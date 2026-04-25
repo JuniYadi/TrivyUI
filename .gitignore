@@ -1,0 +1,6 @@
+node_modules
+.trivyui
+bun.lock
+*.db
+build
+dist
