@@ -1,3 +1,4 @@
+import { AppShell } from "../components/app-shell";
 import { DashboardSkeleton } from "../components/dashboard-skeleton";
 import { EmptyState } from "../components/empty-state";
 import { ErrorBanner } from "../components/error-banner";
@@ -38,18 +39,15 @@ export function DashboardPage() {
   const { data, loading, error, retry } = useStats();
 
   return (
-    <main className="page-shell" role="main">
-      <div className="container">
-        <header className="page-header">
-          <h1 className="page-title">Dashboard Overview</h1>
-          <p className="page-subtitle">At-a-glance vulnerability posture from the latest Trivy scans.</p>
-        </header>
-
-        {loading && <DashboardSkeleton />}
-        {!loading && error && <ErrorBanner message={error} onRetry={retry} />}
-        {!loading && !error && data && isDashboardEmpty(data) && <EmptyState />}
-        {!loading && !error && data && !isDashboardEmpty(data) && <DashboardContent stats={data} />}
-      </div>
-    </main>
+    <AppShell
+      activeRoute="/dashboard"
+      title="Dashboard Overview"
+      subtitle="At-a-glance vulnerability posture from the latest Trivy scans."
+    >
+      {loading && <DashboardSkeleton />}
+      {!loading && error && <ErrorBanner message={error} onRetry={retry} />}
+      {!loading && !error && data && isDashboardEmpty(data) && <EmptyState />}
+      {!loading && !error && data && !isDashboardEmpty(data) && <DashboardContent stats={data} />}
+    </AppShell>
   );
 }

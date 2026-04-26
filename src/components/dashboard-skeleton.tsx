@@ -7,10 +7,10 @@ export function DashboardSkeleton() {
         ))}
       </div>
       <div className="skeleton-grid skeleton-grid--split">
-        <div className="skeleton-block" style={{ minHeight: 220 }} />
-        <div className="skeleton-block" style={{ minHeight: 220 }} />
+        <div className="skeleton-block skeleton-block--tall" />
+        <div className="skeleton-block skeleton-block--tall" />
       </div>
-      <div className="skeleton-block" style={{ minHeight: 220 }} />
+      <div className="skeleton-block skeleton-block--tall" />
     </section>
   );
 }
