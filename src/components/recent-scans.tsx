@@ -27,33 +27,22 @@ function formatRelativeTime(iso: string): string {
   return `${days}d ago`;
 }
 
-export function RecentScans({ scans }: RecentScansProps) {
-  const navigateToScan = (scan: DashboardRecentScan) => {
-    window.history.pushState({}, "", `/images/${scan.id}`);
-    window.dispatchEvent(new PopStateEvent("popstate"));
-  };
+function navigate(path: string) {
+  window.history.pushState({}, "", path);
+  window.dispatchEvent(new PopStateEvent("popstate"));
+}
 
+export function RecentScans({ scans }: RecentScansProps) {
   return (
-    <section style={{ border: "1px solid #334155", borderRadius: 12, padding: "1rem" }}>
-      <h3 style={{ marginTop: 0 }}>Recent Scans</h3>
+    <section className="card">
+      <h3 className="card-title">Recent Scans</h3>
       {scans.length === 0 ? (
-        <p style={{ marginBottom: 0, color: "#94a3b8" }}>No scans available.</p>
+        <p className="muted mb-0">No scans available.</p>
       ) : (
-        <ul style={{ margin: 0, paddingLeft: "1.25rem", display: "grid", gap: 8 }}>
+        <ul className="list">
           {scans.map((scan) => (
             <li key={scan.id}>
-              <button
-                type="button"
-                onClick={() => navigateToScan(scan)}
-                style={{
-                  background: "transparent",
-                  border: "none",
-                  color: "#93c5fd",
-                  padding: 0,
-                  cursor: "pointer",
-                  textAlign: "left",
-                }}
-              >
+              <button type="button" className="link-button" onClick={() => navigate(`/images/${scan.id}`)}>
                 {scan.image}
               </button>{" "}
               — {scan.vulnerability_count} vulns ({scan.critical_count} critical) — {formatRelativeTime(scan.scanned_at)}

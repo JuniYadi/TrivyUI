@@ -1,23 +1,16 @@
 export function DashboardSkeleton() {
-  const block = {
-    background: "#1e293b",
-    borderRadius: 10,
-    minHeight: 88,
-    border: "1px solid #334155",
-  } as const;
-
   return (
-    <section aria-label="dashboard-loading" style={{ display: "grid", gap: "1rem" }}>
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))", gap: "1rem" }}>
+    <section aria-label="dashboard-loading" className="skeleton-stack">
+      <div className="skeleton-grid skeleton-grid--stats">
         {Array.from({ length: 6 }).map((_, index) => (
-          <div key={index} style={block} />
+          <div key={index} className="skeleton-block" />
         ))}
       </div>
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))", gap: "1rem" }}>
-        <div style={{ ...block, minHeight: 220 }} />
-        <div style={{ ...block, minHeight: 220 }} />
+      <div className="skeleton-grid skeleton-grid--split">
+        <div className="skeleton-block" style={{ minHeight: 220 }} />
+        <div className="skeleton-block" style={{ minHeight: 220 }} />
       </div>
-      <div style={{ ...block, minHeight: 220 }} />
+      <div className="skeleton-block" style={{ minHeight: 220 }} />
     </section>
   );
 }

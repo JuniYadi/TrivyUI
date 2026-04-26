@@ -11,7 +11,7 @@ const COLORS = {
   MEDIUM: "#facc15",
   LOW: "#60a5fa",
   UNKNOWN: "#9ca3af",
-};
+} as const;
 
 export function SeverityChart({ bySeverity }: SeverityChartProps) {
   const total = Object.values(bySeverity).reduce((sum, value) => sum + value, 0);
@@ -36,44 +36,28 @@ export function SeverityChart({ bySeverity }: SeverityChartProps) {
     .join(", ");
 
   const chartStyle: CSSProperties = {
-    width: 160,
-    height: 160,
-    borderRadius: "50%",
     background: total === 0 ? "#1f2937" : `conic-gradient(${gradientStops})`,
-    display: "grid",
-    placeItems: "center",
-    position: "relative",
   };
 
   return (
-    <section style={{ border: "1px solid #334155", borderRadius: 12, padding: "1rem" }}>
-      <h3 style={{ marginTop: 0 }}>Severity Distribution</h3>
-      <div style={{ display: "flex", gap: "1rem", alignItems: "center", flexWrap: "wrap" }}>
-        <div style={chartStyle} aria-label="severity-chart">
-          <div
-            style={{
-              width: 90,
-              height: 90,
-              borderRadius: "50%",
-              background: "#020617",
-              border: "1px solid #334155",
-              display: "grid",
-              placeItems: "center",
-              color: "#e2e8f0",
-              fontSize: 14,
-              textAlign: "center",
-            }}
-          >
+    <section className="card">
+      <h3 className="card-title">Severity Distribution</h3>
+      <div className="severity-layout">
+        <div className="severity-chart" aria-label="severity-chart" style={chartStyle}>
+          <div className="severity-chart__center">
             {total.toLocaleString()}
             <br />
             total
           </div>
         </div>
 
-        <ul style={{ listStyle: "none", margin: 0, padding: 0, display: "grid", gap: 6 }}>
+        <ul className="severity-legend">
           {segments.map((segment) => (
             <li key={segment.key}>
-              <span style={{ color: segment.color, fontWeight: 700 }}>{segment.key}</span>: {segment.value}
+              <span className="severity-legend__label" style={{ color: segment.color }}>
+                {segment.key}
+              </span>{" "}
+              : {segment.value}
             </li>
           ))}
         </ul>

@@ -14,14 +14,8 @@ interface DashboardContentProps {
 
 export function DashboardContent({ stats }: DashboardContentProps) {
   return (
-    <section style={{ display: "grid", gap: "1rem" }}>
-      <section
-        style={{
-          display: "grid",
-          gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))",
-          gap: "1rem",
-        }}
-      >
+    <section className="dashboard-content">
+      <section className="card-grid card-grid--stats">
         <StatCard label="Total Vulnerabilities" value={stats.total_vulnerabilities} tone="neutral" />
         <StatCard label="Critical" value={stats.by_severity.CRITICAL} tone="critical" />
         <StatCard label="High" value={stats.by_severity.HIGH} tone="high" />
@@ -30,13 +24,7 @@ export function DashboardContent({ stats }: DashboardContentProps) {
         <StatCard label="Unknown" value={stats.by_severity.UNKNOWN} tone="unknown" />
       </section>
 
-      <section
-        style={{
-          display: "grid",
-          gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))",
-          gap: "1rem",
-        }}
-      >
+      <section className="card-grid card-grid--split">
         <SeverityChart bySeverity={stats.by_severity} />
         <TopRepos repositories={stats.top_repositories} />
       </section>
@@ -50,29 +38,18 @@ export function DashboardPage() {
   const { data, loading, error, retry } = useStats();
 
   return (
-    <main
-      style={{
-        fontFamily: "system-ui, sans-serif",
-        lineHeight: 1.5,
-        padding: "1.25rem",
-        margin: "0 auto",
-        maxWidth: 1200,
-        color: "#e2e8f0",
-        background: "#020617",
-        minHeight: "100vh",
-      }}
-    >
-      <header style={{ marginBottom: "1rem" }}>
-        <h1 style={{ margin: 0 }}>Dashboard Overview</h1>
-        <p style={{ margin: "0.3rem 0 0", color: "#94a3b8" }}>
-          At-a-glance vulnerability posture from the latest Trivy scans.
-        </p>
-      </header>
+    <main className="page-shell" role="main">
+      <div className="container">
+        <header className="page-header">
+          <h1 className="page-title">Dashboard Overview</h1>
+          <p className="page-subtitle">At-a-glance vulnerability posture from the latest Trivy scans.</p>
+        </header>
 
-      {loading && <DashboardSkeleton />}
-      {!loading && error && <ErrorBanner message={error} onRetry={retry} />}
-      {!loading && !error && data && isDashboardEmpty(data) && <EmptyState />}
-      {!loading && !error && data && !isDashboardEmpty(data) && <DashboardContent stats={data} />}
+        {loading && <DashboardSkeleton />}
+        {!loading && error && <ErrorBanner message={error} onRetry={retry} />}
+        {!loading && !error && data && isDashboardEmpty(data) && <EmptyState />}
+        {!loading && !error && data && !isDashboardEmpty(data) && <DashboardContent stats={data} />}
+      </div>
     </main>
   );
 }
