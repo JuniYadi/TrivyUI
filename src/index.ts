@@ -4,8 +4,10 @@ import { createBatchUploadHandler } from "./routes/api/upload-batch";
 import { createUploadHandler } from "./routes/api/upload";
 import { createWebhookHandler } from "./routes/api/webhook";
 import { createStatsHandler } from "./routes/api/stats";
+import { createVulnerabilitiesHandler } from "./routes/api/vulnerabilities";
 
 const db = initDb();
+const vulnerabilitiesHandler = createVulnerabilitiesHandler(db);
 
 const server = Bun.serve({
   port: Number(process.env.PORT || 3000),
@@ -20,6 +22,8 @@ const server = Bun.serve({
     "/api/upload/batch": createBatchUploadHandler(db),
     "/api/webhook": createWebhookHandler(db),
     "/api/stats": createStatsHandler(db),
+    "/api/vulnerabilities": vulnerabilitiesHandler,
+    "/api/vulnerabilities/*": vulnerabilitiesHandler,
     "/*": appHtml,
   },
 });

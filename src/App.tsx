@@ -1,8 +1,9 @@
 import { useEffect, useState } from "react";
 import { DashboardPage } from "./routes/dashboard";
 import { UploadPage } from "./routes/upload";
+import { VulnerabilitiesPage } from "./routes/vulnerabilities";
 
-export type AppRoute = "/dashboard" | "/upload" | "/not-found";
+export type AppRoute = "/dashboard" | "/upload" | "/vulnerabilities" | "/not-found";
 
 export function resolveRoute(pathname: string): AppRoute {
   if (pathname === "/" || pathname === "") {
@@ -16,6 +17,10 @@ export function resolveRoute(pathname: string): AppRoute {
 
   if (pathname === "/upload") {
     return "/upload";
+  }
+
+  if (pathname === "/vulnerabilities") {
+    return "/vulnerabilities";
   }
 
   return "/not-found";
@@ -36,6 +41,10 @@ export default function App() {
 
   if (route === "/upload") {
     return <UploadPage />;
+  }
+
+  if (route === "/vulnerabilities") {
+    return <VulnerabilitiesPage />;
   }
 
   return (

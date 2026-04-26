@@ -53,6 +53,12 @@ describe("app routing", () => {
     expect(route).toBe("/upload");
   });
 
+  test("accepts /vulnerabilities as valid route", () => {
+    const route = resolveRoute("/vulnerabilities");
+
+    expect(route).toBe("/vulnerabilities");
+  });
+
   test("unknown path still resolves to not found", () => {
     const route = resolveRoute("/something-else");
 
