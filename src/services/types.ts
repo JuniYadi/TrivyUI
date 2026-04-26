@@ -156,3 +156,78 @@ export interface VulnerabilityListResponse {
 }
 
 export type VulnerabilityDetailResponse = VulnerabilityWithRelations;
+
+export type RepositorySortField = "name" | "vulnerability_count" | "critical_count" | "last_scanned_at";
+
+export interface RepositoryListItem {
+  id: number;
+  name: string;
+  vulnerability_count: number;
+  critical_count: number;
+  last_scanned_at: string | null;
+}
+
+export interface RepositoryImageSummary {
+  id: number;
+  name: string;
+  last_scanned_at: string | null;
+  vulnerability_count: number;
+  critical_count: number;
+}
+
+export interface RepositoryDetailResponse {
+  id: number;
+  name: string;
+  created_at: string;
+  by_severity: SeverityBreakdown;
+  images: RepositoryImageSummary[];
+  vulnerabilities: VulnerabilityWithRelations[];
+}
+
+export interface RepositoryListResponse {
+  items: RepositoryListItem[];
+  pagination: {
+    page: number;
+    limit: number;
+    total_items: number;
+    total_pages: number;
+  };
+}
+
+export type ImageSortField = "name" | "repository" | "vulnerability_count" | "critical_count" | "last_scanned_at";
+
+export interface ImageListItem {
+  id: number;
+  name: string;
+  repository: {
+    id: number;
+    name: string;
+  };
+  vulnerability_count: number;
+  critical_count: number;
+  last_scanned_at: string | null;
+}
+
+export interface ImageListResponse {
+  items: ImageListItem[];
+  pagination: {
+    page: number;
+    limit: number;
+    total_items: number;
+    total_pages: number;
+  };
+}
+
+export interface ImageDetailResponse {
+  id: number;
+  name: string;
+  repository: {
+    id: number;
+    name: string;
+  };
+  created_at: string;
+  last_scanned_at: string | null;
+  by_severity: SeverityBreakdown;
+  vulnerabilities: VulnerabilityWithRelations[];
+}
+

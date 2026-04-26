@@ -1,9 +1,21 @@
 import { useEffect, useState } from "react";
 import { DashboardPage } from "./routes/dashboard";
+import { ImageDetailPage } from "./routes/image-detail";
+import { ImagesPage } from "./routes/images";
+import { RepositoryDetailPage } from "./routes/repository-detail";
+import { RepositoriesPage } from "./routes/repositories";
 import { UploadPage } from "./routes/upload";
 import { VulnerabilitiesPage } from "./routes/vulnerabilities";
 
-export type AppRoute = "/dashboard" | "/upload" | "/vulnerabilities" | "/not-found";
+export type AppRoute =
+  | "/dashboard"
+  | "/upload"
+  | "/vulnerabilities"
+  | "/repositories"
+  | "/repositories/:id"
+  | "/images"
+  | "/images/:id"
+  | "/not-found";
 
 export function resolveRoute(pathname: string): AppRoute {
   if (pathname === "/" || pathname === "") {
@@ -21,6 +33,22 @@ export function resolveRoute(pathname: string): AppRoute {
 
   if (pathname === "/vulnerabilities") {
     return "/vulnerabilities";
+  }
+
+  if (pathname === "/repositories") {
+    return "/repositories";
+  }
+
+  if (/^\/repositories\/\d+$/.test(pathname)) {
+    return "/repositories/:id";
+  }
+
+  if (pathname === "/images") {
+    return "/images";
+  }
+
+  if (/^\/images\/\d+$/.test(pathname)) {
+    return "/images/:id";
   }
 
   return "/not-found";
@@ -45,6 +73,22 @@ export default function App() {
 
   if (route === "/vulnerabilities") {
     return <VulnerabilitiesPage />;
+  }
+
+  if (route === "/repositories") {
+    return <RepositoriesPage />;
+  }
+
+  if (route === "/repositories/:id") {
+    return <RepositoryDetailPage />;
+  }
+
+  if (route === "/images") {
+    return <ImagesPage />;
+  }
+
+  if (route === "/images/:id") {
+    return <ImageDetailPage />;
   }
 
   return (
