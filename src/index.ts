@@ -15,9 +15,9 @@ const server = Bun.serve({
         status: "ok",
         database: getHealthMessage(db),
       }),
-    "POST /api/upload": createUploadHandler(db),
-    "POST /api/upload/batch": createBatchUploadHandler(db),
-    "POST /api/webhook": createWebhookHandler(db),
+    "/api/upload": createUploadHandler(db),
+    "/api/upload/batch": createBatchUploadHandler(db),
+    "/api/webhook": createWebhookHandler(db),
     "/*": appHtml,
   },
 });
