@@ -130,3 +130,29 @@ export interface Vulnerability {
   score: number | null;
   created_at: string;
 }
+
+export type VulnerabilitySortField = "cve_id" | "severity" | "package_name" | "score" | "scanned_at";
+
+export interface VulnerabilityWithRelations extends Vulnerability {
+  repository: {
+    id: number;
+    name: string;
+  };
+  image: {
+    id: number;
+    name: string;
+  };
+  scanned_at: string;
+}
+
+export interface VulnerabilityListResponse {
+  items: VulnerabilityWithRelations[];
+  pagination: {
+    page: number;
+    limit: number;
+    total_items: number;
+    total_pages: number;
+  };
+}
+
+export type VulnerabilityDetailResponse = VulnerabilityWithRelations;

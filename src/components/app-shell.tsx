@@ -3,11 +3,11 @@ import type { ReactNode } from "react";
 interface AppShellProps {
   title: string;
   subtitle: string;
-  activeRoute: "/dashboard" | "/upload";
+  activeRoute: "/dashboard" | "/upload" | "/vulnerabilities";
   children: ReactNode;
 }
 
-function navigate(path: "/dashboard" | "/upload") {
+function navigate(path: "/dashboard" | "/upload" | "/vulnerabilities") {
   if (window.location.pathname === path) {
     return;
   }
@@ -34,6 +34,13 @@ export function AppShell({ title, subtitle, activeRoute, children }: AppShellPro
               onClick={() => navigate("/dashboard")}
             >
               Dashboard
+            </button>
+            <button
+              type="button"
+              className={`shell-nav__link ${activeRoute === "/vulnerabilities" ? "shell-nav__link--active" : ""}`}
+              onClick={() => navigate("/vulnerabilities")}
+            >
+              Vulns
             </button>
             <button
               type="button"
