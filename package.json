@@ -6,7 +6,8 @@
   "scripts": {
     "dev": "bun run --hot src/index.ts",
     "start": "bun run src/index.ts",
-    "build": "bun build --target bun src/index.ts --outdir dist"
+    "build": "bun build --target bun src/index.ts --outdir dist",
+    "db:seed-dashboard": "bun run scripts/seed-dashboard.ts"
   },
   "dependencies": {
     "react": "^18.3.1",

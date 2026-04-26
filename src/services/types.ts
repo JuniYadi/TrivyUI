@@ -1,5 +1,38 @@
 export type Severity = "CRITICAL" | "HIGH" | "MEDIUM" | "LOW" | "UNKNOWN";
 
+export interface SeverityBreakdown {
+  CRITICAL: number;
+  HIGH: number;
+  MEDIUM: number;
+  LOW: number;
+  UNKNOWN: number;
+}
+
+export interface DashboardTopRepository {
+  id: number;
+  name: string;
+  vulnerability_count: number;
+  critical_count: number;
+}
+
+export interface DashboardRecentScan {
+  id: number;
+  repository: string;
+  image: string;
+  vulnerability_count: number;
+  critical_count: number;
+  scanned_at: string;
+}
+
+export interface DashboardStats {
+  total_vulnerabilities: number;
+  total_repositories: number;
+  total_images: number;
+  by_severity: SeverityBreakdown;
+  top_repositories: DashboardTopRepository[];
+  recent_scans: DashboardRecentScan[];
+}
+
 export interface TrivyVulnerability {
   VulnerabilityID?: string;
   Severity?: string;

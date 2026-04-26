@@ -3,6 +3,7 @@ import { getHealthMessage, initDb } from "./db";
 import { createBatchUploadHandler } from "./routes/api/upload-batch";
 import { createUploadHandler } from "./routes/api/upload";
 import { createWebhookHandler } from "./routes/api/webhook";
+import { createStatsHandler } from "./routes/api/stats";
 
 const db = initDb();
 
@@ -18,6 +19,7 @@ const server = Bun.serve({
     "/api/upload": createUploadHandler(db),
     "/api/upload/batch": createBatchUploadHandler(db),
     "/api/webhook": createWebhookHandler(db),
+    "/api/stats": createStatsHandler(db),
     "/*": appHtml,
   },
 });
