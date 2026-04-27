@@ -7,6 +7,7 @@ import { createStatsHandler } from "./routes/api/stats";
 import { createVulnerabilitiesHandler } from "./routes/api/vulnerabilities";
 import { createRepositoriesHandler } from "./routes/api/repositories";
 import { createImagesHandler } from "./routes/api/images";
+import homepage from "./index.html";
 
 const db = initDb();
 const uploadHandler = createUploadHandler(db);
@@ -122,6 +123,16 @@ if (import.meta.main) {
   const server = Bun.serve({
     port: Number(process.env.PORT || 3000),
     development: true,
+    routes: {
+      "/": homepage,
+      "/dashboard": homepage,
+      "/upload": homepage,
+      "/vulnerabilities": homepage,
+      "/repositories": homepage,
+      "/repositories/:id": homepage,
+      "/images": homepage,
+      "/images/:id": homepage,
+    },
     fetch: handleRequest,
   });
 
