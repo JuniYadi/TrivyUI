@@ -38,6 +38,14 @@ export function ImageDetailPage() {
       {loading && <DetailSkeleton />}
       {!loading && error && <ErrorBanner message={error} onRetry={retry} />}
 
+      {!loading && !error && !data && (
+        <section className="card">
+          <h2 className="card-title">Image not found</h2>
+          <p className="muted">This image does not exist or may have been removed.</p>
+          <button type="button" className="secondary-button" onClick={() => navigate("/images")}>Back to Images</button>
+        </section>
+      )}
+
       {!loading && !error && data && (
         <section className="dashboard-content">
           <section className="card">

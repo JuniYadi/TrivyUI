@@ -542,6 +542,15 @@ a {
   gap: 0.6rem;
 }
 
+@media (max-width: 768px) {
+  .vuln-table--explorer .col-repository,
+  .vuln-table--explorer .col-image,
+  .vuln-table--explorer .col-fixed,
+  .vuln-table--explorer .col-score {
+    display: none;
+  }
+}
+
 @keyframes pulse-slide {
   0% {
     background-position: 200% 0;
