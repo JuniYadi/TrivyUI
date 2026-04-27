@@ -1,5 +1,6 @@
 import type { Database } from "bun:sqlite";
 import {
+  ApiError,
   buildSuccessResponse,
   getMultipartFile,
   importTrivyPayload,
@@ -14,7 +15,7 @@ export function createUploadHandler(db: Database) {
     try {
       const contentType = request.headers.get("content-type") || "";
       if (!contentType.includes("multipart/form-data")) {
-        throw toApiError(new Error("UNSUPPORTED_MEDIA_TYPE"));
+        throw new ApiError(415, "UNSUPPORTED_MEDIA_TYPE", "Content-Type must be multipart/form-data");
       }
 
       const file = await getMultipartFile(request, "file");
@@ -26,11 +27,7 @@ export function createUploadHandler(db: Database) {
 
       return buildSuccessResponse(summary, 201);
     } catch (error) {
-      const normalized =
-        error instanceof Error && error.message === "UNSUPPORTED_MEDIA_TYPE"
-          ? { status: 415, code: "UNSUPPORTED_MEDIA_TYPE", message: "Content-Type must be multipart/form-data" }
-          : toApiError(error);
-
+      const normalized = toApiError(error);
       return sendError(normalized.status, normalized.code, normalized.message);
     }
   };

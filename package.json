@@ -6,8 +6,9 @@
   "scripts": {
     "dev": "bun run --hot src/index.ts",
     "start": "bun run src/index.ts",
-    "build": "bun build --target bun src/index.ts --outdir dist",
-    "db:seed-dashboard": "bun run scripts/seed-dashboard.ts"
+    "build": "rm -rf dist && bun build --target bun src/index.ts --outdir dist --external '*.html' && bun build --target browser src/main.tsx --outdir dist && bun run scripts/build-html.ts",
+    "db:seed-dashboard": "bun run scripts/seed-dashboard.ts",
+    "build:html": "bun run scripts/build-html.ts"
   },
   "dependencies": {
     "react": "^18.3.1",

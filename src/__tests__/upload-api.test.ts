@@ -84,6 +84,29 @@ describe("upload/import API endpoints", () => {
     expect(body.data.vulnerability_count).toBe(1);
   });
 
+  test("POST /api/upload returns 415 for non-multipart payload", async () => {
+    const db = createTestDb();
+    const uploadHandler = createUploadHandler(db);
+
+    const request = new Request("http://localhost/api/upload", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+      },
+      body: JSON.stringify(buildValidTrivyPayload()),
+    });
+
+    const response = await uploadHandler(request);
+    const body = (await response.json()) as {
+      success: boolean;
+      error: { code: string; message: string };
+    };
+
+    expect(response.status).toBe(415);
+    expect(body.success).toBe(false);
+    expect(body.error.code).toBe("UNSUPPORTED_MEDIA_TYPE");
+  });
+
   test("POST /api/upload/batch continues processing when one file fails", async () => {
     const db = createTestDb();
     const batchHandler = createBatchUploadHandler(db);
