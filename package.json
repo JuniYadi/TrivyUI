@@ -5,8 +5,8 @@
   "type": "module",
   "scripts": {
     "dev": "bun run --hot src/index.ts",
-    "start": "bun run src/index.ts",
-    "build": "rm -rf dist && bun build --target bun src/index.ts --outdir dist --external '*.html' && bun build --target browser src/main.tsx --outdir dist && bun run scripts/build-html.ts",
+    "start": "bun run dist/index.js",
+    "build": "rm -rf dist && bun build --target bun src/index.ts --outdir dist && bun build --target browser src/main.tsx --outdir dist && bun run scripts/build-html.ts",
     "db:seed-dashboard": "bun run scripts/seed-dashboard.ts",
     "build:html": "bun run scripts/build-html.ts"
   },
