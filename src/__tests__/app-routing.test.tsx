@@ -59,6 +59,12 @@ describe("app routing", () => {
     expect(route).toBe("/vulnerabilities");
   });
 
+  test("accepts /settings as valid route", () => {
+    const route = resolveRoute("/settings");
+
+    expect(route).toBe("/settings");
+  });
+
   test("unknown path still resolves to not found", () => {
     const route = resolveRoute("/something-else");
 

@@ -44,6 +44,27 @@ const FULL_SCHEMA_SQL = `
   CREATE INDEX IF NOT EXISTS idx_vulns_severity ON vulnerabilities(severity);
   CREATE INDEX IF NOT EXISTS idx_vulns_package ON vulnerabilities(package_name);
 
+  CREATE TABLE IF NOT EXISTS notifications (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    scan_result_id INTEGER NOT NULL REFERENCES scan_results(id) ON DELETE CASCADE,
+    type TEXT NOT NULL CHECK(type IN ('email')),
+    status TEXT NOT NULL CHECK(status IN ('pending','sent','failed')),
+    recipients TEXT NOT NULL,
+    subject TEXT NOT NULL,
+    sent_at DATETIME,
+    error_message TEXT,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_notifications_scan_result ON notifications(scan_result_id);
+  CREATE INDEX IF NOT EXISTS idx_notifications_status ON notifications(status);
+
+  CREATE TABLE IF NOT EXISTS app_settings (
+    key TEXT PRIMARY KEY,
+    value TEXT NOT NULL,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  );
+
   CREATE TABLE IF NOT EXISTS _health_check (
     id INTEGER PRIMARY KEY,
     msg TEXT NOT NULL DEFAULT 'ok'

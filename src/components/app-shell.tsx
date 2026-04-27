@@ -3,11 +3,19 @@ import type { ReactNode } from "react";
 interface AppShellProps {
   title: string;
   subtitle: string;
-  activeRoute: "/dashboard" | "/upload" | "/vulnerabilities" | "/repositories" | "/repositories/:id" | "/images" | "/images/:id";
+  activeRoute:
+    | "/dashboard"
+    | "/upload"
+    | "/vulnerabilities"
+    | "/repositories"
+    | "/repositories/:id"
+    | "/images"
+    | "/images/:id"
+    | "/settings";
   children: ReactNode;
 }
 
-function navigate(path: "/dashboard" | "/upload" | "/vulnerabilities" | "/repositories" | "/images") {
+function navigate(path: "/dashboard" | "/upload" | "/vulnerabilities" | "/repositories" | "/images" | "/settings") {
   if (window.location.pathname === path) {
     return;
   }
@@ -62,6 +70,13 @@ export function AppShell({ title, subtitle, activeRoute, children }: AppShellPro
               onClick={() => navigate("/upload")}
             >
               Upload
+            </button>
+            <button
+              type="button"
+              className={`shell-nav__link ${activeRoute === "/settings" ? "shell-nav__link--active" : ""}`}
+              onClick={() => navigate("/settings")}
+            >
+              Settings
             </button>
           </nav>
         </header>

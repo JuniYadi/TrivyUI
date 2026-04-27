@@ -34,16 +34,18 @@ describe("server routing", () => {
     const vulnerabilities = await handleRequest(makeRequest("/api/vulnerabilities"));
     const repositories = await handleRequest(makeRequest("/api/repositories"));
     const images = await handleRequest(makeRequest("/api/images"));
+    const notificationSettings = await handleRequest(makeRequest("/api/settings/notifications"));
 
     expect(health.status).toBe(200);
     expect(stats.status).toBe(200);
     expect(vulnerabilities.status).toBe(200);
     expect(repositories.status).toBe(200);
     expect(images.status).toBe(200);
+    expect(notificationSettings.status).toBe(200);
   });
 
   test("serves SPA fallback for app routes", async () => {
-    const appRoutes = ["/dashboard", "/vulnerabilities", "/repositories", "/images", "/upload"];
+    const appRoutes = ["/dashboard", "/vulnerabilities", "/repositories", "/images", "/upload", "/settings"];
 
     for (const route of appRoutes) {
       const response = await handleRequest(makeRequest(route));

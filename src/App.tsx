@@ -6,6 +6,7 @@ import { RepositoryDetailPage } from "./routes/repository-detail";
 import { RepositoriesPage } from "./routes/repositories";
 import { UploadPage } from "./routes/upload";
 import { VulnerabilitiesPage } from "./routes/vulnerabilities";
+import { SettingsPage } from "./routes/settings";
 
 export type AppRoute =
   | "/dashboard"
@@ -15,6 +16,7 @@ export type AppRoute =
   | "/repositories/:id"
   | "/images"
   | "/images/:id"
+  | "/settings"
   | "/not-found";
 
 export function resolveRoute(pathname: string): AppRoute {
@@ -49,6 +51,10 @@ export function resolveRoute(pathname: string): AppRoute {
 
   if (/^\/images\/\d+$/.test(pathname)) {
     return "/images/:id";
+  }
+
+  if (pathname === "/settings") {
+    return "/settings";
   }
 
   return "/not-found";
@@ -89,6 +95,10 @@ export default function App() {
 
   if (route === "/images/:id") {
     return <ImageDetailPage />;
+  }
+
+  if (route === "/settings") {
+    return <SettingsPage />;
   }
 
   return (

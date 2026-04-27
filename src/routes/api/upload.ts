@@ -9,6 +9,7 @@ import {
   toApiError,
   validateFileSize,
 } from "./_shared";
+import { sendNotificationAsync } from "../../services/notification";
 
 export function createUploadHandler(db: Database) {
   return async function uploadHandler(request: Request): Promise<Response> {
@@ -24,6 +25,7 @@ export function createUploadHandler(db: Database) {
       const rawJson = await file.text();
       const parsedJson = parseJsonPayload(rawJson);
       const summary = importTrivyPayload(db, parsedJson, rawJson);
+      sendNotificationAsync(db, summary);
 
       return buildSuccessResponse(summary, 201);
     } catch (error) {
