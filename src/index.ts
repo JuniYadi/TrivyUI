@@ -122,7 +122,13 @@ export async function handleRequest(request: Request): Promise<Response> {
 if (import.meta.main) {
   const server = Bun.serve({
     port: Number(process.env.PORT || 3000),
-    development: true,
+    // development can also be an object.
+    development: {
+      // Enable Hot Module Reloading
+      hmr: true,
+      // Echo console logs from the browser to the terminal
+      console: true,
+    },
     routes: {
       "/": homepage,
       "/dashboard": homepage,
