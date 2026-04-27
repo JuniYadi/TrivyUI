@@ -10,6 +10,7 @@ import {
   validateBodySize,
   validateFileSize,
 } from "./_shared";
+import { sendNotificationAsync } from "../../services/notification";
 
 export function createWebhookHandler(db: Database) {
   return async function webhookHandler(request: Request): Promise<Response> {
@@ -39,6 +40,7 @@ export function createWebhookHandler(db: Database) {
 
       const parsedJson = parseJsonPayload(rawJson);
       const summary = importTrivyPayload(db, parsedJson, rawJson);
+      sendNotificationAsync(db, summary);
       return buildSuccessResponse(summary, 201);
     } catch (error) {
       const normalized = toApiError(error);

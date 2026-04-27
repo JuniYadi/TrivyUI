@@ -7,6 +7,7 @@ import { createStatsHandler } from "./routes/api/stats";
 import { createVulnerabilitiesHandler } from "./routes/api/vulnerabilities";
 import { createRepositoriesHandler } from "./routes/api/repositories";
 import { createImagesHandler } from "./routes/api/images";
+import { createNotificationSettingsHandler } from "./routes/api/settings";
 import homepage from "./index.html";
 
 const db = initDb();
@@ -17,6 +18,7 @@ const statsHandler = createStatsHandler(db);
 const vulnerabilitiesHandler = createVulnerabilitiesHandler(db);
 const repositoriesHandler = createRepositoriesHandler(db);
 const imagesHandler = createImagesHandler(db);
+const notificationSettingsHandler = createNotificationSettingsHandler(db);
 const HTML_PATH = new URL("./index.html", import.meta.url);
 
 function methodNotAllowed(method: string, endpoint: string): Response {
@@ -104,6 +106,14 @@ export async function handleRequest(request: Request): Promise<Response> {
     return imagesHandler(request);
   }
 
+  if (pathname === "/api/settings/notifications") {
+    if (request.method !== "GET" && request.method !== "PUT") {
+      return methodNotAllowed(request.method, pathname);
+    }
+
+    return notificationSettingsHandler(request);
+  }
+
   if (pathname.startsWith("/api/")) {
     return sendError(404, "NOT_FOUND", "Endpoint not found");
   }
@@ -138,6 +148,7 @@ if (import.meta.main) {
       "/repositories/:id": homepage,
       "/images": homepage,
       "/images/:id": homepage,
+      "/settings": homepage,
     },
     fetch: handleRequest,
   });
