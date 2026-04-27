@@ -3,6 +3,7 @@ import { ErrorBanner } from "../components/error-banner";
 import { SeverityChart } from "../components/severity-chart";
 import { StatCard } from "../components/stat-card";
 import { useImageDetail } from "../hooks/use-image-detail";
+import type { ImageDetailResponse } from "../services/types";
 
 function parseImageId(pathname: string): number | null {
   const match = pathname.match(/^\/images\/(\d+)$/);
@@ -29,14 +30,28 @@ function DetailSkeleton() {
   );
 }
 
-export function ImageDetailPage() {
-  const id = parseImageId(window.location.pathname);
-  const { data, loading, error, retry } = useImageDetail(id);
+type RetryHandler = () => void | Promise<void>;
 
+interface ImageDetailContentProps {
+  data: ImageDetailResponse | null;
+  loading: boolean;
+  error: string | null;
+  retry: RetryHandler;
+}
+
+export function ImageDetailContent({ data, loading, error, retry }: ImageDetailContentProps) {
   return (
-    <AppShell activeRoute="/images/:id" title={data?.name || "Image Detail"} subtitle="Severity summary and vulnerability list for the selected image.">
+    <>
       {loading && <DetailSkeleton />}
       {!loading && error && <ErrorBanner message={error} onRetry={retry} />}
+
+      {!loading && !error && !data && (
+        <section className="card">
+          <h2 className="card-title">Image not found</h2>
+          <p className="muted">This image does not exist or may have been removed.</p>
+          <button type="button" className="secondary-button" onClick={() => navigate("/images")}>Back to Images</button>
+        </section>
+      )}
 
       {!loading && !error && data && (
         <section className="dashboard-content">
@@ -107,6 +122,17 @@ export function ImageDetailPage() {
           </section>
         </section>
       )}
+    </>
+  );
+}
+
+export function ImageDetailPage() {
+  const id = parseImageId(window.location.pathname);
+  const { data, loading, error, retry } = useImageDetail(id);
+
+  return (
+    <AppShell activeRoute="/images/:id" title={data?.name || "Image Detail"} subtitle="Severity summary and vulnerability list for the selected image.">
+      <ImageDetailContent data={data} loading={loading} error={error} retry={retry} />
     </AppShell>
   );
 }

@@ -3,6 +3,7 @@ import { ErrorBanner } from "../components/error-banner";
 import { SeverityChart } from "../components/severity-chart";
 import { StatCard } from "../components/stat-card";
 import { useRepoDetail } from "../hooks/use-repo-detail";
+import type { RepositoryDetailResponse } from "../services/types";
 
 function parseRepositoryId(pathname: string): number | null {
   const match = pathname.match(/^\/repositories\/(\d+)$/);
@@ -29,14 +30,28 @@ function DetailSkeleton() {
   );
 }
 
-export function RepositoryDetailPage() {
-  const id = parseRepositoryId(window.location.pathname);
-  const { data, loading, error, retry } = useRepoDetail(id);
+type RetryHandler = () => void | Promise<void>;
 
+interface RepositoryDetailContentProps {
+  data: RepositoryDetailResponse | null;
+  loading: boolean;
+  error: string | null;
+  retry: RetryHandler;
+}
+
+export function RepositoryDetailContent({ data, loading, error, retry }: RepositoryDetailContentProps) {
   return (
-    <AppShell activeRoute="/repositories/:id" title={data?.name || "Repository Detail"} subtitle="Severity summary, images, and vulnerabilities for the selected repository.">
+    <>
       {loading && <DetailSkeleton />}
       {!loading && error && <ErrorBanner message={error} onRetry={retry} />}
+
+      {!loading && !error && !data && (
+        <section className="card">
+          <h2 className="card-title">Repository not found</h2>
+          <p className="muted">This repository does not exist or may have been removed.</p>
+          <button type="button" className="secondary-button" onClick={() => navigate("/repositories")}>Back to Repositories</button>
+        </section>
+      )}
 
       {!loading && !error && data && (
         <section className="dashboard-content">
@@ -107,6 +122,17 @@ export function RepositoryDetailPage() {
           </section>
         </section>
       )}
+    </>
+  );
+}
+
+export function RepositoryDetailPage() {
+  const id = parseRepositoryId(window.location.pathname);
+  const { data, loading, error, retry } = useRepoDetail(id);
+
+  return (
+    <AppShell activeRoute="/repositories/:id" title={data?.name || "Repository Detail"} subtitle="Severity summary, images, and vulnerabilities for the selected repository.">
+      <RepositoryDetailContent data={data} loading={loading} error={error} retry={retry} />
     </AppShell>
   );
 }
