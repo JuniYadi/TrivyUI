@@ -146,6 +146,7 @@ if (import.meta.main) {
       "/vulnerabilities": homepage,
       "/repositories": homepage,
       "/repositories/:id": homepage,
+      "/repositories/by-name/:repo-name": homepage,
       "/images": homepage,
       "/images/:id": homepage,
       "/settings": homepage,

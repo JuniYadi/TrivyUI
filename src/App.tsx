@@ -14,6 +14,7 @@ export type AppRoute =
   | "/vulnerabilities"
   | "/repositories"
   | "/repositories/:id"
+  | "/repositories/by-name/:repo-name"
   | "/images"
   | "/images/:id"
   | "/settings"
@@ -43,6 +44,10 @@ export function resolveRoute(pathname: string): AppRoute {
 
   if (/^\/repositories\/\d+$/.test(pathname)) {
     return "/repositories/:id";
+  }
+
+  if (/^\/repositories\/by-name\/.+$/.test(pathname)) {
+    return "/repositories/by-name/:repo-name";
   }
 
   if (pathname === "/images") {
@@ -86,6 +91,10 @@ export default function App() {
   }
 
   if (route === "/repositories/:id") {
+    return <RepositoryDetailPage />;
+  }
+
+  if (route === "/repositories/by-name/:repo-name") {
     return <RepositoryDetailPage />;
   }
 
