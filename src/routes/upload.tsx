@@ -82,10 +82,19 @@ export function UploadPage() {
       return;
     }
 
-    const normalized = Array.from(nextFiles).filter((file) => file.name.toLowerCase().endsWith(".json"));
+    const normalized = Array.from(nextFiles);
     setFiles(normalized);
-    setFeedback(null);
     setProgress(0);
+
+    if (normalized.length === 0) {
+      setFeedback({
+        type: "error",
+        message: "No files selected. Please choose at least one file.",
+      });
+      return;
+    }
+
+    setFeedback(null);
   }
 
   function onDrop(event: DragEvent<HTMLDivElement>) {
@@ -95,7 +104,15 @@ export function UploadPage() {
   }
 
   async function onUpload() {
-    if (files.length === 0 || isUploading) {
+    if (files.length === 0) {
+      setFeedback({
+        type: "error",
+        message: "No files selected. Please choose at least one file before uploading.",
+      });
+      return;
+    }
+
+    if (isUploading) {
       return;
     }
 
@@ -152,6 +169,7 @@ export function UploadPage() {
         message: error instanceof Error ? error.message : "Unexpected upload error",
       });
     } finally {
+      setProgress(100);
       setIsUploading(false);
     }
   }

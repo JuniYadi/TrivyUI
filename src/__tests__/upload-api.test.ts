@@ -84,6 +84,29 @@ describe("upload/import API endpoints", () => {
     expect(body.data.vulnerability_count).toBe(1);
   });
 
+  test("POST /api/upload returns 400 when multipart payload is missing file field", async () => {
+    const db = createTestDb();
+    const uploadHandler = createUploadHandler(db);
+
+    const formData = new FormData();
+    formData.set("not-file", new File([JSON.stringify(buildValidTrivyPayload())], "scan.json", { type: "application/json" }));
+
+    const request = new Request("http://localhost/api/upload", {
+      method: "POST",
+      body: formData,
+    });
+
+    const response = await uploadHandler(request);
+    const body = (await response.json()) as {
+      success: boolean;
+      error: { code: string; message: string };
+    };
+
+    expect(response.status).toBe(400);
+    expect(body.success).toBe(false);
+    expect(body.error.code).toBe("INVALID_JSON_FORMAT");
+  });
+
   test("POST /api/upload returns 415 for non-multipart payload", async () => {
     const db = createTestDb();
     const uploadHandler = createUploadHandler(db);
