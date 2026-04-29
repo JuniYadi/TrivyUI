@@ -21,7 +21,7 @@ ENV NODE_ENV=production
 ENV PORT=3000
 
 COPY --from=deps /app/node_modules ./node_modules
-COPY --from=build /app/dist ./dist
+COPY --from=build /app/dist .
 COPY package.json ./package.json
 
 EXPOSE 3000
@@ -29,4 +29,4 @@ EXPOSE 3000
 HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
   CMD bun -e "fetch('http://127.0.0.1:3000/api/health').then((response)=>process.exit(response.ok?0:1)).catch(()=>process.exit(1))"
 
-ENTRYPOINT ["bun", "run", "dist/index.js"]
+ENTRYPOINT ["bun", "run", "index.js"]
