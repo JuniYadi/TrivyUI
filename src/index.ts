@@ -11,9 +11,11 @@ import { createNotificationSettingsHandler } from "./routes/api/settings";
 import { createApiKeysHandler } from "./routes/api/api-keys";
 import { createEmailTemplatesHandler } from "./routes/api/email-templates";
 import { enforcePostApiKeyAuth } from "./services/api-key-auth";
+import { registerBunCronJobs } from "./services/scheduled-notifications";
 import homepage from "./index.html";
 
 const db = initDb();
+registerBunCronJobs(db);
 const uploadHandler = createUploadHandler(db);
 const batchUploadHandler = createBatchUploadHandler(db);
 const webhookHandler = createWebhookHandler(db);

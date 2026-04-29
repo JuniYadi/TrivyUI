@@ -125,8 +125,11 @@ function buildEmailContentFromTemplate(
 
   const vars: Record<string, string> = {
     repository: summary.repository,
+    repo_name: summary.repository,
     image: summary.image,
+    image_name: summary.image,
     parsed_at: summary.parsed_at,
+    scan_time: summary.parsed_at,
     critical_count: String(summary.severity_breakdown.CRITICAL),
     high_count: String(summary.severity_breakdown.HIGH),
     medium_count: String(summary.severity_breakdown.MEDIUM),
@@ -135,6 +138,9 @@ function buildEmailContentFromTemplate(
     total_count: String(summary.vulnerability_count),
     dashboard_url: dashboardUrl,
     critical_list_items: criticalListItems,
+    top_cves_text: topCritical
+      .map((vuln) => `${vuln.cve_id} (${vuln.package_name})`)
+      .join("\n"),
   };
 
   return {

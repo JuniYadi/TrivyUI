@@ -154,6 +154,68 @@ export function initFullSchema(db: TrivyUiDb): void {
     "TrivyUI Vulnerability Alert\nRepository: {{repository}}\nImage: {{image}}\nParsed at: {{parsed_at}}\n\nCRITICAL: {{critical_count}}\nHIGH: {{high_count}}\nMEDIUM: {{medium_count}}\nLOW: {{low_count}}\nUNKNOWN: {{unknown_count}}\nTOTAL: {{total_count}}\n\nDashboard: {{dashboard_url}}",
     1
   );
+
+  db.query(
+    `
+      INSERT INTO email_templates (template_key, name, subject, html_body, text_body, enabled)
+      VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+      ON CONFLICT(template_key) DO NOTHING
+    `
+  ).run(
+    "weekly_existing_vuln_reminder",
+    "Weekly Existing Vulnerabilities Reminder",
+    "[TrivyUI] Weekly Reminder: {{totalCount}} Active Vulnerabilities",
+    `<div style="font-family: Inter, Arial, sans-serif; color: #0f172a; max-width: 720px; margin: 0 auto;">
+      <h2 style="margin-bottom: 8px;">Weekly Vulnerability Reminder</h2>
+      <p style="margin-top: 0; color: #334155;">Current active vulnerability totals from the latest scan baseline.</p>
+      <ul>
+        <li>Critical: {{critical}}</li>
+        <li>High: {{high}}</li>
+        <li>Medium: {{medium}}</li>
+        <li>Low: {{low}}</li>
+        <li>Unknown: {{unknown}}</li>
+        <li><strong>Total: {{totalCount}}</strong></li>
+      </ul>
+      <p>Top CVEs:</p>
+      <pre style="white-space: pre-wrap; background: #f8fafc; padding: 8px; border-radius: 6px;">{{top_cves_text}}</pre>
+      <p>Generated at: {{generated_at}}</p>
+    </div>`,
+    "Weekly Vulnerability Reminder\nCritical: {{critical}}\nHigh: {{high}}\nMedium: {{medium}}\nLow: {{low}}\nUnknown: {{unknown}}\nTotal: {{totalCount}}\n\nTop CVEs:\n{{top_cves_text}}\n\nGenerated at: {{generated_at}}",
+    1
+  );
+
+  db.query(
+    `
+      INSERT INTO email_templates (template_key, name, subject, html_body, text_body, enabled)
+      VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+      ON CONFLICT(template_key) DO NOTHING
+    `
+  ).run(
+    "monthly_vuln_stats",
+    "Monthly Vulnerability Statistics",
+    "[TrivyUI] Monthly Vulnerability Stats ({{period_start}} to {{period_end}})",
+    `<div style="font-family: Inter, Arial, sans-serif; color: #0f172a; max-width: 720px; margin: 0 auto;">
+      <h2 style="margin-bottom: 8px;">Monthly Vulnerability Statistics</h2>
+      <p style="margin-top: 0; color: #334155;">Period: {{period_start}} to {{period_end}}</p>
+      <ul>
+        <li>Open: {{open_count}}</li>
+        <li>Closed/Fixed: {{closed_count}}</li>
+        <li>Existing: {{existing_count}}</li>
+        <li><strong>Total in month: {{totalCount}}</strong></li>
+      </ul>
+      <h3 style="margin-bottom: 8px;">Severity Breakdown (monthly seen)</h3>
+      <ul>
+        <li>Critical: {{critical}}</li>
+        <li>High: {{high}}</li>
+        <li>Medium: {{medium}}</li>
+        <li>Low: {{low}}</li>
+        <li>Unknown: {{unknown}}</li>
+      </ul>
+      <p>Generated at: {{generated_at}}</p>
+    </div>`,
+    "Monthly Vulnerability Statistics\nPeriod: {{period_start}} to {{period_end}}\nOpen: {{open_count}}\nClosed/Fixed: {{closed_count}}\nExisting: {{existing_count}}\nTotal in month: {{totalCount}}\n\nCritical: {{critical}}\nHigh: {{high}}\nMedium: {{medium}}\nLow: {{low}}\nUnknown: {{unknown}}\n\nGenerated at: {{generated_at}}",
+    1
+  );
 }
 
 export function getHealthMessage(db: TrivyUiDb): string {

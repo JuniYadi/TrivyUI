@@ -208,4 +208,53 @@ describe("notification service", () => {
     const row = db.query("SELECT subject FROM notifications LIMIT 1").get() as { subject: string };
     expect(row.subject).toBe("[Custom] ghcr.io/acme/trivyui");
   });
+
+  test("sendNotification renders top_cves_text and scan_time template variables", async () => {
+    if (!db) throw new Error("db not initialized");
+
+    const scanResultId = seedScanResult(db);
+    const summary = buildSummary(scanResultId);
+
+    db.query(
+      `
+        UPDATE email_templates
+        SET subject = ?2,
+            html_body = ?3,
+            text_body = ?4,
+            updated_at = CURRENT_TIMESTAMP
+        WHERE template_key = ?1
+      `
+    ).run(
+      "repo_vuln_alert",
+      "[Custom] {{repository}} @ {{scan_time}}",
+      "<div>{{critical_list_items}}</div>",
+      "Top CVEs:\n{{top_cves_text}}"
+    );
+
+    process.env.NOTIFY_ENABLED = "true";
+    process.env.NOTIFY_MIN_SEVERITY = "HIGH";
+    process.env.SMTP_HOST = "smtp.example.com";
+    process.env.SMTP_PORT = "587";
+    process.env.SMTP_SECURE = "false";
+    process.env.SMTP_USER = "user";
+    process.env.SMTP_PASS = "pass";
+    process.env.SMTP_FROM = "TrivyUI <trivyui@example.com>";
+    process.env.SMTP_TO = "devops@example.com";
+
+    let sentSubject = "";
+    let sentText = "";
+
+    const fakeCreateTransport = () => ({
+      sendMail: async (input: { subject: string; text: string }) => {
+        sentSubject = input.subject;
+        sentText = input.text;
+      },
+    });
+
+    await sendNotification(db, summary, fakeCreateTransport as never);
+
+    expect(sentSubject).toContain(summary.parsed_at);
+    expect(sentText).toContain("CVE-2026-1111");
+    expect(sentText).toContain("openssl");
+  });
 });
