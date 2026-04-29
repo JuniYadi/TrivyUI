@@ -50,8 +50,8 @@ function buildListOrderBy(sort: RepositorySortField, order: "asc" | "desc"): str
 
   const map: Record<RepositorySortField, string> = {
     name: "r.name",
-    vulnerability_count: "COUNT(v.id)",
-    critical_count: "SUM(CASE WHEN v.severity = 'CRITICAL' THEN 1 ELSE 0 END)",
+    vulnerability_count: "COUNT(DISTINCT v.cve_id)",
+    critical_count: "COUNT(DISTINCT CASE WHEN v.severity = 'CRITICAL' THEN v.cve_id END)",
     last_scanned_at: "MAX(datetime(i.last_scanned_at))",
   };
 
@@ -165,8 +165,8 @@ function handleRepositoryList(db: Database, request: Request): Response {
     SELECT
       r.id,
       r.name,
-      COUNT(v.id) AS vulnerability_count,
-      SUM(CASE WHEN v.severity = 'CRITICAL' THEN 1 ELSE 0 END) AS critical_count,
+      COUNT(DISTINCT v.cve_id) AS vulnerability_count,
+      COUNT(DISTINCT CASE WHEN v.severity = 'CRITICAL' THEN v.cve_id END) AS critical_count,
       MAX(i.last_scanned_at) AS last_scanned_at
     FROM repositories r
     LEFT JOIN images i ON i.repository_id = r.id
@@ -210,7 +210,7 @@ function handleRepositoryDetail(db: Database, id: number): Response {
   const severityRows = db
     .query(
       `
-      SELECT v.severity AS severity, COUNT(v.id) AS count
+      SELECT v.severity AS severity, COUNT(DISTINCT v.cve_id) AS count
       FROM vulnerabilities v
       JOIN scan_results sr ON sr.id = v.scan_result_id
       JOIN images i ON i.id = sr.image_id
@@ -227,8 +227,8 @@ function handleRepositoryDetail(db: Database, id: number): Response {
         i.id,
         i.name,
         i.last_scanned_at,
-        COUNT(v.id) AS vulnerability_count,
-        SUM(CASE WHEN v.severity = 'CRITICAL' THEN 1 ELSE 0 END) AS critical_count
+        COUNT(DISTINCT v.cve_id) AS vulnerability_count,
+        COUNT(DISTINCT CASE WHEN v.severity = 'CRITICAL' THEN v.cve_id END) AS critical_count
       FROM images i
       LEFT JOIN scan_results sr ON sr.image_id = i.id
       LEFT JOIN vulnerabilities v ON v.scan_result_id = sr.id

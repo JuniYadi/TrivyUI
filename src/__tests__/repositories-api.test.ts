@@ -121,6 +121,60 @@ describe("GET /api/repositories", () => {
     expect(body.data.items[0]?.critical_count).toBe(1);
   });
 
+  test("counts only new CVEs when scan contains existing plus new vulnerabilities", async () => {
+    const db = createTestDb();
+
+    const baselinePayload = {
+      ArtifactName: "ghcr.io/acme/api:latest",
+      Metadata: { Source: "ci", CreatedAt: "2026-04-26T10:00:00.000Z" },
+      Results: [
+        {
+          Vulnerabilities: [
+            { VulnerabilityID: "CVE-BASE-001", Severity: "CRITICAL", PkgName: "openssl" },
+            { VulnerabilityID: "CVE-BASE-002", Severity: "HIGH", PkgName: "glibc" },
+          ],
+        },
+      ],
+    };
+
+    importTrivyPayload(db, baselinePayload, "{}");
+
+    const incrementalPayload = {
+      ArtifactName: "ghcr.io/acme/api:latest",
+      Metadata: { Source: "ci", CreatedAt: "2026-04-27T10:00:00.000Z" },
+      Results: [
+        {
+          Vulnerabilities: [
+            { VulnerabilityID: "CVE-BASE-001", Severity: "CRITICAL", PkgName: "openssl" },
+            { VulnerabilityID: "CVE-BASE-002", Severity: "HIGH", PkgName: "glibc" },
+            { VulnerabilityID: "CVE-BASE-003", Severity: "MEDIUM", PkgName: "curl" },
+          ],
+        },
+      ],
+    };
+
+    importTrivyPayload(db, incrementalPayload, "{}");
+
+    const handler = createRepositoriesHandler(db);
+    const response = handler(new Request("http://localhost/api/repositories"));
+    const body = (await response.json()) as {
+      success: boolean;
+      data: {
+        items: Array<{
+          name: string;
+          vulnerability_count: number;
+          critical_count: number;
+        }>;
+      };
+    };
+
+    expect(response.status).toBe(200);
+    expect(body.success).toBe(true);
+    expect(body.data.items[0]?.name).toBe("ghcr.io/acme/api");
+    expect(body.data.items[0]?.vulnerability_count).toBe(3);
+    expect(body.data.items[0]?.critical_count).toBe(1);
+  });
+
   test("falls back to defaults on bad pagination", async () => {
     const db = createTestDb();
     seedData(db);
