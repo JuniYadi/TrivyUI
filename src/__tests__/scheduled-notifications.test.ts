@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { initDb } from "../db";
 import { importTrivyPayload } from "../routes/api/_shared";
 import {
+  registerBunCronJobs,
   runMonthlyVulnerabilityStats,
   runWeeklyExistingVulnerabilityReminder,
   type ScheduledRunResult,
@@ -105,6 +106,141 @@ describe("scheduled notification jobs", () => {
     expect(sent).toBe(0);
     expect(result.status).toBe("skipped");
     expect(result.reason).toContain("dry-run");
+  });
+
+  test("weekly reminder dry-run records skipped run", async () => {
+    if (!db) throw new Error("db not initialized");
+    seedPayload(db);
+
+    const result = (await runWeeklyExistingVulnerabilityReminder(db, {
+      dryRun: true,
+      now: new Date("2026-04-30T12:00:00.000Z"),
+    })) as ScheduledRunResult;
+
+    const row = db
+      .query("SELECT status, reason FROM scheduled_notification_runs ORDER BY id DESC LIMIT 1")
+      .get() as { status: string; reason: string };
+
+    expect(result.status).toBe("skipped");
+    expect(row.status).toBe("skipped");
+    expect(row.reason).toContain("dry-run");
+  });
+
+  test("monthly stats sends email and records sent run", async () => {
+    if (!db) throw new Error("db not initialized");
+    seedPayload(db);
+
+    let sent = 0;
+    const fakeCreateTransport = () => ({
+      sendMail: async () => {
+        sent += 1;
+      },
+    });
+
+    const result = (await runMonthlyVulnerabilityStats(db, {
+      createTransport: fakeCreateTransport as never,
+      now: new Date("2026-04-30T12:00:00.000Z"),
+    })) as ScheduledRunResult;
+
+    const row = db
+      .query("SELECT status, total_count FROM scheduled_notification_runs ORDER BY id DESC LIMIT 1")
+      .get() as { status: string; total_count: number };
+
+    expect(result.status).toBe("sent");
+    expect(sent).toBe(1);
+    expect(row.status).toBe("sent");
+    expect(row.total_count).toBeGreaterThan(0);
+  });
+
+  test("monthly stats records failed run on SMTP send error", async () => {
+    if (!db) throw new Error("db not initialized");
+    seedPayload(db);
+
+    const fakeCreateTransport = () => ({
+      sendMail: async () => {
+        throw new Error("SMTP unreachable");
+      },
+    });
+
+    const result = (await runMonthlyVulnerabilityStats(db, {
+      createTransport: fakeCreateTransport as never,
+      now: new Date("2026-04-30T12:00:00.000Z"),
+    })) as ScheduledRunResult;
+
+    const row = db
+      .query("SELECT status, reason FROM scheduled_notification_runs ORDER BY id DESC LIMIT 1")
+      .get() as { status: string; reason: string };
+
+    expect(result.status).toBe("failed");
+    expect(row.status).toBe("failed");
+    expect(row.reason).toContain("SMTP unreachable");
+  });
+
+  test("weekly reminder falls back when template is disabled", async () => {
+    if (!db) throw new Error("db not initialized");
+    seedPayload(db);
+
+    db.query("UPDATE email_templates SET enabled = 0 WHERE template_key = ?1").run("weekly_existing_vuln_reminder");
+
+    let subject = "";
+    const fakeCreateTransport = () => ({
+      sendMail: async (input: { subject: string }) => {
+        subject = input.subject;
+      },
+    });
+
+    const result = (await runWeeklyExistingVulnerabilityReminder(db, {
+      createTransport: fakeCreateTransport as never,
+    })) as ScheduledRunResult;
+
+    expect(result.status).toBe("sent");
+    expect(subject).toBe("[TrivyUI] Scheduled Vulnerability Report");
+  });
+
+  test("registerBunCronJobs registers jobs when enabled", () => {
+    if (!db) throw new Error("db not initialized");
+    process.env.SCHEDULED_EMAILS_ENABLED = "true";
+    process.env.WEEKLY_REMINDER_CRON = "0 1 * * MON";
+    process.env.MONTHLY_STATS_CRON = "0 2 1 * *";
+
+    const calls: string[] = [];
+    const originalCron = Bun.cron;
+    (Bun as { cron: (schedule: string, handler: () => Promise<void>) => void }).cron = (
+      schedule: string,
+      _handler: () => Promise<void>
+    ) => {
+      calls.push(schedule);
+    };
+
+    try {
+      registerBunCronJobs(db);
+    } finally {
+      (Bun as { cron: typeof originalCron }).cron = originalCron;
+    }
+
+    expect(calls).toEqual(["0 1 * * MON", "0 2 1 * *"]);
+  });
+
+  test("registerBunCronJobs skips registration when disabled", () => {
+    if (!db) throw new Error("db not initialized");
+    process.env.SCHEDULED_EMAILS_ENABLED = "false";
+
+    const calls: string[] = [];
+    const originalCron = Bun.cron;
+    (Bun as { cron: (schedule: string, handler: () => Promise<void>) => void }).cron = (
+      schedule: string,
+      _handler: () => Promise<void>
+    ) => {
+      calls.push(schedule);
+    };
+
+    try {
+      registerBunCronJobs(db);
+    } finally {
+      (Bun as { cron: typeof originalCron }).cron = originalCron;
+    }
+
+    expect(calls).toHaveLength(0);
   });
 
   test("weekly reminder records skipped run when no vulnerabilities exist", async () => {
