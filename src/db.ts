@@ -65,6 +65,21 @@ const FULL_SCHEMA_SQL = `
     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
   );
 
+  CREATE TABLE IF NOT EXISTS api_keys (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    label TEXT NOT NULL,
+    key_hash TEXT NOT NULL,
+    key_prefix TEXT NOT NULL,
+    masked_key TEXT NOT NULL,
+    is_active INTEGER NOT NULL DEFAULT 1,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    last_used_at DATETIME,
+    revoked_at DATETIME
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_api_keys_active ON api_keys(is_active);
+  CREATE INDEX IF NOT EXISTS idx_api_keys_created_at ON api_keys(created_at);
+
   CREATE TABLE IF NOT EXISTS _health_check (
     id INTEGER PRIMARY KEY,
     msg TEXT NOT NULL DEFAULT 'ok'

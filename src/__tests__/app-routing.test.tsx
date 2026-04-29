@@ -65,6 +65,12 @@ describe("app routing", () => {
     expect(route).toBe("/settings");
   });
 
+  test("accepts /api-keys as valid route", () => {
+    const route = resolveRoute("/api-keys");
+
+    expect(route).toBe("/api-keys");
+  });
+
   test("unknown path still resolves to not found", () => {
     const route = resolveRoute("/something-else");
 
