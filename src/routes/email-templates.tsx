@@ -190,7 +190,7 @@ export function EmailTemplatesPage() {
               </select>
             </label>
 
-            <label className="filter-control" htmlFor="email-template-enabled">
+            <label className="filter-control checkbox-control" htmlFor="email-template-enabled">
               <span className="filter-label">Enabled</span>
               <input
                 id="email-template-enabled"
