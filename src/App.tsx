@@ -7,6 +7,7 @@ import { RepositoriesPage } from "./routes/repositories";
 import { UploadPage } from "./routes/upload";
 import { VulnerabilitiesPage } from "./routes/vulnerabilities";
 import { SettingsPage } from "./routes/settings";
+import { ApiKeysPage } from "./routes/api-keys";
 
 export type AppRoute =
   | "/dashboard"
@@ -18,6 +19,7 @@ export type AppRoute =
   | "/images"
   | "/images/:id"
   | "/settings"
+  | "/api-keys"
   | "/not-found";
 
 export function resolveRoute(pathname: string): AppRoute {
@@ -60,6 +62,10 @@ export function resolveRoute(pathname: string): AppRoute {
 
   if (pathname === "/settings") {
     return "/settings";
+  }
+
+  if (pathname === "/api-keys") {
+    return "/api-keys";
   }
 
   return "/not-found";
@@ -108,6 +114,10 @@ export default function App() {
 
   if (route === "/settings") {
     return <SettingsPage />;
+  }
+
+  if (route === "/api-keys") {
+    return <ApiKeysPage />;
   }
 
   return (

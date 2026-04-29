@@ -8,6 +8,8 @@ import { createVulnerabilitiesHandler } from "./routes/api/vulnerabilities";
 import { createRepositoriesHandler } from "./routes/api/repositories";
 import { createImagesHandler } from "./routes/api/images";
 import { createNotificationSettingsHandler } from "./routes/api/settings";
+import { createApiKeysHandler } from "./routes/api/api-keys";
+import { enforcePostApiKeyAuth } from "./services/api-key-auth";
 import homepage from "./index.html";
 
 const db = initDb();
@@ -19,7 +21,22 @@ const vulnerabilitiesHandler = createVulnerabilitiesHandler(db);
 const repositoriesHandler = createRepositoriesHandler(db);
 const imagesHandler = createImagesHandler(db);
 const notificationSettingsHandler = createNotificationSettingsHandler(db);
+const apiKeysHandler = createApiKeysHandler(db);
 const HTML_PATH = new URL("./index.html", import.meta.url);
+
+export const SPA_ROUTES = {
+  "/": homepage,
+  "/dashboard": homepage,
+  "/upload": homepage,
+  "/vulnerabilities": homepage,
+  "/repositories": homepage,
+  "/repositories/:id": homepage,
+  "/repositories/by-name/:repo-name": homepage,
+  "/images": homepage,
+  "/images/:id": homepage,
+  "/settings": homepage,
+  "/api-keys": homepage,
+} as const;
 
 function methodNotAllowed(method: string, endpoint: string): Response {
   return sendError(405, "METHOD_NOT_ALLOWED", `Method ${method} is not allowed for ${endpoint}`);
@@ -38,6 +55,11 @@ async function serveAsset(pathname: string): Promise<Response> {
 export async function handleRequest(request: Request): Promise<Response> {
   const url = new URL(request.url);
   const { pathname } = url;
+
+  const authResponse = await enforcePostApiKeyAuth(db, request);
+  if (authResponse) {
+    return authResponse;
+  }
 
   if (pathname === "/api/health") {
     if (request.method !== "GET") {
@@ -114,6 +136,14 @@ export async function handleRequest(request: Request): Promise<Response> {
     return notificationSettingsHandler(request);
   }
 
+  if (pathname === "/api/api-keys" || pathname.startsWith("/api/api-keys/")) {
+    if (request.method !== "GET" && request.method !== "POST" && request.method !== "DELETE") {
+      return methodNotAllowed(request.method, "/api/api-keys");
+    }
+
+    return apiKeysHandler(request);
+  }
+
   if (pathname.startsWith("/api/")) {
     return sendError(404, "NOT_FOUND", "Endpoint not found");
   }
@@ -139,18 +169,7 @@ if (import.meta.main) {
       // Echo console logs from the browser to the terminal
       console: true,
     },
-    routes: {
-      "/": homepage,
-      "/dashboard": homepage,
-      "/upload": homepage,
-      "/vulnerabilities": homepage,
-      "/repositories": homepage,
-      "/repositories/:id": homepage,
-      "/repositories/by-name/:repo-name": homepage,
-      "/images": homepage,
-      "/images/:id": homepage,
-      "/settings": homepage,
-    },
+    routes: SPA_ROUTES,
     fetch: handleRequest,
   });
 

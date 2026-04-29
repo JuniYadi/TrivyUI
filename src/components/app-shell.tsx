@@ -11,11 +11,12 @@ interface AppShellProps {
     | "/repositories/:id"
     | "/images"
     | "/images/:id"
-    | "/settings";
+    | "/settings"
+    | "/api-keys";
   children: ReactNode;
 }
 
-function navigate(path: "/dashboard" | "/upload" | "/vulnerabilities" | "/repositories" | "/images" | "/settings") {
+function navigate(path: "/dashboard" | "/upload" | "/vulnerabilities" | "/repositories" | "/images" | "/settings" | "/api-keys") {
   if (window.location.pathname === path) {
     return;
   }
@@ -77,6 +78,13 @@ export function AppShell({ title, subtitle, activeRoute, children }: AppShellPro
               onClick={() => navigate("/settings")}
             >
               Settings
+            </button>
+            <button
+              type="button"
+              className={`shell-nav__link ${activeRoute === "/api-keys" ? "shell-nav__link--active" : ""}`}
+              onClick={() => navigate("/api-keys")}
+            >
+              API Keys
             </button>
           </nav>
         </header>
