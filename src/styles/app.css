@@ -486,6 +486,11 @@ a {
   gap: 0.4rem;
 }
 
+.checkbox-control {
+  grid-template-columns: max-content;
+  justify-items: start;
+}
+
 .filter-label {
   font-size: 0.8rem;
   color: #94a3b8;

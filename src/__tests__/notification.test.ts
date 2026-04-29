@@ -169,4 +169,43 @@ describe("notification service", () => {
     expect(row.status).toBe("failed");
     expect(row.error_message).toContain("SMTP unreachable");
   });
+
+  test("sendNotification uses persisted email template subject", async () => {
+    if (!db) throw new Error("db not initialized");
+
+    const scanResultId = seedScanResult(db);
+    const summary = buildSummary(scanResultId);
+
+    db.query(
+      `
+        UPDATE email_templates
+        SET subject = ?2,
+            html_body = ?3,
+            text_body = ?4,
+            updated_at = CURRENT_TIMESTAMP
+        WHERE template_key = ?1
+      `
+    ).run("repo_vuln_alert", "[Custom] {{repository}}", "<div>Repo: {{repository}}</div>", "Repo: {{repository}}");
+
+    process.env.NOTIFY_ENABLED = "true";
+    process.env.NOTIFY_MIN_SEVERITY = "HIGH";
+    process.env.SMTP_HOST = "smtp.example.com";
+    process.env.SMTP_PORT = "587";
+    process.env.SMTP_SECURE = "false";
+    process.env.SMTP_USER = "user";
+    process.env.SMTP_PASS = "pass";
+    process.env.SMTP_FROM = "TrivyUI <trivyui@example.com>";
+    process.env.SMTP_TO = "devops@example.com";
+
+    const fakeCreateTransport = () => ({
+      sendMail: async () => {
+        return;
+      },
+    });
+
+    await sendNotification(db, summary, fakeCreateTransport as never);
+
+    const row = db.query("SELECT subject FROM notifications LIMIT 1").get() as { subject: string };
+    expect(row.subject).toBe("[Custom] ghcr.io/acme/trivyui");
+  });
 });

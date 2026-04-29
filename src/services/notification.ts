@@ -28,6 +28,12 @@ interface NotificationRow {
   id: number;
 }
 
+interface EmailTemplateRow {
+  subject: string;
+  html_body: string;
+  text_body: string | null;
+}
+
 export function getNotificationSettings(db: Database): NotificationSettings {
   const enabledRaw = getAppSetting(db, "notify_enabled") ?? process.env.NOTIFY_ENABLED;
   const minSeverityRaw = getAppSetting(db, "notify_min_severity") ?? process.env.NOTIFY_MIN_SEVERITY;
@@ -90,6 +96,54 @@ export function buildEmailContent(
   return buildNotificationEmailContent(summary, topCritical, dashboardBaseUrl);
 }
 
+function buildEmailContentFromTemplate(
+  db: Database,
+  summary: UploadSummary,
+  topCritical: NotificationEmailCriticalVuln[],
+  dashboardBaseUrl = process.env.APP_BASE_URL || "http://localhost:3000"
+): { subject: string; html: string; text: string } {
+  const fallback = buildEmailContent(summary, topCritical, dashboardBaseUrl);
+  const row = db
+    .query("SELECT subject, html_body, text_body FROM email_templates WHERE template_key = ?1 AND enabled = 1")
+    .get("repo_vuln_alert") as EmailTemplateRow | null;
+
+  if (!row) {
+    return fallback;
+  }
+
+  const dashboardUrl = `${dashboardBaseUrl.replace(/\/$/, "")}/repositories`;
+  const criticalListItems =
+    topCritical.length === 0
+      ? "<li>No critical CVEs found in this scan.</li>"
+      : topCritical
+          .map((vuln) => {
+            const scorePart = vuln.score == null ? "n/a" : vuln.score.toFixed(1);
+            const fixedPart = vuln.fixed_version ? ` (fixed: ${escapeHtml(vuln.fixed_version)})` : "";
+            return `<li><strong>${escapeHtml(vuln.cve_id)}</strong> - ${escapeHtml(vuln.package_name)} (CVSS ${scorePart})${fixedPart}</li>`;
+          })
+          .join("");
+
+  const vars: Record<string, string> = {
+    repository: summary.repository,
+    image: summary.image,
+    parsed_at: summary.parsed_at,
+    critical_count: String(summary.severity_breakdown.CRITICAL),
+    high_count: String(summary.severity_breakdown.HIGH),
+    medium_count: String(summary.severity_breakdown.MEDIUM),
+    low_count: String(summary.severity_breakdown.LOW),
+    unknown_count: String(summary.severity_breakdown.UNKNOWN),
+    total_count: String(summary.vulnerability_count),
+    dashboard_url: dashboardUrl,
+    critical_list_items: criticalListItems,
+  };
+
+  return {
+    subject: renderTemplate(row.subject, vars),
+    html: renderTemplate(row.html_body, vars),
+    text: renderTemplate(row.text_body && row.text_body.trim().length > 0 ? row.text_body : fallback.text, vars),
+  };
+}
+
 export async function sendNotification(
   db: Database,
   summary: UploadSummary,
@@ -110,7 +164,7 @@ export async function sendNotification(
   }
 
   const topCritical = getTopCriticalVulns(db, summary.scan_result_id, 3);
-  const email = buildEmailContent(summary, topCritical);
+  const email = buildEmailContentFromTemplate(db, summary, topCritical);
 
   const insertResult = db
     .query(
@@ -148,6 +202,19 @@ export async function sendNotification(
   } catch (error) {
     markNotificationFailed(db, notificationId, error instanceof Error ? error.message : "SMTP send failed");
   }
+}
+
+function renderTemplate(template: string, vars: Record<string, string>): string {
+  return template.replace(/\{\{\s*([a-z0-9_]+)\s*\}\}/gi, (_, key) => vars[key] ?? "");
+}
+
+function escapeHtml(input: string): string {
+  return input
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#039;");
 }
 
 export function sendNotificationAsync(db: Database, summary: UploadSummary): void {

@@ -9,6 +9,7 @@ import { createRepositoriesHandler } from "./routes/api/repositories";
 import { createImagesHandler } from "./routes/api/images";
 import { createNotificationSettingsHandler } from "./routes/api/settings";
 import { createApiKeysHandler } from "./routes/api/api-keys";
+import { createEmailTemplatesHandler } from "./routes/api/email-templates";
 import { enforcePostApiKeyAuth } from "./services/api-key-auth";
 import homepage from "./index.html";
 
@@ -22,6 +23,7 @@ const repositoriesHandler = createRepositoriesHandler(db);
 const imagesHandler = createImagesHandler(db);
 const notificationSettingsHandler = createNotificationSettingsHandler(db);
 const apiKeysHandler = createApiKeysHandler(db);
+const emailTemplatesHandler = createEmailTemplatesHandler(db);
 const HTML_PATH = new URL("./index.html", import.meta.url);
 
 export const SPA_ROUTES = {
@@ -36,6 +38,7 @@ export const SPA_ROUTES = {
   "/images/:id": homepage,
   "/settings": homepage,
   "/api-keys": homepage,
+  "/email-templates": homepage,
 } as const;
 
 function methodNotAllowed(method: string, endpoint: string): Response {
@@ -142,6 +145,14 @@ export async function handleRequest(request: Request): Promise<Response> {
     }
 
     return apiKeysHandler(request);
+  }
+
+  if (pathname === "/api/email-templates" || pathname.startsWith("/api/email-templates/")) {
+    if (request.method !== "GET" && request.method !== "PUT") {
+      return methodNotAllowed(request.method, "/api/email-templates");
+    }
+
+    return emailTemplatesHandler(request);
   }
 
   if (pathname.startsWith("/api/")) {
