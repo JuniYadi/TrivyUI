@@ -45,6 +45,20 @@ function getDetailId(pathname: string): number | null {
   return Number.isFinite(id) ? id : null;
 }
 
+function getDetailName(pathname: string): string | null {
+  const match = pathname.match(/^\/api\/repositories\/by-name\/(.+)$/);
+  if (!match || !match[1]) {
+    return null;
+  }
+
+  try {
+    const decoded = decodeURIComponent(match[1]);
+    return decoded.length > 0 ? decoded : null;
+  } catch {
+    return null;
+  }
+}
+
 function buildListOrderBy(sort: RepositorySortField, order: "asc" | "desc"): string {
   const direction = order === "asc" ? "ASC" : "DESC";
 
@@ -207,6 +221,22 @@ function handleRepositoryDetail(db: Database, id: number): Response {
     return sendError(404, "REPOSITORY_NOT_FOUND", "Repository not found");
   }
 
+  return buildRepositoryDetailResponse(db, repository.id, repository.name, repository.created_at);
+}
+
+function handleRepositoryDetailByName(db: Database, name: string): Response {
+  const repository = db
+    .query("SELECT id, name, created_at FROM repositories WHERE name = ? LIMIT 1")
+    .get(name) as { id: number; name: string; created_at: string } | null;
+
+  if (!repository) {
+    return sendError(404, "REPOSITORY_NOT_FOUND", "Repository not found");
+  }
+
+  return buildRepositoryDetailResponse(db, repository.id, repository.name, repository.created_at);
+}
+
+function buildRepositoryDetailResponse(db: Database, repositoryId: number, repositoryName: string, createdAt: string): Response {
   const severityRows = db
     .query(
       `
@@ -218,7 +248,7 @@ function handleRepositoryDetail(db: Database, id: number): Response {
       GROUP BY v.severity
       `,
     )
-    .all(id) as SeverityRow[];
+    .all(repositoryId) as SeverityRow[];
 
   const images = db
     .query(
@@ -237,7 +267,7 @@ function handleRepositoryDetail(db: Database, id: number): Response {
       ORDER BY datetime(i.last_scanned_at) DESC, i.id DESC
       `,
     )
-    .all(id) as RepositoryImageRow[];
+    .all(repositoryId) as RepositoryImageRow[];
 
   const vulnerabilities = db
     .query(
@@ -267,12 +297,12 @@ function handleRepositoryDetail(db: Database, id: number): Response {
       ORDER BY datetime(sr.scan_date) DESC, v.id DESC
       `,
     )
-    .all(id) as VulnerabilityRow[];
+    .all(repositoryId) as VulnerabilityRow[];
 
   const data: RepositoryDetailResponse = {
-    id: Number(repository.id),
-    name: repository.name,
-    created_at: repository.created_at,
+    id: Number(repositoryId),
+    name: repositoryName,
+    created_at: createdAt,
     by_severity: buildSeverityBreakdown(severityRows),
     images: images.map((row) => ({
       id: Number(row.id),
@@ -292,9 +322,18 @@ export function createRepositoriesHandler(db: Database) {
     try {
       const url = new URL(request.url);
       const detailId = getDetailId(url.pathname);
+      const detailName = getDetailName(url.pathname);
 
       if (detailId !== null) {
         return handleRepositoryDetail(db, detailId);
+      }
+
+      if (url.pathname.startsWith("/api/repositories/by-name/")) {
+        if (detailName === null) {
+          return sendError(404, "REPOSITORY_NOT_FOUND", "Repository not found");
+        }
+
+        return handleRepositoryDetailByName(db, detailName);
       }
 
       if (url.pathname === "/api/repositories") {

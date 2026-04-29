@@ -16,8 +16,12 @@ interface ApiFailure {
 
 type ApiResponse<T> = ApiSuccess<T> | ApiFailure;
 
-export async function fetchRepositoryDetail(id: number, fetcher: typeof fetch = fetch): Promise<RepositoryDetailResponse> {
-  const response = await fetcher(`/api/repositories/${id}`);
+type RepositoryDetailIdentifier =
+  | { type: "id"; value: number }
+  | { type: "name"; value: string };
+
+async function fetchRepositoryDetailRequest(path: string, fetcher: typeof fetch = fetch): Promise<RepositoryDetailResponse> {
+  const response = await fetcher(path);
 
   let payload: ApiResponse<RepositoryDetailResponse> | null = null;
   try {
@@ -33,13 +37,21 @@ export async function fetchRepositoryDetail(id: number, fetcher: typeof fetch = 
   return payload.data;
 }
 
-export function useRepoDetail(id: number | null) {
+export async function fetchRepositoryDetail(id: number, fetcher: typeof fetch = fetch): Promise<RepositoryDetailResponse> {
+  return fetchRepositoryDetailRequest(`/api/repositories/${id}`, fetcher);
+}
+
+export async function fetchRepositoryDetailByName(name: string, fetcher: typeof fetch = fetch): Promise<RepositoryDetailResponse> {
+  return fetchRepositoryDetailRequest(`/api/repositories/by-name/${encodeURIComponent(name)}`, fetcher);
+}
+
+export function useRepoDetail(identifier: RepositoryDetailIdentifier | null) {
   const [data, setData] = useState<RepositoryDetailResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
-    if (!id) {
+    if (!identifier) {
       setError("Repository not found");
       setData(null);
       setLoading(false);
@@ -50,7 +62,10 @@ export function useRepoDetail(id: number | null) {
     setError(null);
 
     try {
-      const result = await fetchRepositoryDetail(id);
+      const result =
+        identifier.type === "id"
+          ? await fetchRepositoryDetail(identifier.value)
+          : await fetchRepositoryDetailByName(identifier.value);
       setData(result);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to load repository detail");
@@ -58,7 +73,7 @@ export function useRepoDetail(id: number | null) {
     } finally {
       setLoading(false);
     }
-  }, [id]);
+  }, [identifier]);
 
   useEffect(() => {
     void load();

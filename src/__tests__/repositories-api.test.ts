@@ -224,12 +224,63 @@ describe("GET /api/repositories/:id", () => {
     expect(body.data.vulnerabilities.length).toBe(3);
   });
 
+  test("returns full repository detail by encoded name slug", async () => {
+    const db = createTestDb();
+    seedData(db);
+
+    const handler = createRepositoriesHandler(db);
+    const response = handler(new Request("http://localhost/api/repositories/by-name/ghcr.io%2Facme%2Fapi"));
+    const body = (await response.json()) as {
+      success: boolean;
+      data: {
+        id: number;
+        name: string;
+        by_severity: { CRITICAL: number; HIGH: number; MEDIUM: number; LOW: number; UNKNOWN: number };
+        images: Array<{ id: number; name: string; vulnerability_count: number; critical_count: number }>;
+        vulnerabilities: Array<{ id: number; cve_id: string }>;
+      };
+    };
+
+    expect(response.status).toBe(200);
+    expect(body.success).toBe(true);
+    expect(body.data.name).toBe("ghcr.io/acme/api");
+    expect(body.data.by_severity.CRITICAL).toBe(1);
+    expect(body.data.images.length).toBe(2);
+    expect(body.data.vulnerabilities.length).toBe(3);
+  });
+
   test("returns 404 for missing repo", async () => {
     const db = createTestDb();
     seedData(db);
 
     const handler = createRepositoriesHandler(db);
     const response = handler(new Request("http://localhost/api/repositories/99999"));
+    const body = (await response.json()) as { success: boolean; error: { code: string } };
+
+    expect(response.status).toBe(404);
+    expect(body.success).toBe(false);
+    expect(body.error.code).toBe("REPOSITORY_NOT_FOUND");
+  });
+
+  test("returns 404 for unknown repository name slug", async () => {
+    const db = createTestDb();
+    seedData(db);
+
+    const handler = createRepositoriesHandler(db);
+    const response = handler(new Request("http://localhost/api/repositories/by-name/unknown-repo"));
+    const body = (await response.json()) as { success: boolean; error: { code: string } };
+
+    expect(response.status).toBe(404);
+    expect(body.success).toBe(false);
+    expect(body.error.code).toBe("REPOSITORY_NOT_FOUND");
+  });
+
+  test("returns 404 for malformed repository name slug", async () => {
+    const db = createTestDb();
+    seedData(db);
+
+    const handler = createRepositoriesHandler(db);
+    const response = handler(new Request("http://localhost/api/repositories/by-name/%E0%A4%A"));
     const body = (await response.json()) as { success: boolean; error: { code: string } };
 
     expect(response.status).toBe(404);

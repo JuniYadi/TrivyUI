@@ -15,6 +15,20 @@ function parseRepositoryId(pathname: string): number | null {
   return Number.isFinite(value) ? value : null;
 }
 
+function parseRepositoryName(pathname: string): string | null {
+  const match = pathname.match(/^\/repositories\/by-name\/(.+)$/);
+  if (!match || !match[1]) {
+    return null;
+  }
+
+  try {
+    const decoded = decodeURIComponent(match[1]);
+    return decoded.length > 0 ? decoded : null;
+  } catch {
+    return null;
+  }
+}
+
 function navigate(path: string) {
   window.history.pushState({}, "", path);
   window.dispatchEvent(new PopStateEvent("popstate"));
@@ -127,8 +141,11 @@ export function RepositoryDetailContent({ data, loading, error, retry }: Reposit
 }
 
 export function RepositoryDetailPage() {
-  const id = parseRepositoryId(window.location.pathname);
-  const { data, loading, error, retry } = useRepoDetail(id);
+  const pathname = window.location.pathname;
+  const id = parseRepositoryId(pathname);
+  const repoName = parseRepositoryName(pathname);
+  const identifier = id !== null ? { type: "id" as const, value: id } : repoName ? { type: "name" as const, value: repoName } : null;
+  const { data, loading, error, retry } = useRepoDetail(identifier);
 
   return (
     <AppShell activeRoute="/repositories/:id" title={data?.name || "Repository Detail"} subtitle="Severity summary, images, and vulnerabilities for the selected repository.">

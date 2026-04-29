@@ -85,7 +85,11 @@ export function RepositoriesPage() {
                 </thead>
                 <tbody>
                   {data.items.map((item) => (
-                    <tr key={item.id} className="vuln-row" onClick={() => navigate(`/repositories/${item.id}`)}>
+                    <tr
+                      key={item.id}
+                      className="vuln-row"
+                      onClick={() => navigate(`/repositories/by-name/${encodeURIComponent(item.name)}`)}
+                    >
                       <td>{item.name}</td>
                       <td>{item.vulnerability_count}</td>
                       <td>{item.critical_count}</td>
