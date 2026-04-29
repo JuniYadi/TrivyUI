@@ -13,7 +13,16 @@ const SEVERITIES: Severity[] = ["CRITICAL", "HIGH", "MEDIUM", "LOW", "UNKNOWN"];
 export function createStatsHandler(db: Database) {
   return function statsHandler(): Response {
     try {
-      const totalRow = db.query("SELECT COUNT(*) as count FROM vulnerabilities").get() as { count: number };
+      const totalRow = db
+        .query(
+          `
+          SELECT COUNT(DISTINCT i.repository_id || ':' || v.cve_id) as count
+          FROM vulnerabilities v
+          JOIN scan_results sr ON sr.id = v.scan_result_id
+          JOIN images i ON i.id = sr.image_id
+          `
+        )
+        .get() as { count: number };
       const repositoriesRow = db
         .query("SELECT COUNT(*) as count FROM repositories")
         .get() as { count: number };
@@ -22,9 +31,11 @@ export function createStatsHandler(db: Database) {
       const bySeverityRows = db
         .query(
           `
-          SELECT severity, COUNT(*) as count
-          FROM vulnerabilities
-          GROUP BY severity
+          SELECT v.severity as severity, COUNT(DISTINCT i.repository_id || ':' || v.cve_id) as count
+          FROM vulnerabilities v
+          JOIN scan_results sr ON sr.id = v.scan_result_id
+          JOIN images i ON i.id = sr.image_id
+          GROUP BY v.severity
           `
         )
         .all() as Array<{ severity: string; count: number }>;
@@ -49,14 +60,14 @@ export function createStatsHandler(db: Database) {
           SELECT
             r.id as id,
             r.name as name,
-            COUNT(v.id) as vulnerability_count,
-            SUM(CASE WHEN v.severity = 'CRITICAL' THEN 1 ELSE 0 END) as critical_count
+            COUNT(DISTINCT v.cve_id) as vulnerability_count,
+            COUNT(DISTINCT CASE WHEN v.severity = 'CRITICAL' THEN v.cve_id END) as critical_count
           FROM repositories r
           JOIN images i ON i.repository_id = r.id
           JOIN scan_results sr ON sr.image_id = i.id
           LEFT JOIN vulnerabilities v ON v.scan_result_id = sr.id
           GROUP BY r.id, r.name
-          HAVING COUNT(v.id) > 0
+          HAVING COUNT(DISTINCT v.cve_id) > 0
           ORDER BY vulnerability_count DESC, critical_count DESC, r.name ASC
           LIMIT 5
           `
@@ -70,8 +81,8 @@ export function createStatsHandler(db: Database) {
             sr.id as id,
             r.name as repository,
             i.name as image,
-            COUNT(v.id) as vulnerability_count,
-            SUM(CASE WHEN v.severity = 'CRITICAL' THEN 1 ELSE 0 END) as critical_count,
+            COUNT(DISTINCT v.cve_id) as vulnerability_count,
+            COUNT(DISTINCT CASE WHEN v.severity = 'CRITICAL' THEN v.cve_id END) as critical_count,
             sr.scan_date as scanned_at
           FROM scan_results sr
           JOIN images i ON i.id = sr.image_id

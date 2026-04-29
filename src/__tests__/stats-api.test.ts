@@ -18,6 +18,52 @@ afterEach(() => {
 });
 
 describe("GET /api/stats", () => {
+  test("deduplicates aggregate counts when the same scan payload is uploaded repeatedly", async () => {
+    const db = createTestDb();
+
+    const payload = {
+      ArtifactName: "ghcr.io/acme/api:latest",
+      Metadata: { Source: "ci", CreatedAt: "2026-04-26T10:00:00.000Z" },
+      Results: [
+        {
+          Vulnerabilities: [
+            { VulnerabilityID: "CVE-DUP-001", Severity: "CRITICAL", PkgName: "openssl" },
+            { VulnerabilityID: "CVE-DUP-002", Severity: "HIGH", PkgName: "glibc" },
+          ],
+        },
+      ],
+    };
+
+    importTrivyPayload(db, payload, "{}");
+    importTrivyPayload(db, payload, "{}");
+
+    const handler = createStatsHandler(db);
+    const response = handler();
+    const body = (await response.json()) as {
+      success: boolean;
+      data: {
+        total_vulnerabilities: number;
+        by_severity: Record<string, number>;
+        top_repositories: Array<{ name: string; vulnerability_count: number; critical_count: number }>;
+        recent_scans: Array<{ id: number; vulnerability_count: number; critical_count: number }>;
+      };
+    };
+
+    expect(response.status).toBe(200);
+    expect(body.success).toBe(true);
+    expect(body.data.total_vulnerabilities).toBe(2);
+    expect(body.data.by_severity.CRITICAL).toBe(1);
+    expect(body.data.by_severity.HIGH).toBe(1);
+    expect(body.data.top_repositories[0]?.name).toBe("ghcr.io/acme/api");
+    expect(body.data.top_repositories[0]?.vulnerability_count).toBe(2);
+    expect(body.data.top_repositories[0]?.critical_count).toBe(1);
+
+    // scan history should remain per-scan (not deduplicated)
+    expect(body.data.recent_scans.length).toBe(2);
+    expect(body.data.recent_scans[0]?.vulnerability_count).toBe(2);
+    expect(body.data.recent_scans[1]?.vulnerability_count).toBe(2);
+  });
+
   test("returns dashboard aggregate stats with top repositories and recent scans", async () => {
     const db = createTestDb();
 
