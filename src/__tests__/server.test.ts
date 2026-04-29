@@ -5,6 +5,8 @@ function makeRequest(pathname: string, method = "GET"): Request {
   return new Request(`http://localhost:3000${pathname}`, { method });
 }
 
+const apiKeyEnabledBackup = process.env.API_KEY_ENABLED;
+
 describe("server routing", () => {
   test("serves SPA HTML for root path", async () => {
     const response = await handleRequest(makeRequest("/"));
@@ -56,6 +58,58 @@ describe("server routing", () => {
       expect(response.status).toBe(200);
       expect(response.headers.get("content-type")).toContain("text/html");
       expect(body).toContain('<div id="root"></div>');
+    }
+  });
+
+  test("returns 405 for unsupported method on api-keys endpoint", async () => {
+    const response = await handleRequest(makeRequest("/api/api-keys", "PUT"));
+    const body = (await response.json()) as {
+      success: boolean;
+      error: { code: string; message: string };
+    };
+
+    expect(response.status).toBe(405);
+    expect(body.success).toBe(false);
+    expect(body.error.code).toBe("METHOD_NOT_ALLOWED");
+  });
+
+  test("enforces API key for POST /api routes when enabled", async () => {
+    process.env.API_KEY_ENABLED = "true";
+    try {
+      const unauthorized = await handleRequest(
+        new Request("http://localhost:3000/api/upload", {
+          method: "POST",
+        })
+      );
+
+      expect(unauthorized.status).toBe(401);
+
+      const createKeyResponse = await handleRequest(
+        new Request("http://localhost:3000/api/api-keys", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ label: "Server Test Key" }),
+        })
+      );
+      const createKeyBody = (await createKeyResponse.json()) as {
+        success: boolean;
+        data: { api_key: string };
+      };
+
+      const authorized = await handleRequest(
+        new Request("http://localhost:3000/api/upload", {
+          method: "POST",
+          headers: { "X-API-Key": createKeyBody.data.api_key },
+        })
+      );
+
+      expect(authorized.status).toBe(415);
+    } finally {
+      if (apiKeyEnabledBackup === undefined) {
+        delete process.env.API_KEY_ENABLED;
+      } else {
+        process.env.API_KEY_ENABLED = apiKeyEnabledBackup;
+      }
     }
   });
 });

@@ -55,6 +55,30 @@ describe("api key auth policy", () => {
     expect(response?.status).toBe(401);
   });
 
+  test("rejects protected POST /api request with invalid key", async () => {
+    const db = createTestDb();
+    process.env.API_KEY_ENABLED = "true";
+
+    const keysHandler = createApiKeysHandler(db);
+    await keysHandler(
+      new Request("http://localhost/api/api-keys", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ label: "Uploader" }),
+      })
+    );
+
+    const response = await enforcePostApiKeyAuth(
+      db,
+      new Request("http://localhost/api/upload", {
+        method: "POST",
+        headers: { "X-API-Key": "trivy_invalid_key" },
+      })
+    );
+
+    expect(response?.status).toBe(401);
+  });
+
   test("accepts valid key for protected POST /api request and updates last_used_at", async () => {
     const db = createTestDb();
     process.env.API_KEY_ENABLED = "true";
@@ -93,6 +117,34 @@ describe("api key auth policy", () => {
       db,
       new Request("http://localhost/api/settings/notifications", {
         method: "PUT",
+      })
+    );
+
+    expect(response).toBeNull();
+  });
+
+  test("does not protect POST /api/api-keys", async () => {
+    const db = createTestDb();
+    process.env.API_KEY_ENABLED = "true";
+
+    const response = await enforcePostApiKeyAuth(
+      db,
+      new Request("http://localhost/api/api-keys", {
+        method: "POST",
+      })
+    );
+
+    expect(response).toBeNull();
+  });
+
+  test("does not protect non-api routes", async () => {
+    const db = createTestDb();
+    process.env.API_KEY_ENABLED = "true";
+
+    const response = await enforcePostApiKeyAuth(
+      db,
+      new Request("http://localhost/upload", {
+        method: "POST",
       })
     );
 

@@ -109,4 +109,72 @@ describe("api keys endpoint", () => {
     expect(row.is_active).toBe(0);
     expect(row.revoked_at).not.toBeNull();
   });
+
+  test("POST returns 400 when label is missing", async () => {
+    const db = createTestDb();
+    const handler = createApiKeysHandler(db);
+
+    const response = await handler(
+      new Request("http://localhost/api/api-keys", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({}),
+      })
+    );
+
+    const body = (await response.json()) as {
+      success: boolean;
+      error: { code: string; message: string };
+    };
+
+    expect(response.status).toBe(400);
+    expect(body.success).toBe(false);
+    expect(body.error.code).toBe("INVALID_REQUEST");
+  });
+
+  test("DELETE returns 400 when id is invalid", async () => {
+    const db = createTestDb();
+    const handler = createApiKeysHandler(db);
+
+    const response = await handler(
+      new Request("http://localhost/api/api-keys/not-a-number", {
+        method: "DELETE",
+      })
+    );
+
+    expect(response.status).toBe(400);
+  });
+
+  test("DELETE returns 404 when key id is not found", async () => {
+    const db = createTestDb();
+    const handler = createApiKeysHandler(db);
+
+    const response = await handler(
+      new Request("http://localhost/api/api-keys/999999", {
+        method: "DELETE",
+      })
+    );
+
+    const body = (await response.json()) as {
+      success: boolean;
+      error: { code: string; message: string };
+    };
+
+    expect(response.status).toBe(404);
+    expect(body.success).toBe(false);
+    expect(body.error.code).toBe("NOT_FOUND");
+  });
+
+  test("returns 404 for unsupported api-keys path", async () => {
+    const db = createTestDb();
+    const handler = createApiKeysHandler(db);
+
+    const response = await handler(
+      new Request("http://localhost/api/something-else", {
+        method: "GET",
+      })
+    );
+
+    expect(response.status).toBe(404);
+  });
 });
