@@ -59,6 +59,19 @@ const FULL_SCHEMA_SQL = `
   CREATE INDEX IF NOT EXISTS idx_notifications_scan_result ON notifications(scan_result_id);
   CREATE INDEX IF NOT EXISTS idx_notifications_status ON notifications(status);
 
+  CREATE TABLE IF NOT EXISTS scheduled_notification_runs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    job_key TEXT NOT NULL,
+    status TEXT NOT NULL CHECK(status IN ('sent','skipped','failed')),
+    reason TEXT NOT NULL,
+    total_count INTEGER NOT NULL DEFAULT 0,
+    notification_id INTEGER REFERENCES notifications(id) ON DELETE SET NULL,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_scheduled_runs_job ON scheduled_notification_runs(job_key);
+  CREATE INDEX IF NOT EXISTS idx_scheduled_runs_status ON scheduled_notification_runs(status);
+
   CREATE TABLE IF NOT EXISTS app_settings (
     key TEXT PRIMARY KEY,
     value TEXT NOT NULL,

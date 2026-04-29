@@ -106,4 +106,41 @@ describe("scheduled notification jobs", () => {
     expect(result.status).toBe("skipped");
     expect(result.reason).toContain("dry-run");
   });
+
+  test("weekly reminder records skipped run when no vulnerabilities exist", async () => {
+    if (!db) throw new Error("db not initialized");
+
+    const result = (await runWeeklyExistingVulnerabilityReminder(db)) as ScheduledRunResult;
+
+    const row = db
+      .query(
+        "SELECT job_key, status, reason, total_count FROM scheduled_notification_runs ORDER BY id DESC LIMIT 1"
+      )
+      .get() as { job_key: string; status: string; reason: string; total_count: number };
+
+    expect(result.status).toBe("skipped");
+    expect(row.job_key).toBe("weekly_existing_vuln_reminder");
+    expect(row.status).toBe("skipped");
+    expect(row.reason).toContain("No active vulnerabilities");
+    expect(row.total_count).toBe(0);
+  });
+
+  test("weekly reminder records failed run on invalid SMTP config", async () => {
+    if (!db) throw new Error("db not initialized");
+    seedPayload(db);
+    process.env.SMTP_HOST = "";
+
+    const result = (await runWeeklyExistingVulnerabilityReminder(db)) as ScheduledRunResult;
+
+    const row = db
+      .query(
+        "SELECT job_key, status, reason FROM scheduled_notification_runs ORDER BY id DESC LIMIT 1"
+      )
+      .get() as { job_key: string; status: string; reason: string };
+
+    expect(result.status).toBe("failed");
+    expect(row.job_key).toBe("weekly_existing_vuln_reminder");
+    expect(row.status).toBe("failed");
+    expect(row.reason).toContain("SMTP configuration incomplete");
+  });
 });

@@ -43,17 +43,32 @@ export async function runWeeklyExistingVulnerabilityReminder(
 ): Promise<ScheduledRunResult> {
   const active = getActiveVulnerabilitySummary(db);
   if (active.totalCount === 0) {
-    return { status: "skipped", reason: "No active vulnerabilities", totalCount: 0 };
+    const result = { status: "skipped", reason: "No active vulnerabilities", totalCount: 0 } satisfies ScheduledRunResult;
+    recordRun(db, "weekly_existing_vuln_reminder", result);
+    return result;
   }
 
   if (options.dryRun) {
-    return { status: "skipped", reason: "Skipped by dry-run", totalCount: active.totalCount };
+    const result = {
+      status: "skipped",
+      reason: "Skipped by dry-run",
+      totalCount: active.totalCount,
+    } satisfies ScheduledRunResult;
+    recordRun(db, "weekly_existing_vuln_reminder", result);
+    return result;
   }
 
-  return sendScheduledTemplate(db, "weekly_existing_vuln_reminder", {
-    ...active,
-    generated_at: (options.now ?? new Date()).toISOString(),
-  }, options.createTransport);
+  const result = await sendScheduledTemplate(
+    db,
+    "weekly_existing_vuln_reminder",
+    {
+      ...active,
+      generated_at: (options.now ?? new Date()).toISOString(),
+    },
+    options.createTransport
+  );
+  recordRun(db, "weekly_existing_vuln_reminder", result, result.notificationId ?? null);
+  return result;
 }
 
 export async function runMonthlyVulnerabilityStats(
@@ -66,19 +81,38 @@ export async function runMonthlyVulnerabilityStats(
 
   const stats = getMonthlyStats(db, start.toISOString(), end.toISOString());
   if (stats.totalCount === 0) {
-    return { status: "skipped", reason: "No monthly vulnerability data", totalCount: 0 };
+    const result = {
+      status: "skipped",
+      reason: "No monthly vulnerability data",
+      totalCount: 0,
+    } satisfies ScheduledRunResult;
+    recordRun(db, "monthly_vuln_stats", result);
+    return result;
   }
 
   if (options.dryRun) {
-    return { status: "skipped", reason: "Skipped by dry-run", totalCount: stats.totalCount };
+    const result = {
+      status: "skipped",
+      reason: "Skipped by dry-run",
+      totalCount: stats.totalCount,
+    } satisfies ScheduledRunResult;
+    recordRun(db, "monthly_vuln_stats", result);
+    return result;
   }
 
-  return sendScheduledTemplate(db, "monthly_vuln_stats", {
-    ...stats,
-    period_start: start.toISOString().slice(0, 10),
-    period_end: new Date(end.getTime() - 1).toISOString().slice(0, 10),
-    generated_at: now.toISOString(),
-  }, options.createTransport);
+  const result = await sendScheduledTemplate(
+    db,
+    "monthly_vuln_stats",
+    {
+      ...stats,
+      period_start: start.toISOString().slice(0, 10),
+      period_end: new Date(end.getTime() - 1).toISOString().slice(0, 10),
+      generated_at: now.toISOString(),
+    },
+    options.createTransport
+  );
+  recordRun(db, "monthly_vuln_stats", result, result.notificationId ?? null);
+  return result;
 }
 
 export function registerBunCronJobs(db: Database): void {
@@ -195,7 +229,7 @@ async function sendScheduledTemplate(
   templateKey: string,
   vars: Record<string, string | number>,
   createTransport: typeof nodemailer.createTransport = nodemailer.createTransport
-): Promise<ScheduledRunResult> {
+): Promise<ScheduledRunResult & { notificationId?: number }> {
   const smtp = getSmtpConfig();
   if (smtp.recipients.length === 0 || !smtp.host || !smtp.port || !smtp.from) {
     return { status: "failed", reason: "SMTP configuration incomplete", totalCount: Number(vars.totalCount ?? 0) };
@@ -234,12 +268,31 @@ async function sendScheduledTemplate(
     });
     await transporter.sendMail({ from: smtp.from, to: smtp.recipients.join(","), subject, html, text });
     db.query("UPDATE notifications SET status = 'sent', sent_at = CURRENT_TIMESTAMP WHERE id = ?1").run(notificationId);
-    return { status: "sent", reason: "Sent successfully", totalCount: Number(vars.totalCount ?? 0) };
+    return {
+      status: "sent",
+      reason: "Sent successfully",
+      totalCount: Number(vars.totalCount ?? 0),
+      notificationId,
+    };
   } catch (error) {
     const message = error instanceof Error ? error.message : "SMTP send failed";
     db.query("UPDATE notifications SET status = 'failed', error_message = ?2 WHERE id = ?1").run(notificationId, message.slice(0, 1000));
-    return { status: "failed", reason: message, totalCount: Number(vars.totalCount ?? 0) };
+    return { status: "failed", reason: message, totalCount: Number(vars.totalCount ?? 0), notificationId };
   }
+}
+
+function recordRun(
+  db: Database,
+  jobKey: string,
+  result: ScheduledRunResult,
+  notificationId?: number | null
+): void {
+  db.query(
+    `
+      INSERT INTO scheduled_notification_runs (job_key, status, reason, total_count, notification_id)
+      VALUES (?1, ?2, ?3, ?4, ?5)
+    `
+  ).run(jobKey, result.status, result.reason.slice(0, 1000), result.totalCount, notificationId ?? null);
 }
 
 function getTemplate(db: Database, templateKey: string): EmailTemplateRow | null {
