@@ -1,6 +1,42 @@
 # TrivyUI
 Vulnerability Dashboard for Trivy Scanner
 
+## SMTP Setup (Email Notifications)
+
+TrivyUI can send vulnerability alert emails after upload/webhook import.
+
+1. Copy `.env.example` values into your runtime environment (or `.env` if you load it in your setup).
+2. Set SMTP and notification variables:
+
+```bash
+SMTP_HOST=smtp.gmail.com
+SMTP_PORT=587
+SMTP_SECURE=false
+SMTP_USER=trivyui@company.com
+SMTP_PASS=app-password-here
+SMTP_FROM="TrivyUI <trivyui@company.com>"
+SMTP_TO=devops@company.com,security@company.com
+
+NOTIFY_ENABLED=true
+NOTIFY_MIN_SEVERITY=HIGH
+APP_BASE_URL=http://localhost:3000
+```
+
+Variable reference:
+- `SMTP_HOST`: SMTP server host.
+- `SMTP_PORT`: SMTP server port (`587` for STARTTLS, `465` for SMTPS).
+- `SMTP_SECURE`: `true` for implicit TLS (usually port `465`), `false` otherwise.
+- `SMTP_USER` / `SMTP_PASS`: SMTP auth credentials.
+- `SMTP_FROM`: sender address shown in email.
+- `SMTP_TO`: comma-separated recipient list.
+- `NOTIFY_ENABLED`: enable/disable notifications globally.
+- `NOTIFY_MIN_SEVERITY`: minimum severity trigger (`CRITICAL`, `HIGH`, `MEDIUM`, `LOW`).
+- `APP_BASE_URL`: base URL used for dashboard links in email body.
+
+Notes:
+- Upload/webhook API stays successful even when SMTP send fails.
+- Failed notification attempts are recorded in `notifications` table with status `failed` and an error message.
+
 ## Generate Trivy JSON
 
 Create a JSON report from Trivy first, then upload it via UI or API.
