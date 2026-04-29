@@ -35,6 +35,29 @@ function seedPayload(targetDb: ReturnType<typeof initDb>) {
   );
 }
 
+function seedMixedSeverityPayload(targetDb: ReturnType<typeof initDb>) {
+  importTrivyPayload(
+    targetDb,
+    {
+      ArtifactName: "ghcr.io/acme/mixed:latest",
+      Metadata: {
+        Source: "ci",
+        CreatedAt: "2026-04-26T00:00:00.000Z",
+      },
+      Results: [
+        {
+          Vulnerabilities: [
+            { VulnerabilityID: "CVE-2026-2000", Severity: "MEDIUM", PkgName: "curl" },
+            { VulnerabilityID: "CVE-2026-2001", Severity: "LOW", PkgName: "bash" },
+            { VulnerabilityID: "CVE-2026-2002", Severity: "UNKNOWN", PkgName: "zlib" },
+          ],
+        },
+      ],
+    },
+    "{}"
+  );
+}
+
 beforeEach(() => {
   envBackup = {};
   for (const key of ENV_KEYS) {
@@ -243,6 +266,103 @@ describe("scheduled notification jobs", () => {
     expect(calls).toHaveLength(0);
   });
 
+  test("registerBunCronJobs uses default schedules when env not provided", () => {
+    if (!db) throw new Error("db not initialized");
+    process.env.SCHEDULED_EMAILS_ENABLED = "true";
+    delete process.env.WEEKLY_REMINDER_CRON;
+    delete process.env.MONTHLY_STATS_CRON;
+
+    const calls: string[] = [];
+    const handlers: Array<() => Promise<void>> = [];
+    const originalCron = Bun.cron;
+    (Bun as { cron: (schedule: string, handler: () => Promise<void>) => void }).cron = (
+      schedule: string,
+      handler: () => Promise<void>
+    ) => {
+      calls.push(schedule);
+      handlers.push(handler);
+    };
+
+    try {
+      registerBunCronJobs(db);
+    } finally {
+      (Bun as { cron: typeof originalCron }).cron = originalCron;
+    }
+
+    expect(calls).toEqual(["@weekly", "@monthly"]);
+    expect(handlers).toHaveLength(2);
+  });
+
+  test("registered cron handlers execute without throwing", async () => {
+    if (!db) throw new Error("db not initialized");
+    process.env.SCHEDULED_EMAILS_ENABLED = "true";
+    delete process.env.WEEKLY_REMINDER_CRON;
+    delete process.env.MONTHLY_STATS_CRON;
+
+    const handlers: Array<() => Promise<void>> = [];
+    const originalCron = Bun.cron;
+    (Bun as { cron: (schedule: string, handler: () => Promise<void>) => void }).cron = (
+      _schedule: string,
+      handler: () => Promise<void>
+    ) => {
+      handlers.push(handler);
+    };
+
+    try {
+      registerBunCronJobs(db);
+      await handlers[0]?.();
+      await handlers[1]?.();
+    } finally {
+      (Bun as { cron: typeof originalCron }).cron = originalCron;
+    }
+
+    expect(handlers).toHaveLength(2);
+  });
+
+  test("registerBunCronJobs treats invalid enabled flag as disabled", () => {
+    if (!db) throw new Error("db not initialized");
+    process.env.SCHEDULED_EMAILS_ENABLED = "maybe";
+
+    const calls: string[] = [];
+    const originalCron = Bun.cron;
+    (Bun as { cron: (schedule: string, handler: () => Promise<void>) => void }).cron = (
+      schedule: string,
+      _handler: () => Promise<void>
+    ) => {
+      calls.push(schedule);
+    };
+
+    try {
+      registerBunCronJobs(db);
+    } finally {
+      (Bun as { cron: typeof originalCron }).cron = originalCron;
+    }
+
+    expect(calls).toHaveLength(0);
+  });
+
+  test("registerBunCronJobs treats missing enabled flag as disabled", () => {
+    if (!db) throw new Error("db not initialized");
+    delete process.env.SCHEDULED_EMAILS_ENABLED;
+
+    const calls: string[] = [];
+    const originalCron = Bun.cron;
+    (Bun as { cron: (schedule: string, handler: () => Promise<void>) => void }).cron = (
+      schedule: string,
+      _handler: () => Promise<void>
+    ) => {
+      calls.push(schedule);
+    };
+
+    try {
+      registerBunCronJobs(db);
+    } finally {
+      (Bun as { cron: typeof originalCron }).cron = originalCron;
+    }
+
+    expect(calls).toHaveLength(0);
+  });
+
   test("weekly reminder records skipped run when no vulnerabilities exist", async () => {
     if (!db) throw new Error("db not initialized");
 
@@ -278,5 +398,57 @@ describe("scheduled notification jobs", () => {
     expect(row.job_key).toBe("weekly_existing_vuln_reminder");
     expect(row.status).toBe("failed");
     expect(row.reason).toContain("SMTP configuration incomplete");
+  });
+
+  test("monthly stats handles medium/low/unknown severities", async () => {
+    if (!db) throw new Error("db not initialized");
+    seedPayload(db);
+    seedMixedSeverityPayload(db);
+
+    const result = (await runMonthlyVulnerabilityStats(db, {
+      dryRun: true,
+      now: new Date("2026-04-30T12:00:00.000Z"),
+    })) as ScheduledRunResult;
+
+    const row = db
+      .query("SELECT reason, total_count FROM scheduled_notification_runs ORDER BY id DESC LIMIT 1")
+      .get() as { reason: string; total_count: number };
+
+    expect(result.status).toBe("skipped");
+    expect(row.reason).toContain("dry-run");
+    expect(row.total_count).toBeGreaterThan(2);
+  });
+
+  test("weekly reminder handles medium/low/unknown severities", async () => {
+    if (!db) throw new Error("db not initialized");
+    seedMixedSeverityPayload(db);
+
+    const result = (await runWeeklyExistingVulnerabilityReminder(db, {
+      dryRun: true,
+    })) as ScheduledRunResult;
+
+    const row = db
+      .query("SELECT status, total_count FROM scheduled_notification_runs ORDER BY id DESC LIMIT 1")
+      .get() as { status: string; total_count: number };
+
+    expect(result.status).toBe("skipped");
+    expect(row.status).toBe("skipped");
+    expect(row.total_count).toBe(3);
+  });
+
+  test("monthly stats records skipped when no data exists", async () => {
+    if (!db) throw new Error("db not initialized");
+
+    const result = (await runMonthlyVulnerabilityStats(db, {
+      now: new Date("2026-04-30T12:00:00.000Z"),
+    })) as ScheduledRunResult;
+
+    const row = db
+      .query("SELECT status, reason FROM scheduled_notification_runs ORDER BY id DESC LIMIT 1")
+      .get() as { status: string; reason: string };
+
+    expect(result.status).toBe("skipped");
+    expect(row.status).toBe("skipped");
+    expect(row.reason).toContain("No monthly vulnerability data");
   });
 });

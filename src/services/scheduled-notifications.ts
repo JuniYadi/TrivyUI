@@ -244,9 +244,6 @@ async function sendScheduledTemplate(
   const text = renderTemplate(template?.text_body && template.text_body.trim().length > 0 ? template.text_body : fallbackText, vars);
 
   const scanResultId = getLatestScanResultId(db);
-  if (!scanResultId) {
-    return { status: "skipped", reason: "No scan result available for logging", totalCount: Number(vars.totalCount ?? 0) };
-  }
 
   const inserted = db
     .query(
@@ -255,7 +252,7 @@ async function sendScheduledTemplate(
       VALUES (?1, 'email', 'pending', ?2, ?3)
     `
     )
-    .run(scanResultId, smtp.recipients.join(","), subject);
+    .run(scanResultId ?? -1, smtp.recipients.join(","), subject);
 
   const notificationId = Number(inserted.lastInsertRowid);
 
