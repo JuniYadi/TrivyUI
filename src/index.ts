@@ -24,6 +24,20 @@ const notificationSettingsHandler = createNotificationSettingsHandler(db);
 const apiKeysHandler = createApiKeysHandler(db);
 const HTML_PATH = new URL("./index.html", import.meta.url);
 
+export const SPA_ROUTES = {
+  "/": homepage,
+  "/dashboard": homepage,
+  "/upload": homepage,
+  "/vulnerabilities": homepage,
+  "/repositories": homepage,
+  "/repositories/:id": homepage,
+  "/repositories/by-name/:repo-name": homepage,
+  "/images": homepage,
+  "/images/:id": homepage,
+  "/settings": homepage,
+  "/api-keys": homepage,
+} as const;
+
 function methodNotAllowed(method: string, endpoint: string): Response {
   return sendError(405, "METHOD_NOT_ALLOWED", `Method ${method} is not allowed for ${endpoint}`);
 }
@@ -155,19 +169,7 @@ if (import.meta.main) {
       // Echo console logs from the browser to the terminal
       console: true,
     },
-    routes: {
-      "/": homepage,
-      "/dashboard": homepage,
-      "/upload": homepage,
-      "/vulnerabilities": homepage,
-      "/repositories": homepage,
-      "/repositories/:id": homepage,
-      "/repositories/by-name/:repo-name": homepage,
-      "/images": homepage,
-      "/images/:id": homepage,
-      "/settings": homepage,
-      "/api-keys": homepage,
-    },
+    routes: SPA_ROUTES,
     fetch: handleRequest,
   });
 

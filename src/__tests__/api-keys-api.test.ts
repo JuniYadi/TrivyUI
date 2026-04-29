@@ -177,4 +177,26 @@ describe("api keys endpoint", () => {
 
     expect(response.status).toBe(404);
   });
+
+  test("POST returns 500 for malformed JSON payload", async () => {
+    const db = createTestDb();
+    const handler = createApiKeysHandler(db);
+
+    const response = await handler(
+      new Request("http://localhost/api/api-keys", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: "{invalid-json",
+      })
+    );
+
+    const body = (await response.json()) as {
+      success: boolean;
+      error: { code: string; message: string };
+    };
+
+    expect(response.status).toBe(500);
+    expect(body.success).toBe(false);
+    expect(body.error.code).toBe("INTERNAL_SERVER_ERROR");
+  });
 });

@@ -65,16 +65,19 @@ export async function createApiKey(db: Database, label: string): Promise<Created
     | CreateApiKeyRow
     | null;
 
-  if (!row) {
-    throw new Error("FAILED_TO_CREATE_API_KEY");
-  }
+  const created = row ?? {
+    id: Number(inserted.lastInsertRowid),
+    label: label.trim(),
+    masked_key: maskedKey,
+    created_at: new Date().toISOString(),
+  };
 
   return {
-    id: row.id,
-    label: row.label,
+    id: created.id,
+    label: created.label,
     api_key: apiKey,
-    masked_key: row.masked_key,
-    created_at: row.created_at,
+    masked_key: created.masked_key,
+    created_at: created.created_at,
   };
 }
 
