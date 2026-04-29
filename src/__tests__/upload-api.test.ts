@@ -4,6 +4,18 @@ import { createUploadHandler } from "../routes/api/upload";
 import { createBatchUploadHandler } from "../routes/api/upload-batch";
 import { createWebhookHandler } from "../routes/api/webhook";
 
+const NOTIFICATION_ENV_KEYS = [
+  "NOTIFY_ENABLED",
+  "NOTIFY_MIN_SEVERITY",
+  "SMTP_HOST",
+  "SMTP_PORT",
+  "SMTP_SECURE",
+  "SMTP_USER",
+  "SMTP_PASS",
+  "SMTP_FROM",
+  "SMTP_TO",
+] as const;
+
 const MAX_FILE_SIZE = 10 * 1024 * 1024;
 
 function buildValidTrivyPayload() {
@@ -36,6 +48,7 @@ function buildValidTrivyPayload() {
 }
 
 const dbs: ReturnType<typeof initDb>[] = [];
+const envBackup: Partial<Record<(typeof NOTIFICATION_ENV_KEYS)[number], string | undefined>> = {};
 
 function createTestDb() {
   const db = initDb(":memory:");
@@ -47,7 +60,45 @@ afterEach(() => {
   for (const db of dbs.splice(0)) {
     db.close();
   }
+
+  for (const key of NOTIFICATION_ENV_KEYS) {
+    if (envBackup[key] === undefined) {
+      delete process.env[key];
+    } else {
+      process.env[key] = envBackup[key];
+    }
+  }
 });
+
+function setNotificationEnvWithInvalidSmtp() {
+  for (const key of NOTIFICATION_ENV_KEYS) {
+    envBackup[key] = process.env[key];
+  }
+
+  process.env.NOTIFY_ENABLED = "true";
+  process.env.NOTIFY_MIN_SEVERITY = "HIGH";
+  process.env.SMTP_HOST = "";
+  process.env.SMTP_PORT = "587";
+  process.env.SMTP_SECURE = "false";
+  process.env.SMTP_FROM = "TrivyUI <trivyui@example.com>";
+  process.env.SMTP_TO = "devops@example.com";
+}
+
+async function waitForNotificationRow(db: ReturnType<typeof initDb>): Promise<{ status: string; error_message: string | null }> {
+  for (let attempt = 0; attempt < 50; attempt += 1) {
+    const row = db.query("SELECT status, error_message FROM notifications LIMIT 1").get() as
+      | { status: string; error_message: string | null }
+      | null;
+
+    if (row) {
+      return row;
+    }
+
+    await Bun.sleep(5);
+  }
+
+  throw new Error("notification row was not created");
+}
 
 describe("upload/import API endpoints", () => {
   test("POST /api/upload stores valid Trivy JSON and returns 201 summary", async () => {
@@ -82,6 +133,32 @@ describe("upload/import API endpoints", () => {
     expect(body.data.repository).toBe("ghcr.io/acme/trivyui");
     expect(body.data.image).toBe("ghcr.io/acme/trivyui:1.2.3");
     expect(body.data.vulnerability_count).toBe(1);
+  });
+
+  test("POST /api/upload stays successful when notification sending fails", async () => {
+    setNotificationEnvWithInvalidSmtp();
+    const db = createTestDb();
+    const uploadHandler = createUploadHandler(db);
+
+    const formData = new FormData();
+    formData.set(
+      "file",
+      new File([JSON.stringify(buildValidTrivyPayload())], "scan.json", {
+        type: "application/json",
+      })
+    );
+
+    const request = new Request("http://localhost/api/upload", {
+      method: "POST",
+      body: formData,
+    });
+
+    const response = await uploadHandler(request);
+    const row = await waitForNotificationRow(db);
+
+    expect(response.status).toBe(201);
+    expect(row.status).toBe("failed");
+    expect(row.error_message).toBe("SMTP configuration incomplete");
   });
 
   test("POST /api/upload returns 400 when multipart payload is missing file field", async () => {
@@ -198,6 +275,27 @@ describe("upload/import API endpoints", () => {
     expect(response.status).toBe(400);
     expect(body.success).toBe(false);
     expect(body.error.code).toBe("INVALID_JSON_FORMAT");
+  });
+
+  test("POST /api/webhook stays successful when notification sending fails", async () => {
+    setNotificationEnvWithInvalidSmtp();
+    const db = createTestDb();
+    const webhookHandler = createWebhookHandler(db);
+
+    const request = new Request("http://localhost/api/webhook", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+      },
+      body: JSON.stringify(buildValidTrivyPayload()),
+    });
+
+    const response = await webhookHandler(request);
+    const row = await waitForNotificationRow(db);
+
+    expect(response.status).toBe(201);
+    expect(row.status).toBe("failed");
+    expect(row.error_message).toBe("SMTP configuration incomplete");
   });
 
   test("returns 413 FILE_TOO_LARGE for file larger than 10MB", async () => {
