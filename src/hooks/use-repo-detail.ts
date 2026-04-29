@@ -20,6 +20,14 @@ type RepositoryDetailIdentifier =
   | { type: "id"; value: number }
   | { type: "name"; value: string };
 
+export function getRepoDetailIdentifierKey(identifier: RepositoryDetailIdentifier | null): string {
+  if (!identifier) {
+    return "none";
+  }
+
+  return `${identifier.type}:${identifier.value}`;
+}
+
 async function fetchRepositoryDetailRequest(path: string, fetcher: typeof fetch = fetch): Promise<RepositoryDetailResponse> {
   const response = await fetcher(path);
 
@@ -49,6 +57,7 @@ export function useRepoDetail(identifier: RepositoryDetailIdentifier | null) {
   const [data, setData] = useState<RepositoryDetailResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const identifierKey = getRepoDetailIdentifierKey(identifier);
 
   const load = useCallback(async () => {
     if (!identifier) {
@@ -73,7 +82,7 @@ export function useRepoDetail(identifier: RepositoryDetailIdentifier | null) {
     } finally {
       setLoading(false);
     }
-  }, [identifier]);
+  }, [identifierKey]);
 
   useEffect(() => {
     void load();
