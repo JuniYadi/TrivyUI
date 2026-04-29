@@ -1,14 +1,16 @@
 # TrivyUI
 Vulnerability Dashboard for Trivy Scanner
 
-## SMTP Setup (Email Notifications)
+## Environment Variables
 
-TrivyUI can send vulnerability alert emails after upload/webhook import.
-
-1. Copy `.env.example` values into your runtime environment (or `.env` if you load it in your setup).
-2. Set SMTP and notification variables:
+Copy `.env.example` to `.env` (or export these in your runtime).
 
 ```bash
+PORT=3000
+API_KEY_ENABLED=false
+TRIVYUI_DB_PATH=trivy.db
+# MYSQL_URL=mysql://user:password@127.0.0.1:3306/trivyui
+
 SMTP_HOST=smtp.gmail.com
 SMTP_PORT=587
 SMTP_SECURE=false
@@ -17,23 +19,29 @@ SMTP_PASS=app-password-here
 SMTP_FROM="TrivyUI <trivyui@company.com>"
 SMTP_TO=devops@company.com,security@company.com
 
-NOTIFY_ENABLED=true
+NOTIFY_ENABLED=false
 NOTIFY_MIN_SEVERITY=HIGH
 APP_BASE_URL=http://localhost:3000
+
 ```
 
 Variable reference:
+- `PORT`: HTTP server port for Bun (`3000` default).
+- `API_KEY_ENABLED`: enables API key enforcement for `POST /api/*` when set to `true`.
+- `TRIVYUI_DB_PATH`: SQLite file path used by current runtime and by `bun run db:seed-dashboard`.
+- `MYSQL_URL`: MySQL connection string example for DB-driver based integrations.
 - `SMTP_HOST`: SMTP server host.
 - `SMTP_PORT`: SMTP server port (`587` for STARTTLS, `465` for SMTPS).
 - `SMTP_SECURE`: `true` for implicit TLS (usually port `465`), `false` otherwise.
 - `SMTP_USER` / `SMTP_PASS`: SMTP auth credentials.
 - `SMTP_FROM`: sender address shown in email.
 - `SMTP_TO`: comma-separated recipient list.
-- `NOTIFY_ENABLED`: enable/disable notifications globally.
-- `NOTIFY_MIN_SEVERITY`: minimum severity trigger (`CRITICAL`, `HIGH`, `MEDIUM`, `LOW`).
+- `NOTIFY_ENABLED`: enables/disables notifications globally.
+- `NOTIFY_MIN_SEVERITY`: minimum severity trigger (`CRITICAL`, `HIGH`, `MEDIUM`, `LOW`, `UNKNOWN`).
 - `APP_BASE_URL`: base URL used for dashboard links in email body.
 
 Notes:
+- Current HTTP runtime in `src/index.ts` initializes SQLite (`initDb()`), so `MYSQL_URL` is documented as connection format reference.
 - Upload/webhook API stays successful even when SMTP send fails.
 - Failed notification attempts are recorded in `notifications` table with status `failed` and an error message.
 
