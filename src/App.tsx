@@ -8,6 +8,7 @@ import { UploadPage } from "./routes/upload";
 import { VulnerabilitiesPage } from "./routes/vulnerabilities";
 import { SettingsPage } from "./routes/settings";
 import { ApiKeysPage } from "./routes/api-keys";
+import { EmailTemplatesPage } from "./routes/email-templates";
 
 export type AppRoute =
   | "/dashboard"
@@ -20,6 +21,7 @@ export type AppRoute =
   | "/images/:id"
   | "/settings"
   | "/api-keys"
+  | "/email-templates"
   | "/not-found";
 
 export function resolveRoute(pathname: string): AppRoute {
@@ -66,6 +68,10 @@ export function resolveRoute(pathname: string): AppRoute {
 
   if (pathname === "/api-keys") {
     return "/api-keys";
+  }
+
+  if (pathname === "/email-templates") {
+    return "/email-templates";
   }
 
   return "/not-found";
@@ -118,6 +124,10 @@ export default function App() {
 
   if (route === "/api-keys") {
     return <ApiKeysPage />;
+  }
+
+  if (route === "/email-templates") {
+    return <EmailTemplatesPage />;
   }
 
   return (

@@ -65,6 +65,20 @@ const FULL_SCHEMA_SQL = `
     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
   );
 
+  CREATE TABLE IF NOT EXISTS email_templates (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    template_key TEXT NOT NULL UNIQUE,
+    name TEXT NOT NULL,
+    subject TEXT NOT NULL,
+    html_body TEXT NOT NULL,
+    text_body TEXT,
+    enabled INTEGER NOT NULL DEFAULT 1 CHECK(enabled IN (0, 1)),
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_email_templates_key ON email_templates(template_key);
+
   CREATE TABLE IF NOT EXISTS api_keys (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     label TEXT NOT NULL,
@@ -98,6 +112,48 @@ export function initDb(path = "trivy.db"): TrivyUiDb {
 export function initFullSchema(db: TrivyUiDb): void {
   db.exec("PRAGMA foreign_keys = ON;");
   db.exec(FULL_SCHEMA_SQL);
+  db.query(
+    `
+      INSERT INTO email_templates (template_key, name, subject, html_body, text_body, enabled)
+      VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+      ON CONFLICT(template_key) DO NOTHING
+    `
+  ).run(
+    "repo_vuln_alert",
+    "Repository Vulnerability Alert",
+    "[TrivyUI] {{critical_count}} Critical Vulnerabilities Found - {{repository}}",
+    `<div style="font-family: Inter, Arial, sans-serif; color: #0f172a; max-width: 720px; margin: 0 auto;">
+      <h2 style="margin-bottom: 8px;">TrivyUI Vulnerability Alert</h2>
+      <p style="margin-top: 0; color: #334155;">New scan result uploaded with severity above threshold.</p>
+
+      <table style="width: 100%; border-collapse: collapse; margin: 16px 0;">
+        <tr><td style="padding: 6px 0; color: #475569;">Repository</td><td><strong>{{repository}}</strong></td></tr>
+        <tr><td style="padding: 6px 0; color: #475569;">Image</td><td><strong>{{image}}</strong></td></tr>
+        <tr><td style="padding: 6px 0; color: #475569;">Parsed At</td><td>{{parsed_at}}</td></tr>
+      </table>
+
+      <h3 style="margin-bottom: 8px;">Severity Breakdown</h3>
+      <ul style="margin-top: 0;">
+        <li>CRITICAL: {{critical_count}}</li>
+        <li>HIGH: {{high_count}}</li>
+        <li>MEDIUM: {{medium_count}}</li>
+        <li>LOW: {{low_count}}</li>
+        <li>UNKNOWN: {{unknown_count}}</li>
+        <li><strong>Total: {{total_count}}</strong></li>
+      </ul>
+
+      <h3 style="margin-bottom: 8px;">Top Critical Vulnerabilities</h3>
+      <ul style="margin-top: 0;">{{critical_list_items}}</ul>
+
+      <p style="margin-top: 18px;">
+        <a href="{{dashboard_url}}" style="display: inline-block; padding: 10px 14px; background: #1d4ed8; color: white; text-decoration: none; border-radius: 6px;">
+          View Dashboard
+        </a>
+      </p>
+    </div>`,
+    "TrivyUI Vulnerability Alert\nRepository: {{repository}}\nImage: {{image}}\nParsed at: {{parsed_at}}\n\nCRITICAL: {{critical_count}}\nHIGH: {{high_count}}\nMEDIUM: {{medium_count}}\nLOW: {{low_count}}\nUNKNOWN: {{unknown_count}}\nTOTAL: {{total_count}}\n\nDashboard: {{dashboard_url}}",
+    1
+  );
 }
 
 export function getHealthMessage(db: TrivyUiDb): string {

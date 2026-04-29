@@ -12,11 +12,14 @@ interface AppShellProps {
     | "/images"
     | "/images/:id"
     | "/settings"
-    | "/api-keys";
+    | "/api-keys"
+    | "/email-templates";
   children: ReactNode;
 }
 
-function navigate(path: "/dashboard" | "/upload" | "/vulnerabilities" | "/repositories" | "/images" | "/settings" | "/api-keys") {
+function navigate(
+  path: "/dashboard" | "/upload" | "/vulnerabilities" | "/repositories" | "/images" | "/settings" | "/api-keys" | "/email-templates"
+) {
   if (window.location.pathname === path) {
     return;
   }
@@ -85,6 +88,13 @@ export function AppShell({ title, subtitle, activeRoute, children }: AppShellPro
               onClick={() => navigate("/api-keys")}
             >
               API Keys
+            </button>
+            <button
+              type="button"
+              className={`shell-nav__link ${activeRoute === "/email-templates" ? "shell-nav__link--active" : ""}`}
+              onClick={() => navigate("/email-templates")}
+            >
+              Email Templates
             </button>
           </nav>
         </header>
