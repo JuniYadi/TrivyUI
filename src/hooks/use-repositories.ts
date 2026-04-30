@@ -74,12 +74,9 @@ export async function fetchRepositories(
   return payload.data;
 }
 
-function syncUrl(query: RepositoryQueryParams) {
+function buildUrl(query: RepositoryQueryParams): string {
   const qs = toQueryString(query);
-  const nextUrl = `/repositories?${qs}`;
-  if (`${window.location.pathname}${window.location.search}` !== nextUrl) {
-    window.history.pushState({}, "", nextUrl);
-  }
+  return `/repositories?${qs}`;
 }
 
 export function useRepositories() {
@@ -108,6 +105,14 @@ export function useRepositories() {
   }, [load, query]);
 
   useEffect(() => {
+    const nextUrl = buildUrl(query);
+    const currentUrl = `${window.location.pathname}${window.location.search}`;
+    if (currentUrl !== nextUrl) {
+      window.history.pushState({}, "", nextUrl);
+    }
+  }, [query]);
+
+  useEffect(() => {
     const onPopState = () => {
       setQuery(parseRepositoryParams());
     };
@@ -117,11 +122,7 @@ export function useRepositories() {
   }, []);
 
   const setFilters = useCallback((updater: (prev: RepositoryQueryParams) => RepositoryQueryParams) => {
-    setQuery((prev) => {
-      const next = updater(prev);
-      syncUrl(next);
-      return next;
-    });
+    setQuery((prev) => updater(prev));
   }, []);
 
   const retry = useCallback(async () => {
