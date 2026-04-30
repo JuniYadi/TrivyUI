@@ -1,33 +1,18 @@
+import { useNavigate, useParams } from "@tanstack/react-router";
 import { AppShell } from "../components/app-shell";
 import { ErrorBanner } from "../components/error-banner";
 import { SeverityChart } from "../components/severity-chart";
 import { StatCard } from "../components/stat-card";
 import { useRepoDetail } from "../hooks/use-repo-detail";
-import { navigate } from "../lib/navigation";
 import type { RepositoryDetailResponse } from "../services/types";
 
-function parseRepositoryId(pathname: string): number | null {
-  const match = pathname.match(/^\/repositories\/(\d+)$/);
-  if (!match) {
+function parseRepositoryId(value: string | undefined): number | null {
+  if (!value) {
     return null;
   }
 
-  const value = Number.parseInt(match[1] || "", 10);
-  return Number.isFinite(value) ? value : null;
-}
-
-function parseRepositoryName(pathname: string): string | null {
-  const match = pathname.match(/^\/repositories\/by-name\/(.+)$/);
-  if (!match || !match[1]) {
-    return null;
-  }
-
-  try {
-    const decoded = decodeURIComponent(match[1]);
-    return decoded.length > 0 ? decoded : null;
-  } catch {
-    return null;
-  }
+  const id = Number.parseInt(value, 10);
+  return Number.isFinite(id) ? id : null;
 }
 
 function DetailSkeleton() {
@@ -58,6 +43,8 @@ const SEVERITY_STYLES: Record<string, string> = {
 };
 
 export function RepositoryDetailContent({ data, loading, error, retry }: RepositoryDetailContentProps) {
+  const navigate = useNavigate();
+
   return (
     <>
       {loading && (
@@ -73,7 +60,13 @@ export function RepositoryDetailContent({ data, loading, error, retry }: Reposit
         <section className="rounded-xl border border-slate-700 bg-slate-900/90 p-5">
           <h2 className="mb-2 text-base font-semibold">Repository not found</h2>
           <p className="mb-4 text-slate-400">This repository does not exist or may have been removed.</p>
-          <button type="button" className="rounded-lg border border-slate-700 bg-slate-950 px-4 py-2 text-sm font-semibold text-slate-300 transition hover:border-slate-500" onClick={() => navigate("/repositories")}>Back to Repositories</button>
+          <button
+            type="button"
+            className="rounded-lg border border-slate-700 bg-slate-950 px-4 py-2 text-sm font-semibold text-slate-300 transition hover:border-slate-500"
+            onClick={() => void navigate({ to: "/repositories" })}
+          >
+            Back to Repositories
+          </button>
         </section>
       )}
 
@@ -85,7 +78,13 @@ export function RepositoryDetailContent({ data, loading, error, retry }: Reposit
                 <p className="mt-0 text-xs font-semibold uppercase tracking-wide text-slate-400">Created at</p>
                 <p className="mb-0 text-sm">{new Date(data.created_at).toLocaleString()}</p>
               </div>
-              <button type="button" className="rounded-lg border border-slate-700 bg-slate-950 px-4 py-2 text-sm font-semibold text-slate-300 transition hover:border-slate-500" onClick={() => navigate("/repositories")}>Back to Repositories</button>
+              <button
+                type="button"
+                className="rounded-lg border border-slate-700 bg-slate-950 px-4 py-2 text-sm font-semibold text-slate-300 transition hover:border-slate-500"
+                onClick={() => void navigate({ to: "/repositories" })}
+              >
+                Back to Repositories
+              </button>
             </div>
           </section>
 
@@ -105,9 +104,13 @@ export function RepositoryDetailContent({ data, loading, error, retry }: Reposit
               <ul className="m-0 list-none space-y-2 p-0">
                 {data.images.map((image) => (
                   <li key={image.id} className="rounded-lg border border-slate-700/80 bg-slate-950/60 p-2">
-                    <button type="button" className="text-blue-400 hover:text-blue-300 hover:underline" onClick={() => navigate(`/images/${image.id}`)}>
+                    <button
+                      type="button"
+                      className="text-blue-400 hover:text-blue-300 hover:underline"
+                      onClick={() => void navigate({ to: "/images/$id", params: { id: String(image.id) } })}
+                    >
                       {image.name}
-                    </button>{" "}
+                    </button>
                     — {image.vulnerability_count} vulns ({image.critical_count} critical)
                   </li>
                 ))}
@@ -149,9 +152,8 @@ export function RepositoryDetailContent({ data, loading, error, retry }: Reposit
 }
 
 export function RepositoryDetailPage() {
-  const pathname = window.location.pathname;
-  const id = parseRepositoryId(pathname);
-  const repoName = parseRepositoryName(pathname);
+  const { id: rawId, repoName } = useParams({ strict: false }) as { id?: string; repoName?: string };
+  const id = parseRepositoryId(rawId);
   const identifier = id !== null ? { type: "id" as const, value: id } : repoName ? { type: "name" as const, value: repoName } : null;
   const { data, loading, error, retry } = useRepoDetail(identifier);
 
