@@ -1,5 +1,5 @@
 import type { Database } from "bun:sqlite";
-import { insertVulnerabilities, upsertImage, upsertRepository, upsertScanResult } from "../../services/db-service";
+import { insertScanPackages, insertVulnerabilities, upsertImage, upsertRepository, upsertScanResult } from "../../services/db-service";
 import { parseTrivyResult } from "../../services/trivy-parser";
 
 export const MAX_UPLOAD_BYTES = 10 * 1024 * 1024;
@@ -17,6 +17,9 @@ export interface UploadSummary {
   repository: string;
   image: string;
   vulnerability_count: number;
+  package_count: number;
+  vulnerable_package_count: number;
+  clean_package_count: number;
   severity_breakdown: Record<"CRITICAL" | "HIGH" | "MEDIUM" | "LOW" | "UNKNOWN", number>;
   parsed_at: string;
 }
@@ -75,7 +78,12 @@ export function importTrivyPayload(db: Database, parsedJson: unknown, rawJson: s
     const repositoryId = upsertRepository(db, parsed.repo_name);
     const imageId = upsertImage(db, repositoryId, parsed.image_name);
     const scanResultId = upsertScanResult(db, imageId, rawJson, parsed.source, parsed.scan_date);
+    insertScanPackages(db, scanResultId, parsed.packages);
     insertVulnerabilities(db, scanResultId, parsed.vulnerabilities);
+
+    const packageCount = countUniquePackages(parsed.packages);
+    const vulnerablePackageCount = countUniqueVulnerablePackages(parsed.vulnerabilities);
+    const cleanPackageCount = Math.max(0, packageCount - vulnerablePackageCount);
 
     const severity_breakdown: UploadSummary["severity_breakdown"] = {
       CRITICAL: 0,
@@ -94,6 +102,9 @@ export function importTrivyPayload(db: Database, parsedJson: unknown, rawJson: s
       repository: parsed.repo_name,
       image: parsed.image_name,
       vulnerability_count: parsed.vulnerabilities.length,
+      package_count: packageCount,
+      vulnerable_package_count: vulnerablePackageCount,
+      clean_package_count: cleanPackageCount,
       severity_breakdown,
       parsed_at: new Date().toISOString(),
     };
@@ -106,6 +117,29 @@ export function importTrivyPayload(db: Database, parsedJson: unknown, rawJson: s
   }
 
   return summary;
+}
+
+function countUniquePackages(
+  packages: Array<{ result_target: string | null; package_name: string; installed_version: string | null }>
+): number {
+  const unique = new Set<string>();
+  for (const item of packages) {
+    const target = item.result_target ?? "";
+    const version = item.installed_version ?? "";
+    unique.add(`${target}|${item.package_name}|${version}`);
+  }
+  return unique.size;
+}
+
+function countUniqueVulnerablePackages(
+  vulnerabilities: Array<{ package_name: string; installed_version: string | null }>
+): number {
+  const unique = new Set<string>();
+  for (const vuln of vulnerabilities) {
+    const version = vuln.installed_version ?? "";
+    unique.add(`${vuln.package_name}|${version}`);
+  }
+  return unique.size;
 }
 
 export function toApiError(error: unknown): ApiError {

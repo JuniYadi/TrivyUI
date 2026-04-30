@@ -89,6 +89,22 @@ export function buildSchemaStatements(dialect: DatabaseDriver["dialect"]): strin
     )
   `);
 
+  statements.push(`
+    CREATE TABLE IF NOT EXISTS scan_packages (
+      id ${idType(dialect)},
+      scan_result_id INTEGER NOT NULL REFERENCES scan_results(id) ON DELETE CASCADE,
+      result_class ${textColumn(dialect, 64)},
+      result_type ${textColumn(dialect, 64)},
+      result_target TEXT,
+      package_name ${textColumn(dialect, 255)} NOT NULL,
+      installed_version TEXT,
+      package_id ${textColumn(dialect, 255)},
+      src_name ${textColumn(dialect, 255)},
+      src_version TEXT,
+      created_at ${ts} DEFAULT CURRENT_TIMESTAMP
+    )
+  `);
+
   const createIndex = (name: string, column: string): string => {
     if (dialect === "mysql") {
       return `CREATE INDEX ${name} ON vulnerabilities(${column})`;
@@ -101,6 +117,20 @@ export function buildSchemaStatements(dialect: DatabaseDriver["dialect"]): strin
   statements.push(createIndex("idx_vulns_cve_id", "cve_id"));
   statements.push(createIndex("idx_vulns_severity", "severity"));
   statements.push(createIndex("idx_vulns_package", "package_name"));
+
+  if (dialect === "mysql") {
+    statements.push("CREATE INDEX idx_scan_packages_scan_result ON scan_packages(scan_result_id)");
+    statements.push("CREATE INDEX idx_scan_packages_name ON scan_packages(package_name)");
+    statements.push(
+      "CREATE UNIQUE INDEX idx_scan_packages_unique ON scan_packages(scan_result_id, result_target(255), package_name, installed_version(255))"
+    );
+  } else {
+    statements.push("CREATE INDEX IF NOT EXISTS idx_scan_packages_scan_result ON scan_packages(scan_result_id)");
+    statements.push("CREATE INDEX IF NOT EXISTS idx_scan_packages_name ON scan_packages(package_name)");
+    statements.push(
+      "CREATE UNIQUE INDEX IF NOT EXISTS idx_scan_packages_unique ON scan_packages(scan_result_id, result_target, package_name, installed_version)"
+    );
+  }
 
   statements.push(`
     CREATE TABLE IF NOT EXISTS _health_check (

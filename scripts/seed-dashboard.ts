@@ -30,6 +30,15 @@ type VulnerabilitySeed = {
   score: number;
 };
 
+type PackageSeed = {
+  scanId: number;
+  resultClass: string;
+  resultType: string;
+  resultTarget: string;
+  packageName: string;
+  installedVersion: string;
+};
+
 const DB_PATH = process.env.TRIVYUI_DB_PATH || "trivy.db";
 
 const REPOSITORIES: RepoSeed[] = [{ name: "ghcr.io/acme/api" }, { name: "ghcr.io/acme/worker" }];
@@ -81,18 +90,33 @@ const VULNERABILITIES: VulnerabilitySeed[] = [
   { scanId: 4, cveId: "CVE-2026-0304", severity: "LOW", packageName: "tar", installedVersion: "1.34", fixedVersion: "1.35", title: "tar symlink warning bypass", score: 3.0 },
 ];
 
+const SCAN_PACKAGES: PackageSeed[] = [
+  ...VULNERABILITIES.map((vuln) => ({
+    scanId: vuln.scanId,
+    resultClass: "os-pkgs",
+    resultType: "seed",
+    resultTarget: `scan-${vuln.scanId}`,
+    packageName: vuln.packageName,
+    installedVersion: vuln.installedVersion,
+  })),
+  { scanId: 1, resultClass: "os-pkgs", resultType: "seed", resultTarget: "scan-1", packageName: "jq", installedVersion: "1.7.1" },
+  { scanId: 2, resultClass: "os-pkgs", resultType: "seed", resultTarget: "scan-2", packageName: "wget", installedVersion: "1.24.5" },
+  { scanId: 3, resultClass: "lang-pkgs", resultType: "seed", resultTarget: "scan-3", packageName: "express", installedVersion: "4.19.2" },
+  { scanId: 4, resultClass: "os-pkgs", resultType: "seed", resultTarget: "scan-4", packageName: "coreutils", installedVersion: "9.6" },
+];
+
 const db = new Database(DB_PATH, { create: true });
 initFullSchema(db);
 
 db.exec("PRAGMA foreign_keys = ON;");
 
-const deleteTables = ["vulnerabilities", "scan_results", "images", "repositories"];
+const deleteTables = ["vulnerabilities", "scan_packages", "scan_results", "images", "repositories"];
 
 for (const table of deleteTables) {
   db.exec(`DELETE FROM ${table};`);
 }
 
-db.exec("DELETE FROM sqlite_sequence WHERE name IN ('repositories','images','scan_results','vulnerabilities');");
+db.exec("DELETE FROM sqlite_sequence WHERE name IN ('repositories','images','scan_results','vulnerabilities','scan_packages');");
 
 const insertRepository = db.prepare("INSERT INTO repositories (name) VALUES (?1)");
 const insertImage = db.prepare(
@@ -114,6 +138,19 @@ const insertVulnerability = db.prepare(
     score,
     created_at
   ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)`,
+);
+const insertPackage = db.prepare(
+  `INSERT INTO scan_packages (
+    scan_result_id,
+    result_class,
+    result_type,
+    result_target,
+    package_name,
+    installed_version,
+    package_id,
+    src_name,
+    src_version
+  ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)`,
 );
 
 for (const repo of REPOSITORIES) {
@@ -165,19 +202,35 @@ for (const vuln of VULNERABILITIES) {
   );
 }
 
+for (const pkg of SCAN_PACKAGES) {
+  insertPackage.run(
+    pkg.scanId,
+    pkg.resultClass,
+    pkg.resultType,
+    pkg.resultTarget,
+    pkg.packageName,
+    pkg.installedVersion,
+    `${pkg.packageName}-${pkg.installedVersion}`,
+    pkg.packageName,
+    pkg.installedVersion,
+  );
+}
+
 const summary = db
   .query(
     `SELECT
       (SELECT COUNT(*) FROM repositories) AS repositories,
       (SELECT COUNT(*) FROM images) AS images,
       (SELECT COUNT(*) FROM scan_results) AS scans,
-      (SELECT COUNT(*) FROM vulnerabilities) AS vulnerabilities`,
+      (SELECT COUNT(*) FROM vulnerabilities) AS vulnerabilities,
+      (SELECT COUNT(*) FROM scan_packages) AS packages`,
   )
   .get() as {
   repositories: number;
   images: number;
   scans: number;
   vulnerabilities: number;
+  packages: number;
 };
 
 console.log("Dashboard seed complete (local/dev preview only):");
@@ -186,5 +239,6 @@ console.log(`- repositories: ${summary.repositories}`);
 console.log(`- images: ${summary.images}`);
 console.log(`- scan_results: ${summary.scans}`);
 console.log(`- vulnerabilities: ${summary.vulnerabilities}`);
+console.log(`- packages: ${summary.packages}`);
 
 db.close();

@@ -13,6 +13,7 @@ type BatchSuccess = {
   filename: string;
   scan_result_id: number;
   vulnerability_count: number;
+  package_count: number;
   status: "success";
 };
 
@@ -54,6 +55,7 @@ export function createBatchUploadHandler(db: Database) {
             filename: file.name,
             scan_result_id: summary.scan_result_id,
             vulnerability_count: summary.vulnerability_count,
+            package_count: summary.package_count,
             status: "success",
           });
           successful += 1;

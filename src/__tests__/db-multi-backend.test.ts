@@ -5,6 +5,7 @@ import { createPostgresDriver } from "../db/drivers/postgres";
 import { createSqliteDriver } from "../db/drivers/sqlite";
 import { initSchema } from "../db/schema";
 import {
+  insertScanPackagesMultiDb,
   insertVulnerabilitiesMultiDb,
   upsertImageMultiDb,
   upsertRepositoryMultiDb,
@@ -67,6 +68,7 @@ async function canConnect(name: Exclude<BackendName, "sqlite">): Promise<boolean
 async function resetTables(db: DatabaseDriver): Promise<void> {
   const drops = [
     "DROP TABLE IF EXISTS vulnerabilities",
+    "DROP TABLE IF EXISTS scan_packages",
     "DROP TABLE IF EXISTS scan_results",
     "DROP TABLE IF EXISTS images",
     "DROP TABLE IF EXISTS repositories",
@@ -137,6 +139,7 @@ for (const backend of ["sqlite", "mysql", "postgres"] as const) {
         expect(tables).toContain("images");
         expect(tables).toContain("scan_results");
         expect(tables).toContain("vulnerabilities");
+        expect(tables).toContain("scan_packages");
         expect(tables).toContain("_health_check");
 
         const health = await db.queryOne<{ msg: string }>("SELECT msg FROM _health_check WHERE id = 1");
@@ -193,6 +196,25 @@ for (const backend of ["sqlite", "mysql", "postgres"] as const) {
           [scanResultId],
         );
         expect(Number(count?.count ?? 0)).toBe(2);
+
+        await insertScanPackagesMultiDb(db, scanResultId, [
+          {
+            result_class: "os-pkgs",
+            result_type: "alpine",
+            result_target: "ghcr.io/acme/example:latest (alpine)",
+            package_name: "openssl",
+            installed_version: "3.0.0",
+            package_id: null,
+            src_name: "openssl",
+            src_version: "3.0.0-r0",
+          },
+        ]);
+
+        const packageCount = await db.queryOne<{ count: number }>(
+          "SELECT COUNT(*) AS count FROM scan_packages WHERE scan_result_id = ?",
+          [scanResultId],
+        );
+        expect(Number(packageCount?.count ?? 0)).toBe(1);
 
         const invalidSeverity = await db.queryOne<{ severity: string }>(
           "SELECT severity FROM vulnerabilities WHERE cve_id = ?",

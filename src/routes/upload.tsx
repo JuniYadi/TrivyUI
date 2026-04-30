@@ -134,6 +134,7 @@ export function UploadPage() {
         data?: {
           scan_result_id?: number;
           vulnerability_count?: number;
+          package_count?: number;
           successful?: number;
           failed?: number;
         };
@@ -154,7 +155,7 @@ export function UploadPage() {
       } else {
         setFeedback({
           type: "success",
-          message: `Upload completed (scan_result_id: ${payload.data?.scan_result_id ?? "n/a"}, vulnerabilities: ${payload.data?.vulnerability_count ?? 0}).`,
+          message: `Upload completed (scan_result_id: ${payload.data?.scan_result_id ?? "n/a"}, vulnerabilities: ${payload.data?.vulnerability_count ?? 0}, packages: ${payload.data?.package_count ?? 0}).`,
         });
       }
 

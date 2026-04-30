@@ -1,4 +1,5 @@
 import type {
+  NormalizedPackage,
   NormalizedVulnerability,
   ParseResult,
   Severity,
@@ -51,21 +52,53 @@ export function parseTrivyResult(input: unknown): ParseResult {
   const { repoName, imageName } = splitArtifact(artifactName);
 
   const vulnerabilities: NormalizedVulnerability[] = [];
+  const packages: NormalizedPackage[] = [];
 
   for (const result of results) {
-    const packages = extractPackages(result);
-
-    for (const pkg of packages) {
-      const packageVulns = extractPackageVulnerabilities(result, pkg);
-      if (packageVulns.length === 0) {
-        continue;
+    const inventoryPackages = extractInventoryPackages(result);
+    for (const pkg of inventoryPackages) {
+      const normalizedPackage = normalizePackage(result, pkg);
+      if (normalizedPackage) {
+        packages.push(normalizedPackage);
       }
+    }
 
-      for (const vuln of packageVulns) {
-        const normalized = normalizeVulnerability(pkg, vuln);
-        if (normalized) {
-          vulnerabilities.push(normalized);
+    const resultPackages = extractPackages(result);
+    const hasPackageScopedVulns = resultPackages.some(
+      (pkg) => Array.isArray(pkg.Vulnerabilities) && pkg.Vulnerabilities.length > 0
+    );
+
+    if (hasPackageScopedVulns) {
+      for (const pkg of resultPackages) {
+        if (!Array.isArray(pkg.Vulnerabilities) || pkg.Vulnerabilities.length === 0) {
+          continue;
         }
+
+        for (const vuln of pkg.Vulnerabilities) {
+          if (!isObject(vuln)) {
+            continue;
+          }
+
+          const normalized = normalizeVulnerability(pkg, vuln);
+          if (normalized) {
+            vulnerabilities.push(normalized);
+          }
+        }
+      }
+      continue;
+    }
+
+    const resultLevelVulns = extractResultLevelVulnerabilities(result);
+    if (resultLevelVulns.length === 0) {
+      continue;
+    }
+
+    for (const vuln of resultLevelVulns) {
+      const packageName = normalizedText(vuln.PkgName);
+      const matchedPackage = packageName ? findPackageByName(resultPackages, packageName) : null;
+      const normalized = normalizeVulnerability(matchedPackage ?? {}, vuln);
+      if (normalized) {
+        vulnerabilities.push(normalized);
       }
     }
   }
@@ -77,6 +110,7 @@ export function parseTrivyResult(input: unknown): ParseResult {
     source: extractSource(payload),
     schema_version: detectSchemaVersion(payload),
     vulnerabilities,
+    packages,
   };
 }
 
@@ -98,21 +132,38 @@ function extractPackages(result: TrivyResult): TrivyPackage[] {
   return [{}];
 }
 
-function extractPackageVulnerabilities(
-  result: TrivyResult,
-  pkg: TrivyPackage
-): TrivyVulnerability[] {
-  const packageVulns = pkg.Vulnerabilities;
-  if (Array.isArray(packageVulns)) {
-    return packageVulns.filter((entry): entry is TrivyVulnerability => isObject(entry));
+function extractInventoryPackages(result: TrivyResult): TrivyPackage[] {
+  const packages = result.Packages;
+  if (!Array.isArray(packages)) {
+    return [];
   }
 
+  return packages.filter((entry): entry is TrivyPackage => isObject(entry));
+}
+
+function extractResultLevelVulnerabilities(result: TrivyResult): TrivyVulnerability[] {
   const resultVulns = result.Vulnerabilities ?? (result as Record<string, unknown>).vulnerabilities;
   if (Array.isArray(resultVulns)) {
     return resultVulns.filter((entry): entry is TrivyVulnerability => isObject(entry));
   }
 
   return [];
+}
+
+function findPackageByName(packages: TrivyPackage[], packageName: string): TrivyPackage | null {
+  const target = packageName.trim().toLowerCase();
+  if (target.length === 0) {
+    return null;
+  }
+
+  for (const pkg of packages) {
+    const name = (normalizedText(pkg.PkgName) ?? normalizedText(pkg.Name) ?? "").toLowerCase();
+    if (name === target) {
+      return pkg;
+    }
+  }
+
+  return null;
 }
 
 function normalizeVulnerability(
@@ -148,6 +199,26 @@ function normalizeVulnerability(
     title,
     description,
     score: extractScore(vuln),
+  };
+}
+
+function normalizePackage(result: TrivyResult, pkg: TrivyPackage): NormalizedPackage | null {
+  const packageName = normalizedText(pkg.Name) ?? normalizedText(pkg.PkgName);
+  if (!packageName) {
+    return null;
+  }
+
+  const packageRecord = pkg as Record<string, unknown>;
+
+  return {
+    result_class: normalizedText(result.Class) ?? null,
+    result_type: normalizedText(result.Type) ?? null,
+    result_target: normalizedText(result.Target) ?? null,
+    package_name: packageName,
+    installed_version: normalizedText(pkg.Version) ?? normalizedText(pkg.InstalledVersion) ?? null,
+    package_id: normalizedText(packageRecord.ID) ?? null,
+    src_name: normalizedText(packageRecord.SrcName) ?? null,
+    src_version: normalizedText(packageRecord.SrcVersion) ?? null,
   };
 }
 
