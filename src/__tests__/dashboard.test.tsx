@@ -8,6 +8,10 @@ import type { DashboardStats } from "../services/types";
 
 const SAMPLE_STATS: DashboardStats = {
   total_vulnerabilities: 12,
+  total_packages_scanned: 420,
+  total_vulnerable_packages: 18,
+  total_clean_packages: 402,
+  clean_package_rate: 95.71,
   total_repositories: 2,
   total_images: 3,
   by_severity: {
@@ -32,6 +36,9 @@ const SAMPLE_STATS: DashboardStats = {
       image: "ghcr.io/acme/api:latest",
       vulnerability_count: 8,
       critical_count: 2,
+      package_count: 210,
+      vulnerable_package_count: 9,
+      clean_package_count: 201,
       scanned_at: "2026-04-26T12:00:00.000Z",
     },
   ],
@@ -41,8 +48,8 @@ describe("dashboard overview ui", () => {
   test("renders dashboard success state with stats, chart section, top repositories, and recent scans", () => {
     const html = renderToStaticMarkup(<DashboardContent stats={SAMPLE_STATS} />);
 
-    expect(html).toContain("Total Vulnerabilities");
     expect(html).toContain("Severity Distribution");
+    expect(html).toContain("Package Coverage");
     expect(html).toContain("Top Vulnerable Repositories");
     expect(html).toContain("Recent Scans");
     expect(html).toContain("ghcr.io/acme/api:latest");
