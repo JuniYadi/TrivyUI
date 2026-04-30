@@ -26,9 +26,9 @@ export function Pagination({ page, totalPages, limit, totalItems, onPageChange, 
   const visiblePages = getVisiblePages(page, totalPages);
 
   return (
-    <section className="card pagination-bar" aria-label="Pagination">
-      <div className="pagination-actions">
-        <button type="button" className="secondary-button" onClick={() => onPageChange(page - 1)} disabled={page <= 1}>
+    <section className="mt-4 flex flex-wrap items-end justify-between gap-3 rounded-xl border border-slate-700 bg-slate-900/90 p-4" aria-label="Pagination">
+      <div className="flex flex-wrap gap-2">
+        <button type="button" className="rounded-lg border border-slate-700 bg-slate-950 px-3 py-1.5 text-sm font-semibold text-slate-300 transition hover:border-slate-500 disabled:cursor-not-allowed disabled:opacity-40" onClick={() => onPageChange(page - 1)} disabled={page <= 1}>
           Prev
         </button>
 
@@ -36,7 +36,7 @@ export function Pagination({ page, totalPages, limit, totalItems, onPageChange, 
           <button
             key={value}
             type="button"
-            className={`secondary-button ${value === page ? "pagination-active" : ""}`}
+            className={`rounded-lg border px-3 py-1.5 text-sm font-semibold transition ${value === page ? "border-blue-700 bg-blue-700 text-white" : "border-slate-700 bg-slate-950 text-slate-300 hover:border-slate-500"}`}
             onClick={() => onPageChange(value)}
           >
             {value}
@@ -45,7 +45,7 @@ export function Pagination({ page, totalPages, limit, totalItems, onPageChange, 
 
         <button
           type="button"
-          className="secondary-button"
+          className="rounded-lg border border-slate-700 bg-slate-950 px-3 py-1.5 text-sm font-semibold text-slate-300 transition hover:border-slate-500 disabled:cursor-not-allowed disabled:opacity-40"
           onClick={() => onPageChange(page + 1)}
           disabled={totalPages === 0 || page >= totalPages}
         >
@@ -53,9 +53,9 @@ export function Pagination({ page, totalPages, limit, totalItems, onPageChange, 
         </button>
       </div>
 
-      <label className="filter-control">
-        <span className="filter-label">Page size</span>
-        <select className="filter-select" value={limit} onChange={(event) => onLimitChange(Number(event.target.value))}>
+      <label className="flex items-center gap-2">
+        <span className="text-sm font-semibold text-slate-400">Page size</span>
+        <select className="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-1.5 text-sm text-slate-200 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/50" value={limit} onChange={(event) => onLimitChange(Number(event.target.value))}>
           <option value={25}>25</option>
           <option value={50}>50</option>
           <option value={100}>100</option>
