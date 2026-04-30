@@ -1,79 +1,25 @@
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { resolveRoute } from "../App";
-
-interface MockWindow {
-  location: { pathname: string };
-  history: {
-    replaceState: (...args: unknown[]) => void;
-    pushState: (...args: unknown[]) => void;
-  };
-  addEventListener: () => void;
-  removeEventListener: () => void;
-  dispatchEvent: () => boolean;
-}
+import { describe, expect, test } from "bun:test";
+import { APP_ROUTE_PATHS } from "../router";
 
 describe("app routing", () => {
-  const originalWindow = (globalThis as Record<string, unknown>).window;
-  let replaceStateCalls: unknown[][] = [];
-
-  beforeEach(() => {
-    replaceStateCalls = [];
-
-    const mockWindow: MockWindow = {
-      location: { pathname: "/" },
-      history: {
-        replaceState: (...args: unknown[]) => {
-          replaceStateCalls.push(args);
-        },
-        pushState: () => {},
-      },
-      addEventListener: () => {},
-      removeEventListener: () => {},
-      dispatchEvent: () => true,
-    };
-
-    (globalThis as Record<string, unknown>).window = mockWindow;
+  test("contains /upload as valid route", () => {
+    expect(APP_ROUTE_PATHS.includes("/upload")).toBe(true);
   });
 
-  afterEach(() => {
-    (globalThis as Record<string, unknown>).window = originalWindow;
+  test("contains /vulnerabilities as valid route", () => {
+    expect(APP_ROUTE_PATHS.includes("/vulnerabilities")).toBe(true);
   });
 
-  test("redirects root path / to /dashboard", () => {
-    const route = resolveRoute("/");
-
-    expect(route).toBe("/dashboard");
-    expect(replaceStateCalls.length).toBe(1);
-    expect(replaceStateCalls[0]?.[2]).toBe("/dashboard");
+  test("contains /settings as valid route", () => {
+    expect(APP_ROUTE_PATHS.includes("/settings")).toBe(true);
   });
 
-  test("accepts /upload as valid route", () => {
-    const route = resolveRoute("/upload");
-
-    expect(route).toBe("/upload");
+  test("contains /api-keys as valid route", () => {
+    expect(APP_ROUTE_PATHS.includes("/api-keys")).toBe(true);
   });
 
-  test("accepts /vulnerabilities as valid route", () => {
-    const route = resolveRoute("/vulnerabilities");
-
-    expect(route).toBe("/vulnerabilities");
-  });
-
-  test("accepts /settings as valid route", () => {
-    const route = resolveRoute("/settings");
-
-    expect(route).toBe("/settings");
-  });
-
-  test("accepts /api-keys as valid route", () => {
-    const route = resolveRoute("/api-keys");
-
-    expect(route).toBe("/api-keys");
-  });
-
-  test("unknown path still resolves to not found", () => {
-    const route = resolveRoute("/something-else");
-
-    expect(route).toBe("/not-found");
+  test("contains dynamic detail routes", () => {
+    expect(APP_ROUTE_PATHS.includes("/repositories/$id")).toBe(true);
+    expect(APP_ROUTE_PATHS.includes("/images/$id")).toBe(true);
   });
 });

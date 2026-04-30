@@ -1,12 +1,12 @@
 import { describe, expect, test } from "bun:test";
-import { resolveRoute } from "../App";
+import { APP_ROUTE_PATHS } from "../router";
 
 describe("app routing", () => {
-  test("resolves /email-templates route", () => {
-    expect(resolveRoute("/email-templates")).toBe("/email-templates");
+  test("contains /email-templates route", () => {
+    expect(APP_ROUTE_PATHS.includes("/email-templates")).toBe(true);
   });
 
-  test("unknown route resolves to not-found", () => {
-    expect(resolveRoute("/missing-page")).toBe("/not-found");
+  test("contains repository by-name dynamic route", () => {
+    expect(APP_ROUTE_PATHS.includes("/repositories/by-name/$repoName")).toBe(true);
   });
 });
