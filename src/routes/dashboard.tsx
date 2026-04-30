@@ -15,8 +15,8 @@ interface DashboardContentProps {
 
 export function DashboardContent({ stats }: DashboardContentProps) {
   return (
-    <section className="dashboard-content">
-      <section className="card-grid card-grid--stats">
+    <section className="grid gap-4">
+      <section className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
         <StatCard label="Total Vulnerabilities" value={stats.total_vulnerabilities} tone="neutral" />
         <StatCard label="Critical" value={stats.by_severity.CRITICAL} tone="critical" />
         <StatCard label="High" value={stats.by_severity.HIGH} tone="high" />
@@ -25,7 +25,7 @@ export function DashboardContent({ stats }: DashboardContentProps) {
         <StatCard label="Unknown" value={stats.by_severity.UNKNOWN} tone="unknown" />
       </section>
 
-      <section className="card-grid card-grid--split">
+      <section className="grid md:grid-cols-2 gap-4">
         <SeverityChart bySeverity={stats.by_severity} />
         <TopRepos repositories={stats.top_repositories} />
       </section>
