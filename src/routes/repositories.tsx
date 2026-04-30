@@ -1,10 +1,10 @@
 import { useCallback } from "react";
+import { useNavigate } from "@tanstack/react-router";
 import { AppShell } from "../components/app-shell";
 import { EmptyState } from "../components/empty-state";
 import { ErrorBanner } from "../components/error-banner";
 import { Pagination } from "../components/pagination";
 import { useRepositories } from "../hooks/use-repositories";
-import { navigate } from "../lib/navigation";
 import type { RepositorySortField } from "../services/types";
 
 function sortLabel(currentSort: RepositorySortField, currentOrder: "asc" | "desc", sort: RepositorySortField): string {
@@ -25,6 +25,7 @@ function RepositorySkeleton() {
 
 export function RepositoriesPage() {
   const { query, data, loading, error, retry, setFilters } = useRepositories();
+  const navigate = useNavigate();
 
   const onSortChange = useCallback(
     (sort: RepositorySortField) => {
@@ -83,7 +84,7 @@ export function RepositoriesPage() {
                   <tr
                     key={item.id}
                     className="cursor-pointer border-b border-slate-800 last:border-0 hover:bg-slate-800/50"
-                    onClick={() => navigate(`/repositories/by-name/${encodeURIComponent(item.name)}`)}
+                    onClick={() => navigate({ to: "/repositories/by-name/$repoName", params: { repoName: item.name } })}
                   >
                     <td className="py-3 pr-4">{item.name}</td>
                     <td className="py-3 pr-4">{item.vulnerability_count}</td>

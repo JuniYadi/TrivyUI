@@ -1,10 +1,10 @@
 import { useCallback } from "react";
+import { useNavigate } from "@tanstack/react-router";
 import { AppShell } from "../components/app-shell";
 import { EmptyState } from "../components/empty-state";
 import { ErrorBanner } from "../components/error-banner";
 import { Pagination } from "../components/pagination";
 import { useImages } from "../hooks/use-images";
-import { navigate } from "../lib/navigation";
 import type { ImageSortField } from "../services/types";
 
 function sortLabel(currentSort: ImageSortField, currentOrder: "asc" | "desc", sort: ImageSortField): string {
@@ -25,6 +25,7 @@ function ImagesSkeleton() {
 
 export function ImagesPage() {
   const { query, data, loading, error, retry, setFilters } = useImages();
+  const navigate = useNavigate();
 
   const onSortChange = useCallback(
     (sort: ImageSortField) => {
@@ -81,7 +82,7 @@ export function ImagesPage() {
               </thead>
               <tbody>
                 {data.items.map((item) => (
-                  <tr key={item.id} className="cursor-pointer border-b border-slate-800 last:border-0 hover:bg-slate-800/50" onClick={() => navigate(`/images/${item.id}`)}>
+                  <tr key={item.id} className="cursor-pointer border-b border-slate-800 last:border-0 hover:bg-slate-800/50" onClick={() => navigate({ to: "/images/$id", params: { id: item.id } })}>
                     <td className="py-3 pr-4">{item.name}</td>
                     <td className="py-3 pr-4">{item.repository.name}</td>
                     <td className="py-3 pr-4">{item.vulnerability_count}</td>
