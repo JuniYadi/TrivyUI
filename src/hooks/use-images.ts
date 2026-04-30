@@ -71,12 +71,9 @@ export async function fetchImages(query: ImageQueryParams, fetcher: typeof fetch
   return payload.data;
 }
 
-function syncUrl(query: ImageQueryParams) {
+function buildUrl(query: ImageQueryParams): string {
   const qs = toQueryString(query);
-  const nextUrl = `/images?${qs}`;
-  if (`${window.location.pathname}${window.location.search}` !== nextUrl) {
-    window.history.pushState({}, "", nextUrl);
-  }
+  return `/images?${qs}`;
 }
 
 export function useImages() {
@@ -105,6 +102,14 @@ export function useImages() {
   }, [load, query]);
 
   useEffect(() => {
+    const nextUrl = buildUrl(query);
+    const currentUrl = `${window.location.pathname}${window.location.search}`;
+    if (currentUrl !== nextUrl) {
+      window.history.pushState({}, "", nextUrl);
+    }
+  }, [query]);
+
+  useEffect(() => {
     const onPopState = () => {
       setQuery(parseImageParams());
     };
@@ -114,11 +119,7 @@ export function useImages() {
   }, []);
 
   const setFilters = useCallback((updater: (prev: ImageQueryParams) => ImageQueryParams) => {
-    setQuery((prev) => {
-      const next = updater(prev);
-      syncUrl(next);
-      return next;
-    });
+    setQuery((prev) => updater(prev));
   }, []);
 
   const retry = useCallback(async () => {

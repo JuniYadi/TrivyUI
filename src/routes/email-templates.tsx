@@ -158,26 +158,26 @@ export function EmailTemplatesPage() {
   }
 
   return (
-    <AppShell
-      activeRoute="/email-templates"
-      title="Email Templates"
-      subtitle="Edit global templates used for vulnerability notifications."
-    >
-      <section className="card upload-layout">
-        <h2 className="card-title">Templates</h2>
-        <p className="muted mt-0">Templates are database-backed and applied immediately to new notification sends.</p>
+      <AppShell
+       activeRoute="/email-templates"
+       title="Email Templates"
+       subtitle="Edit global templates used for vulnerability notifications."
+     >
+      <section className="rounded-xl border border-slate-700 bg-slate-900/90 p-5 shadow-inner grid gap-4">
+        <h2 className="mb-0 text-base font-semibold">Templates</h2>
+        <p className="mt-0 text-sm text-slate-400">Templates are database-backed and applied immediately to new notification sends.</p>
 
-        {loading && <div className="muted">Loading templates...</div>}
+        {loading && <div className="text-slate-400">Loading templates...</div>}
 
-        {!loading && templates.length === 0 && <div className="upload-feedback">No templates found.</div>}
+        {!loading && templates.length === 0 && <div className="rounded-lg border border-slate-700 px-3 py-2 text-sm">No templates found.</div>}
 
         {!loading && templates.length > 0 && (
           <>
-            <label className="filter-control" htmlFor="email-template-select">
-              <span className="filter-label">Template</span>
+            <label className="grid gap-1" htmlFor="email-template-select">
+              <span className="text-xs font-semibold uppercase tracking-wide text-slate-400">Template</span>
               <select
                 id="email-template-select"
-                className="filter-select"
+                className="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-slate-200 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/50 disabled:opacity-50"
                 value={selectedKey}
                 disabled={status === "saving"}
                 onChange={(event) => onSelectTemplate(event.target.value)}
@@ -190,33 +190,34 @@ export function EmailTemplatesPage() {
               </select>
             </label>
 
-            <label className="filter-control checkbox-control" htmlFor="email-template-enabled">
-              <span className="filter-label">Enabled</span>
+            <label className="flex items-center gap-3 cursor-pointer" htmlFor="email-template-enabled">
               <input
                 id="email-template-enabled"
                 type="checkbox"
+                className="h-4 w-4 rounded border-slate-600 bg-slate-950 accent-blue-600"
                 checked={enabled}
                 disabled={status === "saving"}
                 onChange={(event) => setEnabled(event.target.checked)}
               />
+              <span className="text-sm font-semibold text-slate-300">Enabled</span>
             </label>
 
-            <label className="filter-control" htmlFor="email-template-subject">
-              <span className="filter-label">Subject</span>
+            <label className="grid gap-1" htmlFor="email-template-subject">
+              <span className="text-xs font-semibold uppercase tracking-wide text-slate-400">Subject</span>
               <input
                 id="email-template-subject"
-                className="filter-input"
+                className="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-slate-200 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/50 disabled:opacity-50"
                 value={subject}
                 disabled={status === "saving"}
                 onChange={(event) => setSubject(event.target.value)}
               />
             </label>
 
-            <label className="filter-control" htmlFor="email-template-html">
-              <span className="filter-label">HTML body</span>
+            <label className="grid gap-1" htmlFor="email-template-html">
+              <span className="text-xs font-semibold uppercase tracking-wide text-slate-400">HTML body</span>
               <textarea
                 id="email-template-html"
-                className="upload-textarea"
+                className="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-slate-200 font-mono focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/50 disabled:opacity-50"
                 rows={12}
                 value={htmlBody}
                 disabled={status === "saving"}
@@ -224,11 +225,11 @@ export function EmailTemplatesPage() {
               />
             </label>
 
-            <label className="filter-control" htmlFor="email-template-text">
-              <span className="filter-label">Text body (optional)</span>
+            <label className="grid gap-1" htmlFor="email-template-text">
+              <span className="text-xs font-semibold uppercase tracking-wide text-slate-400">Text body (optional)</span>
               <textarea
                 id="email-template-text"
-                className="upload-textarea"
+                className="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-slate-200 font-mono focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/50 disabled:opacity-50"
                 rows={8}
                 value={textBody}
                 disabled={status === "saving"}
@@ -236,16 +237,16 @@ export function EmailTemplatesPage() {
               />
             </label>
 
-            <div className="upload-actions">
+            <div className="flex flex-wrap gap-2">
               <button
                 type="button"
-                className="primary-button"
+                className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-blue-700 disabled:opacity-40"
                 onClick={onSave}
                 disabled={status === "saving" || !isDirty || !selected}
               >
                 {status === "saving" ? "Saving..." : "Save Template"}
               </button>
-              <button type="button" className="secondary-button" onClick={onCancel} disabled={status === "saving" || !isDirty}>
+              <button type="button" className="rounded-lg border border-slate-700 bg-slate-950 px-4 py-2 text-sm font-semibold text-slate-300 transition hover:border-slate-500 disabled:opacity-40" onClick={onCancel} disabled={status === "saving" || !isDirty}>
                 Cancel
               </button>
             </div>
@@ -253,7 +254,9 @@ export function EmailTemplatesPage() {
         )}
 
         {message && (
-          <div className={`upload-feedback ${status === "error" ? "upload-feedback--error" : "upload-feedback--success"}`}>{message}</div>
+          <div className={`rounded-lg border px-3 py-2 text-sm font-semibold ${status === "error" ? "border-red-900 bg-red-950/40 text-red-200" : "border-green-800 bg-green-950/30 text-green-200"}`}>
+            {message}
+          </div>
         )}
       </section>
     </AppShell>

@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import { Link } from "@tanstack/react-router";
 
 interface AppShellProps {
   title: string;
@@ -17,17 +18,6 @@ interface AppShellProps {
   children: ReactNode;
 }
 
-function navigate(
-  path: "/dashboard" | "/upload" | "/vulnerabilities" | "/repositories" | "/images" | "/settings" | "/api-keys" | "/email-templates"
-) {
-  if (window.location.pathname === path) {
-    return;
-  }
-
-  window.history.pushState({}, "", path);
-  window.dispatchEvent(new PopStateEvent("popstate"));
-}
-
 export function AppShell({ title, subtitle, activeRoute, children }: AppShellProps) {
   return (
     <main className="page-shell" role="main">
@@ -35,71 +25,63 @@ export function AppShell({ title, subtitle, activeRoute, children }: AppShellPro
         <header className="shell-header">
           <div className="shell-brand">
             <span className="shell-brand__badge">TrivyUI</span>
-            <h1 className="page-title">{title}</h1>
-            <p className="page-subtitle">{subtitle}</p>
+            <h1 className="page-title text-3xl font-bold leading-tight">{title}</h1>
+            <p className="page-subtitle mt-2 text-sm text-slate-400">{subtitle}</p>
           </div>
 
           <nav className="shell-nav" aria-label="Primary">
-            <button
-              type="button"
+            <Link
+              to="/dashboard"
               className={`shell-nav__link ${activeRoute === "/dashboard" ? "shell-nav__link--active" : ""}`}
-              onClick={() => navigate("/dashboard")}
             >
               Dashboard
-            </button>
-            <button
-              type="button"
+            </Link>
+            <Link
+              to="/vulnerabilities"
               className={`shell-nav__link ${activeRoute === "/vulnerabilities" ? "shell-nav__link--active" : ""}`}
-              onClick={() => navigate("/vulnerabilities")}
             >
               Vulns
-            </button>
-            <button
-              type="button"
+            </Link>
+            <Link
+              to="/repositories"
               className={`shell-nav__link ${activeRoute.startsWith("/repositories") ? "shell-nav__link--active" : ""}`}
-              onClick={() => navigate("/repositories")}
             >
               Repos
-            </button>
-            <button
-              type="button"
+            </Link>
+            <Link
+              to="/images"
               className={`shell-nav__link ${activeRoute.startsWith("/images") ? "shell-nav__link--active" : ""}`}
-              onClick={() => navigate("/images")}
             >
               Images
-            </button>
-            <button
-              type="button"
+            </Link>
+            <Link
+              to="/upload"
               className={`shell-nav__link ${activeRoute === "/upload" ? "shell-nav__link--active" : ""}`}
-              onClick={() => navigate("/upload")}
             >
               Upload
-            </button>
-            <button
-              type="button"
+            </Link>
+            <Link
+              to="/settings"
               className={`shell-nav__link ${activeRoute === "/settings" ? "shell-nav__link--active" : ""}`}
-              onClick={() => navigate("/settings")}
             >
               Settings
-            </button>
-            <button
-              type="button"
+            </Link>
+            <Link
+              to="/api-keys"
               className={`shell-nav__link ${activeRoute === "/api-keys" ? "shell-nav__link--active" : ""}`}
-              onClick={() => navigate("/api-keys")}
             >
               API Keys
-            </button>
-            <button
-              type="button"
+            </Link>
+            <Link
+              to="/email-templates"
               className={`shell-nav__link ${activeRoute === "/email-templates" ? "shell-nav__link--active" : ""}`}
-              onClick={() => navigate("/email-templates")}
             >
               Email Templates
-            </button>
+            </Link>
           </nav>
         </header>
 
-        {children}
+        <section className="w-full">{children}</section>
       </div>
     </main>
   );

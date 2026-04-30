@@ -142,12 +142,9 @@ export async function fetchVulnerabilityDetail(id: number, fetcher: typeof fetch
   return payload.data;
 }
 
-function syncUrl(query: VulnerabilityQueryParams) {
+function buildUrl(query: VulnerabilityQueryParams): string {
   const qs = toQueryString(query);
-  const nextUrl = `/vulnerabilities?${qs}`;
-  if (`${window.location.pathname}${window.location.search}` !== nextUrl) {
-    window.history.pushState({}, "", nextUrl);
-  }
+  return `/vulnerabilities?${qs}`;
 }
 
 export function useVulnerabilities() {
@@ -176,6 +173,14 @@ export function useVulnerabilities() {
   }, [load, query]);
 
   useEffect(() => {
+    const nextUrl = buildUrl(query);
+    const currentUrl = `${window.location.pathname}${window.location.search}`;
+    if (currentUrl !== nextUrl) {
+      window.history.pushState({}, "", nextUrl);
+    }
+  }, [query]);
+
+  useEffect(() => {
     const onPopState = () => {
       setQuery(parseVulnerabilityParams());
     };
@@ -185,11 +190,7 @@ export function useVulnerabilities() {
   }, []);
 
   const setFilters = useCallback((updater: (prev: VulnerabilityQueryParams) => VulnerabilityQueryParams) => {
-    setQuery((prev) => {
-      const next = updater(prev);
-      syncUrl(next);
-      return next;
-    });
+    setQuery((prev) => updater(prev));
   }, []);
 
   const retry = useCallback(async () => {

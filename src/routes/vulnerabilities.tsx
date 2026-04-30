@@ -11,9 +11,9 @@ import type { VulnerabilityDetailResponse, VulnerabilitySortField } from "../ser
 
 function VulnerabilitySkeleton() {
   return (
-    <section className="skeleton-stack">
-      <div className="skeleton-block" />
-      <div className="skeleton-block skeleton-block--tall" />
+    <section className="grid gap-4">
+      <div className="h-16 rounded-xl border border-slate-700 bg-gradient-to-r from-slate-900 via-slate-800 to-slate-900 bg-[length:200%_100%] animate-pulse" />
+      <div className="h-64 rounded-xl border border-slate-700 bg-gradient-to-r from-slate-900 via-slate-800 to-slate-900 bg-[length:200%_100%] animate-pulse" />
     </section>
   );
 }
@@ -87,9 +87,9 @@ export function VulnerabilitiesPage() {
       {!loading && !error && noScans && <EmptyState />}
 
       {!loading && !error && noData && !noScans && (
-        <section className="empty-state">
-          <h2>No vulnerabilities found</h2>
-          <p className="muted mb-0">No vulnerabilities found matching your filters.</p>
+        <section className="rounded-xl border border-dashed border-slate-600 p-8 text-center">
+          <h2 className="mt-0 text-xl font-semibold">No vulnerabilities found</h2>
+          <p className="mb-0 text-slate-400">No vulnerabilities found matching your filters.</p>
         </section>
       )}
 
