@@ -1,6 +1,7 @@
 import { useMemo, useRef, useState } from "react";
 import type { DragEvent } from "react";
 import { AppShell } from "../components/app-shell";
+import { navigate } from "../lib/navigation";
 
 type UploadMode = "single" | "batch";
 type FeedbackType = "success" | "error";
@@ -9,11 +10,6 @@ type UploadFeedback = {
   type: FeedbackType;
   message: string;
 };
-
-function navigate(path: string) {
-  window.history.pushState({}, "", path);
-  window.dispatchEvent(new PopStateEvent("popstate"));
-}
 
 function formatFileSize(size: number): string {
   if (size < 1024) {
@@ -175,20 +171,20 @@ export function UploadPage() {
   }
 
   return (
-    <AppShell
-      activeRoute="/upload"
-      title="Upload Trivy Scan"
-      subtitle="Upload one or multiple Trivy JSON reports with progress tracking and API feedback."
-    >
-      <div className="upload-layout">
-        <section className="card upload-card">
-          <h2 className="card-title">Upload reports</h2>
-          <p className="muted mt-0">Drag-and-drop JSON files or use file picker. One file uses /api/upload, multiple files use /api/upload/batch.</p>
+      <AppShell
+       activeRoute="/upload"
+       title="Upload Trivy Scan"
+       subtitle="Upload one or multiple Trivy JSON reports with progress tracking and API feedback."
+     >
+      <div className="grid gap-4">
+        <section className="rounded-xl border border-slate-700 bg-slate-900/90 p-4 shadow-inner grid gap-4">
+          <h2 className="mb-0 text-base font-semibold">Upload reports</h2>
+          <p className="mt-0 text-sm text-slate-400">Drag-and-drop JSON files or use file picker. One file uses /api/upload, multiple files use /api/upload/batch.</p>
 
           <div
             role="button"
             tabIndex={0}
-            className={`upload-dropzone ${isDragging ? "upload-dropzone--active" : ""}`}
+            className={`rounded-xl border border-dashed border-blue-500 bg-slate-950/60 p-5 text-center cursor-pointer grid gap-1 ${isDragging ? "border-blue-300 bg-blue-950/20" : ""}`}
             onDragOver={(event) => {
               event.preventDefault();
               setIsDragging(true);
@@ -204,10 +200,10 @@ export function UploadPage() {
             }}
           >
             <strong>Drop Trivy JSON files here</strong>
-            <span className="muted">or click to choose file(s)</span>
+            <span className="text-sm text-slate-400">or click to choose file(s)</span>
             <input
               ref={inputRef}
-              className="upload-hidden-input"
+              className="hidden"
               type="file"
               accept="application/json,.json"
               multiple
@@ -215,44 +211,48 @@ export function UploadPage() {
             />
           </div>
 
-          <div className="upload-actions">
-            <button type="button" className="secondary-button" onClick={() => inputRef.current?.click()} disabled={isUploading}>
+          <div className="flex flex-wrap gap-2">
+            <button type="button" className="rounded-lg border border-slate-700 bg-slate-950 px-4 py-2 text-sm font-semibold text-slate-300 transition hover:border-slate-500 disabled:opacity-40" onClick={() => inputRef.current?.click()} disabled={isUploading}>
               Choose Files
             </button>
-            <button type="button" className="primary-button" onClick={onUpload} disabled={files.length === 0 || isUploading}>
+            <button type="button" className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-blue-700 disabled:opacity-40" onClick={onUpload} disabled={files.length === 0 || isUploading}>
               {isUploading ? "Uploading..." : mode === "batch" ? "Upload Batch" : "Upload File"}
             </button>
-            <button type="button" className="secondary-button" onClick={() => navigate("/dashboard")}>Back to Dashboard</button>
+            <button type="button" className="rounded-lg border border-slate-700 bg-slate-950 px-4 py-2 text-sm font-semibold text-slate-300 transition hover:border-slate-500" onClick={() => navigate("/dashboard")}>Back to Dashboard</button>
           </div>
 
-          <div className="upload-meta muted">
+          <div className="text-sm text-slate-400">
             {fileSummary.count > 0
               ? `${fileSummary.count} file(s) selected • ${formatFileSize(fileSummary.totalBytes)} • mode: ${mode}`
               : "No file selected."}
           </div>
 
           {files.length > 0 && (
-            <ul className="upload-file-list">
+            <ul className="m-0 list-none space-y-1 p-0 pl-4">
               {files.map((file) => (
-                <li key={`${file.name}-${file.size}`}>{file.name} ({formatFileSize(file.size)})</li>
+                <li key={`${file.name}-${file.size}`} className="text-sm">{file.name} ({formatFileSize(file.size)})</li>
               ))}
             </ul>
           )}
 
-          <div className="upload-progress-wrap" aria-live="polite">
-            <div className="upload-progress-bar" style={{ width: `${progress}%` }} />
+          <div className="h-2.5 w-full overflow-hidden rounded-full border border-slate-700 bg-slate-900" aria-live="polite">
+            <div className="h-full rounded-full bg-gradient-to-r from-blue-500 to-cyan-400 transition-all duration-200" style={{ width: `${progress}%` }} />
           </div>
-          <p className="muted mt-0 mb-0">Progress: {progress}%</p>
+          <p className="m-0 text-sm text-slate-400">Progress: {progress}%</p>
 
-          {feedback && <div className={`upload-feedback upload-feedback--${feedback.type}`}>{feedback.message}</div>}
+          {feedback && (
+            <div className={`rounded-lg border px-3 py-2 text-sm font-semibold ${feedback.type === "success" ? "border-green-800 bg-green-950/30 text-green-200" : "border-red-900 bg-red-950/40 text-red-200"}`}>
+              {feedback.message}
+            </div>
+          )}
         </section>
 
-        <section className="card">
-          <h2 className="card-title">Local sample data (dev only)</h2>
-          <p className="muted mt-0">
+        <section className="rounded-xl border border-slate-700 bg-slate-900/90 p-4 shadow-inner">
+          <h2 className="mb-2 text-base font-semibold">Local sample data (dev only)</h2>
+          <p className="mt-0 text-sm text-slate-400">
             Need non-empty dashboard quickly? Seed local SQLite data for preview. This command is for local development only and does not affect API contract.
           </p>
-          <code className="code-block">PATH="$HOME/.bun/bin:$PATH" bun run db:seed-dashboard</code>
+          <code className="mt-2 block rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-cyan-300 overflow-x-auto">PATH="$HOME/.bun/bin:$PATH" bun run db:seed-dashboard</code>
         </section>
       </div>
     </AppShell>
