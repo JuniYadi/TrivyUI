@@ -21,11 +21,18 @@ export interface DashboardRecentScan {
   image: string;
   vulnerability_count: number;
   critical_count: number;
+  package_count: number;
+  vulnerable_package_count: number;
+  clean_package_count: number;
   scanned_at: string;
 }
 
 export interface DashboardStats {
   total_vulnerabilities: number;
+  total_packages_scanned: number;
+  total_vulnerable_packages: number;
+  total_clean_packages: number;
+  clean_package_rate: number;
   total_repositories: number;
   total_images: number;
   by_severity: SeverityBreakdown;
@@ -86,6 +93,17 @@ export interface NormalizedVulnerability {
   score: number | null;
 }
 
+export interface NormalizedPackage {
+  result_class: string | null;
+  result_type: string | null;
+  result_target: string | null;
+  package_name: string;
+  installed_version: string | null;
+  package_id: string | null;
+  src_name: string | null;
+  src_version: string | null;
+}
+
 export interface ParseResult {
   repo_name: string;
   image_name: string;
@@ -93,6 +111,7 @@ export interface ParseResult {
   source: string;
   schema_version: string;
   vulnerabilities: NormalizedVulnerability[];
+  packages: NormalizedPackage[];
 }
 
 export interface Repository {
@@ -230,4 +249,3 @@ export interface ImageDetailResponse {
   by_severity: SeverityBreakdown;
   vulnerabilities: VulnerabilityWithRelations[];
 }
-

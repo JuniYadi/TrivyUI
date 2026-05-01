@@ -1,5 +1,5 @@
 import type { DatabaseDriver } from "../db/driver";
-import type { NormalizedVulnerability, Severity } from "./types";
+import type { NormalizedPackage, NormalizedVulnerability, Severity } from "./types";
 
 const ALLOWED_SEVERITIES: Severity[] = ["CRITICAL", "HIGH", "MEDIUM", "LOW", "UNKNOWN"];
 
@@ -132,6 +132,45 @@ export async function insertVulnerabilitiesMultiDb(
   });
 }
 
+export async function insertScanPackagesMultiDb(
+  db: DatabaseDriver,
+  scanResultId: number,
+  packages: NormalizedPackage[],
+): Promise<void> {
+  if (packages.length === 0) {
+    return;
+  }
+
+  for (const item of packages) {
+    await insertIgnore(
+      db,
+      "scan_packages",
+      [
+        "scan_result_id",
+        "result_class",
+        "result_type",
+        "result_target",
+        "package_name",
+        "installed_version",
+        "package_id",
+        "src_name",
+        "src_version",
+      ],
+      [
+        scanResultId,
+        normalizeOptionalText(item.result_class),
+        normalizeOptionalText(item.result_type),
+        normalizeOptionalText(item.result_target),
+        normalizeName(item.package_name, "unknown-package"),
+        normalizeOptionalText(item.installed_version),
+        normalizeOptionalText(item.package_id),
+        normalizeOptionalText(item.src_name),
+        normalizeOptionalText(item.src_version),
+      ],
+    );
+  }
+}
+
 function normalizeSeverity(value: string): Severity {
   const normalized = value.toUpperCase() as Severity;
   return ALLOWED_SEVERITIES.includes(normalized) ? normalized : "UNKNOWN";
@@ -144,6 +183,15 @@ function normalizeName(name: string, fallback: string): string {
 
 function normalizeOptionalDate(value?: string): string | null {
   if (!value) {
+    return null;
+  }
+
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : null;
+}
+
+function normalizeOptionalText(value?: string | null): string | null {
+  if (typeof value !== "string") {
     return null;
   }
 

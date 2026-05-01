@@ -82,7 +82,11 @@ export function ImagesPage() {
               </thead>
               <tbody>
                 {data.items.map((item) => (
-                  <tr key={item.id} className="cursor-pointer border-b border-slate-800 last:border-0 hover:bg-slate-800/50" onClick={() => navigate({ to: "/images/$id", params: { id: item.id } })}>
+                  <tr
+                    key={item.id}
+                    className="cursor-pointer border-b border-slate-800 last:border-0 hover:bg-slate-800/50"
+                    onClick={() => void navigate({ to: "/images/$id", params: { id: String(item.id) } })}
+                  >
                     <td className="py-3 pr-4">{item.name}</td>
                     <td className="py-3 pr-4">{item.repository.name}</td>
                     <td className="py-3 pr-4">{item.vulnerability_count}</td>

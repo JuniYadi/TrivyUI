@@ -44,6 +44,25 @@ const FULL_SCHEMA_SQL = `
   CREATE INDEX IF NOT EXISTS idx_vulns_severity ON vulnerabilities(severity);
   CREATE INDEX IF NOT EXISTS idx_vulns_package ON vulnerabilities(package_name);
 
+  CREATE TABLE IF NOT EXISTS scan_packages (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    scan_result_id INTEGER NOT NULL REFERENCES scan_results(id) ON DELETE CASCADE,
+    result_class TEXT,
+    result_type TEXT,
+    result_target TEXT,
+    package_name TEXT NOT NULL,
+    installed_version TEXT,
+    package_id TEXT,
+    src_name TEXT,
+    src_version TEXT,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_scan_packages_scan_result ON scan_packages(scan_result_id);
+  CREATE INDEX IF NOT EXISTS idx_scan_packages_name ON scan_packages(package_name);
+  CREATE UNIQUE INDEX IF NOT EXISTS idx_scan_packages_unique
+    ON scan_packages(scan_result_id, result_target, package_name, installed_version);
+
   CREATE TABLE IF NOT EXISTS notifications (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     scan_result_id INTEGER NOT NULL REFERENCES scan_results(id) ON DELETE CASCADE,

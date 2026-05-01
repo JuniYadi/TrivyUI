@@ -34,7 +34,11 @@ export async function fetchDashboardStats(fetcher: typeof fetch = fetch): Promis
 }
 
 export function isDashboardEmpty(stats: DashboardStats): boolean {
-  return stats.total_vulnerabilities === 0;
+  return (
+    stats.total_vulnerabilities === 0 &&
+    stats.total_packages_scanned === 0 &&
+    stats.recent_scans.length === 0
+  );
 }
 
 export function useStats() {

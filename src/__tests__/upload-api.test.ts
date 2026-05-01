@@ -124,6 +124,9 @@ describe("upload/import API endpoints", () => {
         repository: string;
         image: string;
         vulnerability_count: number;
+        package_count: number;
+        vulnerable_package_count: number;
+        clean_package_count: number;
       };
     };
 
@@ -133,6 +136,9 @@ describe("upload/import API endpoints", () => {
     expect(body.data.repository).toBe("ghcr.io/acme/trivyui");
     expect(body.data.image).toBe("ghcr.io/acme/trivyui:1.2.3");
     expect(body.data.vulnerability_count).toBe(1);
+    expect(body.data.package_count).toBe(1);
+    expect(body.data.vulnerable_package_count).toBe(1);
+    expect(body.data.clean_package_count).toBe(0);
   });
 
   test("POST /api/upload stays successful when notification sending fails", async () => {

@@ -1,5 +1,5 @@
 import type { Database } from "bun:sqlite";
-import type { NormalizedVulnerability, Severity } from "./types";
+import type { NormalizedPackage, NormalizedVulnerability, Severity } from "./types";
 
 const ALLOWED_SEVERITIES: Severity[] = [
   "CRITICAL",
@@ -113,6 +113,48 @@ export function insertVulnerabilities(
   insertBatch(vulns);
 }
 
+export function insertScanPackages(
+  db: Database,
+  scanResultId: number,
+  packages: NormalizedPackage[]
+): void {
+  if (packages.length === 0) {
+    return;
+  }
+
+  const insert = db.query(`
+    INSERT OR IGNORE INTO scan_packages (
+      scan_result_id,
+      result_class,
+      result_type,
+      result_target,
+      package_name,
+      installed_version,
+      package_id,
+      src_name,
+      src_version
+    ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
+  `);
+
+  const insertBatch = db.transaction((rows: NormalizedPackage[]) => {
+    for (const item of rows) {
+      insert.run(
+        scanResultId,
+        item.result_class,
+        item.result_type,
+        item.result_target,
+        normalizeName(item.package_name, "unknown-package"),
+        normalizeOptionalText(item.installed_version),
+        normalizeOptionalText(item.package_id),
+        normalizeOptionalText(item.src_name),
+        normalizeOptionalText(item.src_version)
+      );
+    }
+  });
+
+  insertBatch(packages);
+}
+
 function normalizeSeverity(value: string): Severity {
   const normalized = value.toUpperCase() as Severity;
   return ALLOWED_SEVERITIES.includes(normalized) ? normalized : "UNKNOWN";
@@ -125,6 +167,15 @@ function normalizeName(name: string, fallback: string): string {
 
 function normalizeOptionalDate(value?: string): string | null {
   if (!value) {
+    return null;
+  }
+
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : null;
+}
+
+function normalizeOptionalText(value?: string | null): string | null {
+  if (typeof value !== "string") {
     return null;
   }
 

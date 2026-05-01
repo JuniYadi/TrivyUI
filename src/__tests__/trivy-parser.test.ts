@@ -43,6 +43,12 @@ describe("trivy parser", () => {
     expect(result.repo_name).toBe("ghcr.io/acme/trivyui");
     expect(result.image_name).toBe("ghcr.io/acme/trivyui:1.0.0");
     expect(result.schema_version).toBe("2");
+    expect(result.packages).toHaveLength(1);
+    expect(result.packages[0]).toMatchObject({
+      package_name: "openssl",
+      installed_version: "3.0.0",
+      result_target: "ghcr.io/acme/trivyui:1.0.0",
+    });
     expect(result.vulnerabilities).toHaveLength(1);
     expect(result.vulnerabilities[0]).toMatchObject({
       cve_id: "CVE-2026-0001",
@@ -75,6 +81,7 @@ describe("trivy parser", () => {
 
     expect(detectSchemaVersion(payload)).toBe("unknown");
     expect(result.repo_name).toBe("docker.io/library/nginx");
+    expect(result.packages).toHaveLength(0);
     expect(result.vulnerabilities[0].severity).toBe("UNKNOWN");
   });
 });

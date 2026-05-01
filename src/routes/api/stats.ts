@@ -1,6 +1,5 @@
 import type { Database } from "bun:sqlite";
 import type {
-  DashboardRecentScan,
   DashboardStats,
   DashboardTopRepository,
   Severity,
@@ -9,6 +8,17 @@ import type {
 import { buildSuccessResponse, sendError } from "./_shared";
 
 const SEVERITIES: Severity[] = ["CRITICAL", "HIGH", "MEDIUM", "LOW", "UNKNOWN"];
+
+interface RecentScanRow {
+  id: number;
+  repository: string;
+  image: string;
+  vulnerability_count: number;
+  critical_count: number;
+  package_count: number;
+  vulnerable_package_count: number;
+  scanned_at: string;
+}
 
 export function createStatsHandler(db: Database) {
   return function statsHandler(): Response {
@@ -27,6 +37,26 @@ export function createStatsHandler(db: Database) {
         .query("SELECT COUNT(*) as count FROM repositories")
         .get() as { count: number };
       const imagesRow = db.query("SELECT COUNT(*) as count FROM images").get() as { count: number };
+      const packagesRow = db
+        .query(
+          `
+          SELECT COUNT(DISTINCT i.id || ':' || COALESCE(sp.result_target, '') || ':' || sp.package_name || ':' || COALESCE(sp.installed_version, '')) as count
+          FROM scan_packages sp
+          JOIN scan_results sr ON sr.id = sp.scan_result_id
+          JOIN images i ON i.id = sr.image_id
+          `
+        )
+        .get() as { count: number };
+      const vulnerablePackagesRow = db
+        .query(
+          `
+          SELECT COUNT(DISTINCT i.id || ':' || v.package_name || ':' || COALESCE(v.installed_version, '')) as count
+          FROM vulnerabilities v
+          JOIN scan_results sr ON sr.id = v.scan_result_id
+          JOIN images i ON i.id = sr.image_id
+          `
+        )
+        .get() as { count: number };
 
       const bySeverityRows = db
         .query(
@@ -69,7 +99,7 @@ export function createStatsHandler(db: Database) {
           GROUP BY r.id, r.name
           HAVING COUNT(DISTINCT v.cve_id) > 0
           ORDER BY vulnerability_count DESC, critical_count DESC, r.name ASC
-          LIMIT 5
+          LIMIT 10
           `
         )
         .all() as DashboardTopRepository[];
@@ -83,6 +113,16 @@ export function createStatsHandler(db: Database) {
             i.name as image,
             COUNT(DISTINCT v.cve_id) as vulnerability_count,
             COUNT(DISTINCT CASE WHEN v.severity = 'CRITICAL' THEN v.cve_id END) as critical_count,
+            (
+              SELECT COUNT(*)
+              FROM scan_packages sp
+              WHERE sp.scan_result_id = sr.id
+            ) as package_count,
+            (
+              SELECT COUNT(DISTINCT v2.package_name || ':' || COALESCE(v2.installed_version, ''))
+              FROM vulnerabilities v2
+              WHERE v2.scan_result_id = sr.id
+            ) as vulnerable_package_count,
             sr.scan_date as scanned_at
           FROM scan_results sr
           JOIN images i ON i.id = sr.image_id
@@ -93,10 +133,22 @@ export function createStatsHandler(db: Database) {
           LIMIT 10
           `
         )
-        .all() as DashboardRecentScan[];
+        .all() as RecentScanRow[];
+
+      const totalPackagesScanned = Number(packagesRow.count ?? 0);
+      const totalVulnerablePackages = Number(vulnerablePackagesRow.count ?? 0);
+      const totalCleanPackages = Math.max(0, totalPackagesScanned - totalVulnerablePackages);
+      const cleanPackageRate =
+        totalPackagesScanned > 0
+          ? Number(((totalCleanPackages / totalPackagesScanned) * 100).toFixed(2))
+          : 0;
 
       const data: DashboardStats = {
         total_vulnerabilities: Number(totalRow.count ?? 0),
+        total_packages_scanned: totalPackagesScanned,
+        total_vulnerable_packages: totalVulnerablePackages,
+        total_clean_packages: totalCleanPackages,
+        clean_package_rate: cleanPackageRate,
         total_repositories: Number(repositoriesRow.count ?? 0),
         total_images: Number(imagesRow.count ?? 0),
         by_severity,
@@ -112,6 +164,12 @@ export function createStatsHandler(db: Database) {
           image: scan.image,
           vulnerability_count: Number(scan.vulnerability_count ?? 0),
           critical_count: Number(scan.critical_count ?? 0),
+          package_count: Number(scan.package_count ?? 0),
+          vulnerable_package_count: Number(scan.vulnerable_package_count ?? 0),
+          clean_package_count: Math.max(
+            0,
+            Number(scan.package_count ?? 0) - Number(scan.vulnerable_package_count ?? 0)
+          ),
           scanned_at: scan.scanned_at,
         })),
       };

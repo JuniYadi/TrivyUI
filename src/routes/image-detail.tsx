@@ -1,19 +1,18 @@
+import { useNavigate, useParams } from "@tanstack/react-router";
 import { AppShell } from "../components/app-shell";
 import { ErrorBanner } from "../components/error-banner";
 import { SeverityChart } from "../components/severity-chart";
 import { StatCard } from "../components/stat-card";
 import { useImageDetail } from "../hooks/use-image-detail";
-import { navigate } from "../lib/navigation";
 import type { ImageDetailResponse } from "../services/types";
 
-function parseImageId(pathname: string): number | null {
-  const match = pathname.match(/^\/images\/(\d+)$/);
-  if (!match) {
+function parseImageId(value: string | undefined): number | null {
+  if (!value) {
     return null;
   }
 
-  const value = Number.parseInt(match[1] || "", 10);
-  return Number.isFinite(value) ? value : null;
+  const id = Number.parseInt(value, 10);
+  return Number.isFinite(id) ? id : null;
 }
 
 function DetailSkeleton() {
@@ -44,6 +43,8 @@ const SEVERITY_STYLES: Record<string, string> = {
 };
 
 export function ImageDetailContent({ data, loading, error, retry }: ImageDetailContentProps) {
+  const navigate = useNavigate();
+
   return (
     <>
       {loading && (
@@ -59,7 +60,13 @@ export function ImageDetailContent({ data, loading, error, retry }: ImageDetailC
         <section className="rounded-xl border border-slate-700 bg-slate-900/90 p-5">
           <h2 className="mb-2 text-base font-semibold">Image not found</h2>
           <p className="mb-4 text-slate-400">This image does not exist or may have been removed.</p>
-          <button type="button" className="rounded-lg border border-slate-700 bg-slate-950 px-4 py-2 text-sm font-semibold text-slate-300 transition hover:border-slate-500" onClick={() => navigate("/images")}>Back to Images</button>
+          <button
+            type="button"
+            className="rounded-lg border border-slate-700 bg-slate-950 px-4 py-2 text-sm font-semibold text-slate-300 transition hover:border-slate-500"
+            onClick={() => void navigate({ to: "/images" })}
+          >
+            Back to Images
+          </button>
         </section>
       )}
 
@@ -75,7 +82,13 @@ export function ImageDetailContent({ data, loading, error, retry }: ImageDetailC
                 <p className="mt-0 text-xs font-semibold uppercase tracking-wide text-slate-400">Last scanned</p>
                 <p className="mb-0 text-sm">{data.last_scanned_at ? new Date(data.last_scanned_at).toLocaleString() : "-"}</p>
               </div>
-              <button type="button" className="rounded-lg border border-slate-700 bg-slate-950 px-4 py-2 text-sm font-semibold text-slate-300 transition hover:border-slate-500" onClick={() => navigate("/images")}>Back to Images</button>
+              <button
+                type="button"
+                className="rounded-lg border border-slate-700 bg-slate-950 px-4 py-2 text-sm font-semibold text-slate-300 transition hover:border-slate-500"
+                onClick={() => void navigate({ to: "/images" })}
+              >
+                Back to Images
+              </button>
             </div>
           </section>
 
@@ -93,7 +106,11 @@ export function ImageDetailContent({ data, loading, error, retry }: ImageDetailC
             <section className="rounded-xl border border-slate-700 bg-slate-900/90 p-4 shadow-inner">
               <h3 className="mb-3 text-base font-semibold">Image metadata</h3>
               <p className="text-sm text-slate-400">Created at: {new Date(data.created_at).toLocaleString()}</p>
-              <button type="button" className="text-blue-400 hover:text-blue-300 hover:underline" onClick={() => navigate(`/repositories/${data.repository.id}`)}>
+              <button
+                type="button"
+                className="text-blue-400 hover:text-blue-300 hover:underline"
+                onClick={() => void navigate({ to: "/repositories/$id", params: { id: String(data.repository.id) } })}
+              >
                 Open repository detail
               </button>
             </section>
@@ -135,7 +152,8 @@ export function ImageDetailContent({ data, loading, error, retry }: ImageDetailC
 }
 
 export function ImageDetailPage() {
-  const id = parseImageId(window.location.pathname);
+  const { id: rawId } = useParams({ strict: false }) as { id?: string };
+  const id = parseImageId(rawId);
   const { data, loading, error, retry } = useImageDetail(id);
 
   return (

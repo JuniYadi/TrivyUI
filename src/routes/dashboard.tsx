@@ -16,21 +16,23 @@ interface DashboardContentProps {
 export function DashboardContent({ stats }: DashboardContentProps) {
   return (
     <section className="grid gap-4">
-      <section className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
-        <StatCard label="Total Vulnerabilities" value={stats.total_vulnerabilities} tone="neutral" />
-        <StatCard label="Critical" value={stats.by_severity.CRITICAL} tone="critical" />
-        <StatCard label="High" value={stats.by_severity.HIGH} tone="high" />
-        <StatCard label="Medium" value={stats.by_severity.MEDIUM} tone="medium" />
-        <StatCard label="Low" value={stats.by_severity.LOW} tone="low" />
-        <StatCard label="Unknown" value={stats.by_severity.UNKNOWN} tone="unknown" />
-      </section>
-
       <section className="grid md:grid-cols-2 gap-4">
         <SeverityChart bySeverity={stats.by_severity} />
-        <TopRepos repositories={stats.top_repositories} />
+        <section className="rounded-xl border border-slate-700 bg-slate-900/60 p-3">
+          <h3 className="mb-2 text-sm font-semibold text-slate-200">Package Coverage</h3>
+          <div className="grid grid-cols-2 md:grid-cols-2 gap-3">
+            <StatCard label="Packages Scanned" value={stats.total_packages_scanned} tone="neutral" compact />
+            <StatCard label="Clean Packages" value={stats.total_clean_packages} tone="neutral" compact />
+            <StatCard label="Vulnerable Packages" value={stats.total_vulnerable_packages} tone="neutral" compact />
+            <StatCard label="Clean Rate (%)" value={Math.round(stats.clean_package_rate)} tone="neutral" compact />
+          </div>
+        </section>
       </section>
 
-      <RecentScans scans={stats.recent_scans} />
+      <section className="grid grid-cols-1 gap-4">
+        <TopRepos repositories={stats.top_repositories} />
+        <RecentScans scans={stats.recent_scans} />
+      </section>
     </section>
   );
 }
@@ -42,7 +44,7 @@ export function DashboardPage() {
     <AppShell
       activeRoute="/dashboard"
       title="Dashboard Overview"
-      subtitle="At-a-glance vulnerability posture from the latest Trivy scans."
+      subtitle="At-a-glance vulnerability posture and package coverage from the latest Trivy scans."
     >
       {loading && <DashboardSkeleton />}
       {!loading && error && <ErrorBanner message={error} onRetry={retry} />}
