@@ -3,3 +3,4 @@ node_modules
 *.db
 build
 dist
+src/styles/tailwind.generated.css
