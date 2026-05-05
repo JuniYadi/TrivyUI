@@ -11,6 +11,7 @@ export interface VulnerabilityQueryParams {
   image?: string;
   package?: string;
   search?: string;
+  vulnerabilityId?: number;
 }
 
 interface ApiSuccess<T> {
@@ -85,6 +86,14 @@ export function parseVulnerabilityParams(search = window.location.search): Vulne
     parsed.search = searchText;
   }
 
+  const vulnerabilityIdRaw = params.get("vulnerabilityId") || params.get("vuln");
+  if (vulnerabilityIdRaw) {
+    const vulnerabilityId = Number.parseInt(vulnerabilityIdRaw, 10);
+    if (Number.isFinite(vulnerabilityId) && vulnerabilityId > 0) {
+      parsed.vulnerabilityId = vulnerabilityId;
+    }
+  }
+
   return parsed;
 }
 
@@ -100,6 +109,7 @@ export function toQueryString(query: VulnerabilityQueryParams): string {
   if (query.image) params.set("image", query.image);
   if (query.package) params.set("package", query.package);
   if (query.search) params.set("search", query.search);
+  if (query.vulnerabilityId) params.set("vulnerabilityId", String(query.vulnerabilityId));
 
   return params.toString();
 }

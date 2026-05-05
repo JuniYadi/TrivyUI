@@ -34,6 +34,54 @@ interface RepositoryDetailContentProps {
   retry: RetryHandler;
 }
 
+type ParsedImageRef = {
+  registry: string;
+  owner: string;
+  region: string;
+  image: string;
+};
+
+function parseImageReference(imageName: string): ParsedImageRef {
+  const value = imageName.trim();
+  if (!value) {
+    return { registry: "Unknown", owner: "-", region: "-", image: imageName };
+  }
+
+  const ecrMatch = value.match(/^([^.]*)\.dkr\.ecr\.([a-z0-9-]+)\.amazonaws\.com\/(.+)$/i);
+  if (ecrMatch) {
+    const [, accountId, region, image] = ecrMatch;
+    return { registry: "ECR", owner: accountId || "-", region: region || "-", image: image || "-" };
+  }
+
+  const slash = value.indexOf("/");
+  const image = slash >= 0 ? value.slice(slash + 1) : value;
+
+  return { registry: "Other", owner: "-", region: "-", image };
+}
+
+function formatRelativeTime(iso: string): string {
+  const then = new Date(iso).getTime();
+  const now = Date.now();
+  const diffMs = Math.max(0, now - then);
+
+  const minute = 60 * 1000;
+  const hour = 60 * minute;
+  const day = 24 * hour;
+
+  if (diffMs < hour) {
+    const mins = Math.max(1, Math.floor(diffMs / minute));
+    return `${mins}m ago`;
+  }
+
+  if (diffMs < day) {
+    const hours = Math.max(1, Math.floor(diffMs / hour));
+    return `${hours}h ago`;
+  }
+
+  const days = Math.max(1, Math.floor(diffMs / day));
+  return `${days}d ago`;
+}
+
 const SEVERITY_STYLES: Record<string, string> = {
   CRITICAL: "rounded-full bg-red-950 px-2 py-0.5 text-xs font-bold text-red-200",
   HIGH: "rounded-full bg-orange-950 px-2 py-0.5 text-xs font-bold text-orange-200",
@@ -101,20 +149,51 @@ export function RepositoryDetailContent({ data, loading, error, retry }: Reposit
             <SeverityChart bySeverity={data.by_severity} />
             <section className="rounded-xl border border-slate-700 bg-slate-900/90 p-4 shadow-inner">
               <h3 className="mb-3 text-base font-semibold">Images in repository</h3>
-              <ul className="m-0 list-none space-y-2 p-0">
-                {data.images.map((image) => (
-                  <li key={image.id} className="rounded-lg border border-slate-700/80 bg-slate-950/60 p-2">
-                    <button
-                      type="button"
-                      className="text-blue-400 hover:text-blue-300 hover:underline"
-                      onClick={() => void navigate({ to: "/images/$id", params: { id: String(image.id) } })}
-                    >
-                      {image.name}
-                    </button>
-                    — {image.vulnerability_count} vulns ({image.critical_count} critical)
-                  </li>
-                ))}
-              </ul>
+              <div className="overflow-x-auto">
+                <table className="w-full border-collapse text-sm">
+                  <thead>
+                    <tr className="border-b border-slate-700 text-left text-slate-300">
+                      <th className="py-2 pr-3 font-medium">Registry</th>
+                      <th className="py-2 pr-3 font-medium">Owner</th>
+                      <th className="py-2 pr-3 font-medium">Region</th>
+                      <th className="py-2 pr-3 font-medium">Image</th>
+                      <th className="py-2 pr-3 font-medium">Vulnerabilities</th>
+                      <th className="py-2 pr-3 font-medium">Packages</th>
+                      <th className="py-2 font-medium">Scanned</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {data.images.map((image) => {
+                      const parsed = parseImageReference(image.name);
+
+                      return (
+                        <tr key={image.id} className="border-b border-slate-800/80 last:border-b-0">
+                          <td className="py-2 pr-3 whitespace-nowrap">{parsed.registry}</td>
+                          <td className="py-2 pr-3 whitespace-nowrap">{parsed.owner}</td>
+                          <td className="py-2 pr-3 whitespace-nowrap">{parsed.region}</td>
+                          <td className="py-2 pr-3">
+                            <button
+                              type="button"
+                              className="block max-w-[320px] truncate text-blue-400 hover:text-blue-300 hover:underline"
+                              title={image.name}
+                              onClick={() => void navigate({ to: "/images/$id", params: { id: String(image.id) } })}
+                            >
+                              {parsed.image}
+                            </button>
+                          </td>
+                          <td className="py-2 pr-3 whitespace-nowrap">
+                            {image.vulnerability_count} total / {image.critical_count} critical
+                          </td>
+                          <td className="py-2 pr-3 whitespace-nowrap">
+                            {image.package_count} total / {image.clean_package_count} clean / {image.vulnerable_package_count} vuln
+                          </td>
+                          <td className="py-2 whitespace-nowrap">{image.last_scanned_at ? formatRelativeTime(image.last_scanned_at) : "-"}</td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
             </section>
           </section>
 
