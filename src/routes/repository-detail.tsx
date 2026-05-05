@@ -59,6 +59,29 @@ function parseImageReference(imageName: string): ParsedImageRef {
   return { registry: "Other", owner: "-", region: "-", image };
 }
 
+function formatRelativeTime(iso: string): string {
+  const then = new Date(iso).getTime();
+  const now = Date.now();
+  const diffMs = Math.max(0, now - then);
+
+  const minute = 60 * 1000;
+  const hour = 60 * minute;
+  const day = 24 * hour;
+
+  if (diffMs < hour) {
+    const mins = Math.max(1, Math.floor(diffMs / minute));
+    return `${mins}m ago`;
+  }
+
+  if (diffMs < day) {
+    const hours = Math.max(1, Math.floor(diffMs / hour));
+    return `${hours}h ago`;
+  }
+
+  const days = Math.max(1, Math.floor(diffMs / day));
+  return `${days}d ago`;
+}
+
 const SEVERITY_STYLES: Record<string, string> = {
   CRITICAL: "rounded-full bg-red-950 px-2 py-0.5 text-xs font-bold text-red-200",
   HIGH: "rounded-full bg-orange-950 px-2 py-0.5 text-xs font-bold text-orange-200",
@@ -135,7 +158,7 @@ export function RepositoryDetailContent({ data, loading, error, retry }: Reposit
                       <th className="py-2 pr-3 font-medium">Region</th>
                       <th className="py-2 pr-3 font-medium">Image</th>
                       <th className="py-2 pr-3 font-medium">Vulnerabilities</th>
-                      <th className="py-2 font-medium">Critical</th>
+                      <th className="py-2 font-medium">Scanned</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -157,8 +180,10 @@ export function RepositoryDetailContent({ data, loading, error, retry }: Reposit
                               {parsed.image}
                             </button>
                           </td>
-                          <td className="py-2 pr-3">{image.vulnerability_count}</td>
-                          <td className="py-2">{image.critical_count}</td>
+                          <td className="py-2 pr-3 whitespace-nowrap">
+                            {image.vulnerability_count} total / {image.critical_count} critical
+                          </td>
+                          <td className="py-2 whitespace-nowrap">{image.last_scanned_at ? formatRelativeTime(image.last_scanned_at) : "-"}</td>
                         </tr>
                       );
                     })}
