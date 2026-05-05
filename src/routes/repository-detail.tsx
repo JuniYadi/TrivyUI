@@ -158,6 +158,7 @@ export function RepositoryDetailContent({ data, loading, error, retry }: Reposit
                       <th className="py-2 pr-3 font-medium">Region</th>
                       <th className="py-2 pr-3 font-medium">Image</th>
                       <th className="py-2 pr-3 font-medium">Vulnerabilities</th>
+                      <th className="py-2 pr-3 font-medium">Packages</th>
                       <th className="py-2 font-medium">Scanned</th>
                     </tr>
                   </thead>
@@ -182,6 +183,9 @@ export function RepositoryDetailContent({ data, loading, error, retry }: Reposit
                           </td>
                           <td className="py-2 pr-3 whitespace-nowrap">
                             {image.vulnerability_count} total / {image.critical_count} critical
+                          </td>
+                          <td className="py-2 pr-3 whitespace-nowrap">
+                            {image.package_count} total / {image.clean_package_count} clean / {image.vulnerable_package_count} vuln
                           </td>
                           <td className="py-2 whitespace-nowrap">{image.last_scanned_at ? formatRelativeTime(image.last_scanned_at) : "-"}</td>
                         </tr>

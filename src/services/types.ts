@@ -192,6 +192,9 @@ export interface RepositoryImageSummary {
   last_scanned_at: string | null;
   vulnerability_count: number;
   critical_count: number;
+  package_count: number;
+  vulnerable_package_count: number;
+  clean_package_count: number;
 }
 
 export interface RepositoryDetailResponse {

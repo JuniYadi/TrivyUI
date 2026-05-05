@@ -91,6 +91,8 @@ interface RepositoryImageRow {
   last_scanned_at: string | null;
   vulnerability_count: number;
   critical_count: number;
+  package_count: number;
+  vulnerable_package_count: number;
 }
 
 interface VulnerabilityRow {
@@ -258,7 +260,19 @@ function buildRepositoryDetailResponse(db: Database, repositoryId: number, repos
         i.name,
         i.last_scanned_at,
         COUNT(DISTINCT v.cve_id) AS vulnerability_count,
-        COUNT(DISTINCT CASE WHEN v.severity = 'CRITICAL' THEN v.cve_id END) AS critical_count
+        COUNT(DISTINCT CASE WHEN v.severity = 'CRITICAL' THEN v.cve_id END) AS critical_count,
+        (
+          SELECT COUNT(*)
+          FROM scan_packages sp
+          JOIN scan_results sr2 ON sr2.id = sp.scan_result_id
+          WHERE sr2.image_id = i.id
+        ) as package_count,
+        (
+          SELECT COUNT(DISTINCT v2.package_name || ':' || COALESCE(v2.installed_version, ''))
+          FROM vulnerabilities v2
+          JOIN scan_results sr3 ON sr3.id = v2.scan_result_id
+          WHERE sr3.image_id = i.id
+        ) as vulnerable_package_count
       FROM images i
       LEFT JOIN scan_results sr ON sr.image_id = i.id
       LEFT JOIN vulnerabilities v ON v.scan_result_id = sr.id
@@ -304,13 +318,20 @@ function buildRepositoryDetailResponse(db: Database, repositoryId: number, repos
     name: repositoryName,
     created_at: createdAt,
     by_severity: buildSeverityBreakdown(severityRows),
-    images: images.map((row) => ({
-      id: Number(row.id),
-      name: row.name,
-      last_scanned_at: row.last_scanned_at,
-      vulnerability_count: Number(row.vulnerability_count ?? 0),
-      critical_count: Number(row.critical_count ?? 0),
-    })),
+    images: images.map((row) => {
+      const packageCount = Number(row.package_count ?? 0);
+      const vulnerablePackageCount = Number(row.vulnerable_package_count ?? 0);
+      return {
+        id: Number(row.id),
+        name: row.name,
+        last_scanned_at: row.last_scanned_at,
+        vulnerability_count: Number(row.vulnerability_count ?? 0),
+        critical_count: Number(row.critical_count ?? 0),
+        package_count: packageCount,
+        vulnerable_package_count: vulnerablePackageCount,
+        clean_package_count: Math.max(0, packageCount - vulnerablePackageCount),
+      };
+    }),
     vulnerabilities: vulnerabilities.map((row) => toVulnerabilityWithRelations(row)),
   };
 
