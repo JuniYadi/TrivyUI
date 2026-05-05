@@ -252,6 +252,37 @@ function buildRepositoryDetailResponse(db: Database, repositoryId: number, repos
     )
     .all(repositoryId) as SeverityRow[];
 
+  const packagesRow = db
+    .query(
+      `
+      SELECT COUNT(DISTINCT i.id || ':' || COALESCE(sp.result_target, '') || ':' || sp.package_name || ':' || COALESCE(sp.installed_version, '')) as count
+      FROM scan_packages sp
+      JOIN scan_results sr ON sr.id = sp.scan_result_id
+      JOIN images i ON i.id = sr.image_id
+      WHERE i.repository_id = ?
+      `,
+    )
+    .get(repositoryId) as { count: number };
+
+  const vulnerablePackagesRow = db
+    .query(
+      `
+      SELECT COUNT(DISTINCT i.id || ':' || v.package_name || ':' || COALESCE(v.installed_version, '')) as count
+      FROM vulnerabilities v
+      JOIN scan_results sr ON sr.id = v.scan_result_id
+      JOIN images i ON i.id = sr.image_id
+      WHERE i.repository_id = ?
+      `,
+    )
+    .get(repositoryId) as { count: number };
+
+  const totalPackagesScanned = Number(packagesRow.count ?? 0);
+  const totalVulnerablePackages = Number(vulnerablePackagesRow.count ?? 0);
+  const totalCleanPackages = Math.max(0, totalPackagesScanned - totalVulnerablePackages);
+  const cleanPackageRate = totalPackagesScanned > 0
+    ? Number(((totalCleanPackages / totalPackagesScanned) * 100).toFixed(2))
+    : 0;
+
   const images = db
     .query(
       `
@@ -318,6 +349,10 @@ function buildRepositoryDetailResponse(db: Database, repositoryId: number, repos
     name: repositoryName,
     created_at: createdAt,
     by_severity: buildSeverityBreakdown(severityRows),
+    total_packages_scanned: totalPackagesScanned,
+    total_vulnerable_packages: totalVulnerablePackages,
+    total_clean_packages: totalCleanPackages,
+    clean_package_rate: cleanPackageRate,
     images: images.map((row) => {
       const packageCount = Number(row.package_count ?? 0);
       const vulnerablePackageCount = Number(row.vulnerable_package_count ?? 0);

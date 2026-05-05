@@ -202,6 +202,10 @@ export interface RepositoryDetailResponse {
   name: string;
   created_at: string;
   by_severity: SeverityBreakdown;
+  total_packages_scanned: number;
+  total_vulnerable_packages: number;
+  total_clean_packages: number;
+  clean_package_rate: number;
   images: RepositoryImageSummary[];
   vulnerabilities: VulnerabilityWithRelations[];
 }

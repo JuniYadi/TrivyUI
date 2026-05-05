@@ -1,10 +1,13 @@
+import { useCallback, useState } from "react";
 import { useNavigate, useParams } from "@tanstack/react-router";
 import { AppShell } from "../components/app-shell";
+import { CveDetailDrawer } from "../components/cve-detail-drawer";
 import { ErrorBanner } from "../components/error-banner";
 import { SeverityChart } from "../components/severity-chart";
 import { StatCard } from "../components/stat-card";
 import { useRepoDetail } from "../hooks/use-repo-detail";
-import type { RepositoryDetailResponse } from "../services/types";
+import { fetchVulnerabilityDetail } from "../hooks/use-vulnerabilities";
+import type { RepositoryDetailResponse, VulnerabilityDetailResponse } from "../services/types";
 
 function parseRepositoryId(value: string | undefined): number | null {
   if (!value) {
@@ -90,8 +93,32 @@ const SEVERITY_STYLES: Record<string, string> = {
   UNKNOWN: "rounded-full bg-gray-800 px-2 py-0.5 text-xs font-bold text-gray-300",
 };
 
+function formatScore(score: number | null): string {
+  return score === null ? "-" : score.toFixed(1);
+}
+
 export function RepositoryDetailContent({ data, loading, error, retry }: RepositoryDetailContentProps) {
   const navigate = useNavigate();
+  const [drawerOpen, setDrawerOpen] = useState(false);
+  const [detailLoading, setDetailLoading] = useState(false);
+  const [detailError, setDetailError] = useState<string | null>(null);
+  const [detail, setDetail] = useState<VulnerabilityDetailResponse | null>(null);
+
+  const openDetail = useCallback(async (id: number) => {
+    setDrawerOpen(true);
+    setDetailLoading(true);
+    setDetailError(null);
+    setDetail(null);
+
+    try {
+      const result = await fetchVulnerabilityDetail(id);
+      setDetail(result);
+    } catch (err) {
+      setDetailError(err instanceof Error ? err.message : "Failed to load vulnerability detail");
+    } finally {
+      setDetailLoading(false);
+    }
+  }, []);
 
   return (
     <>
@@ -147,78 +174,109 @@ export function RepositoryDetailContent({ data, loading, error, retry }: Reposit
 
           <section className="grid md:grid-cols-2 gap-4">
             <SeverityChart bySeverity={data.by_severity} />
-            <section className="rounded-xl border border-slate-700 bg-slate-900/90 p-4 shadow-inner">
-              <h3 className="mb-3 text-base font-semibold">Images in repository</h3>
-              <div className="overflow-x-auto">
-                <table className="w-full border-collapse text-sm">
-                  <thead>
-                    <tr className="border-b border-slate-700 text-left text-slate-300">
-                      <th className="py-2 pr-3 font-medium">Registry</th>
-                      <th className="py-2 pr-3 font-medium">Owner</th>
-                      <th className="py-2 pr-3 font-medium">Region</th>
-                      <th className="py-2 pr-3 font-medium">Image</th>
-                      <th className="py-2 pr-3 font-medium">Vulnerabilities</th>
-                      <th className="py-2 pr-3 font-medium">Packages</th>
-                      <th className="py-2 font-medium">Scanned</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {data.images.map((image) => {
-                      const parsed = parseImageReference(image.name);
-
-                      return (
-                        <tr key={image.id} className="border-b border-slate-800/80 last:border-b-0">
-                          <td className="py-2 pr-3 whitespace-nowrap">{parsed.registry}</td>
-                          <td className="py-2 pr-3 whitespace-nowrap">{parsed.owner}</td>
-                          <td className="py-2 pr-3 whitespace-nowrap">{parsed.region}</td>
-                          <td className="py-2 pr-3">
-                            <button
-                              type="button"
-                              className="block max-w-[320px] truncate text-blue-400 hover:text-blue-300 hover:underline"
-                              title={image.name}
-                              onClick={() => void navigate({ to: "/images/$id", params: { id: String(image.id) } })}
-                            >
-                              {parsed.image}
-                            </button>
-                          </td>
-                          <td className="py-2 pr-3 whitespace-nowrap">
-                            {image.vulnerability_count} total / {image.critical_count} critical
-                          </td>
-                          <td className="py-2 pr-3 whitespace-nowrap">
-                            {image.package_count} total / {image.clean_package_count} clean / {image.vulnerable_package_count} vuln
-                          </td>
-                          <td className="py-2 whitespace-nowrap">{image.last_scanned_at ? formatRelativeTime(image.last_scanned_at) : "-"}</td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
+            <section className="rounded-xl border border-slate-700 bg-slate-900/60 p-3">
+              <h3 className="mb-2 text-sm font-semibold text-slate-200">Package Coverage</h3>
+              <div className="grid grid-cols-2 md:grid-cols-2 gap-3">
+                <StatCard label="Packages Scanned" value={data.total_packages_scanned} tone="neutral" compact />
+                <StatCard label="Clean Packages" value={data.total_clean_packages} tone="neutral" compact />
+                <StatCard label="Vulnerable Packages" value={data.total_vulnerable_packages} tone="neutral" compact />
+                <StatCard label="Clean Rate (%)" value={Math.round(data.clean_package_rate)} tone="neutral" compact />
               </div>
             </section>
           </section>
 
+          <section className="rounded-xl border border-slate-700 bg-slate-900/90 p-4 shadow-inner">
+            <h3 className="mb-3 text-base font-semibold">Images in repository</h3>
+            <div className="overflow-x-auto">
+              <table className="w-full border-collapse text-sm">
+                <thead>
+                  <tr className="border-b border-slate-700 text-left text-slate-300">
+                    <th className="py-2 pr-3 font-medium">Registry</th>
+                    <th className="py-2 pr-3 font-medium">Owner</th>
+                    <th className="py-2 pr-3 font-medium">Region</th>
+                    <th className="py-2 pr-3 font-medium">Image</th>
+                    <th className="py-2 pr-3 font-medium">Vulnerabilities</th>
+                    <th className="py-2 pr-3 font-medium">Packages</th>
+                    <th className="py-2 font-medium">Scanned</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {data.images.map((image) => {
+                    const parsed = parseImageReference(image.name);
+
+                    return (
+                      <tr key={image.id} className="border-b border-slate-800/80 last:border-b-0">
+                        <td className="py-2 pr-3 whitespace-nowrap">{parsed.registry}</td>
+                        <td className="py-2 pr-3 whitespace-nowrap">{parsed.owner}</td>
+                        <td className="py-2 pr-3 whitespace-nowrap">{parsed.region}</td>
+                        <td className="py-2 pr-3">
+                          <button
+                            type="button"
+                            className="block max-w-[320px] truncate text-blue-400 hover:text-blue-300 hover:underline"
+                            title={image.name}
+                            onClick={() => void navigate({ to: "/images/$id", params: { id: String(image.id) } })}
+                          >
+                            {parsed.image}
+                          </button>
+                        </td>
+                        <td className="py-2 pr-3 whitespace-nowrap">
+                          {image.vulnerability_count} total / {image.critical_count} critical
+                        </td>
+                        <td className="py-2 pr-3 whitespace-nowrap">
+                          {image.package_count} total / {image.clean_package_count} clean / {image.vulnerable_package_count} vuln
+                        </td>
+                        <td className="py-2 whitespace-nowrap">{image.last_scanned_at ? formatRelativeTime(image.last_scanned_at) : "-"}</td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </section>
+
           <section className="rounded-xl border border-slate-700 bg-slate-900/90 p-4 shadow-inner overflow-x-auto">
             <h3 className="mb-3 text-base font-semibold">Vulnerabilities</h3>
-            <table className="w-full border-collapse text-sm">
+            <table className="w-full table-fixed border-collapse text-sm">
               <thead>
                 <tr className="border-b border-slate-700 text-left">
                   <th className="pb-3 pr-4">CVE ID</th>
                   <th className="pb-3 pr-4">Severity</th>
-                  <th className="pb-3 pr-4">Package</th>
-                  <th className="pb-3 pr-4">Image</th>
-                  <th className="pb-3">Scanned At</th>
+                  <th className="pb-3 pr-4 w-[220px]">Package</th>
+                  <th className="hidden md:table-cell pb-3 pr-4 w-[260px]">Image</th>
+                  <th className="pb-3 pr-4">Installed</th>
+                  <th className="hidden lg:table-cell pb-3 pr-4">Fixed</th>
+                  <th className="pb-3">Score</th>
                 </tr>
               </thead>
               <tbody>
                 {data.vulnerabilities.map((item) => (
-                  <tr key={item.id} className="border-b border-slate-800 last:border-0">
+                  <tr key={item.id} className="cursor-pointer border-b border-slate-800 last:border-0 hover:bg-slate-800/50" onClick={() => void openDetail(item.id)}>
                     <td className="py-3 pr-4">{item.cve_id}</td>
                     <td className="py-3 pr-4">
                       <span className={SEVERITY_STYLES[item.severity] || ""}>{item.severity}</span>
                     </td>
-                    <td className="py-3 pr-4">{item.package_name}</td>
-                    <td className="py-3 pr-4">{item.image.name}</td>
-                    <td className="py-3">{new Date(item.scanned_at).toLocaleString()}</td>
+                    <td className="py-3 pr-4">
+                      <span className="block max-w-[220px] truncate" title={item.package_name}>
+                        {item.package_name}
+                      </span>
+                    </td>
+                    <td className="hidden md:table-cell py-3 pr-4">
+                      <button
+                        type="button"
+                        className="block max-w-[260px] truncate text-blue-400 hover:text-blue-300 hover:underline"
+                        title={item.image.name}
+                        onClick={(event) => {
+                          event.preventDefault();
+                          event.stopPropagation();
+                          void navigate({ to: "/images/$id", params: { id: String(item.image.id) } });
+                        }}
+                      >
+                        {parseImageReference(item.image.name).image}
+                      </button>
+                    </td>
+                    <td className="py-3 pr-4">{item.installed_version || "-"}</td>
+                    <td className="hidden lg:table-cell py-3 pr-4">{item.fixed_version || "-"}</td>
+                    <td className="py-3">{formatScore(item.score)}</td>
                   </tr>
                 ))}
               </tbody>
@@ -226,6 +284,14 @@ export function RepositoryDetailContent({ data, loading, error, retry }: Reposit
           </section>
         </section>
       )}
+
+      <CveDetailDrawer
+        open={drawerOpen}
+        loading={detailLoading}
+        error={detailError}
+        data={detail}
+        onClose={() => setDrawerOpen(false)}
+      />
     </>
   );
 }
