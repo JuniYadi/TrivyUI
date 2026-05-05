@@ -227,7 +227,11 @@ export function RepositoryDetailContent({ data, loading, error, retry }: Reposit
                       <span className={SEVERITY_STYLES[item.severity] || ""}>{item.severity}</span>
                     </td>
                     <td className="py-3 pr-4">{item.package_name}</td>
-                    <td className="py-3 pr-4">{item.image.name}</td>
+                    <td className="py-3 pr-4">
+                      <span className="block max-w-[320px] truncate" title={item.image.name}>
+                        {parseImageReference(item.image.name).image}
+                      </span>
+                    </td>
                     <td className="py-3">{new Date(item.scanned_at).toLocaleString()}</td>
                   </tr>
                 ))}
