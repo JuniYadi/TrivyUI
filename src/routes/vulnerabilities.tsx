@@ -1,4 +1,4 @@
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { AppShell } from "../components/app-shell";
 import { CveDetailDrawer } from "../components/cve-detail-drawer";
 import { EmptyState } from "../components/empty-state";
@@ -53,7 +53,7 @@ export function VulnerabilitiesPage() {
     }));
   }, [setFilters]);
 
-  const onSelectRow = useCallback(async (id: number) => {
+  const openDetail = useCallback(async (id: number) => {
     setDrawerOpen(true);
     setDetailLoading(true);
     setDetailError(null);
@@ -68,6 +68,22 @@ export function VulnerabilitiesPage() {
       setDetailLoading(false);
     }
   }, []);
+
+  useEffect(() => {
+    if (!query.vulnerabilityId) {
+      setDrawerOpen(false);
+      return;
+    }
+
+    void openDetail(query.vulnerabilityId);
+  }, [openDetail, query.vulnerabilityId]);
+
+  const onSelectRow = useCallback(
+    async (id: number) => {
+      setFilters((prev) => ({ ...prev, vulnerabilityId: id }));
+    },
+    [setFilters],
+  );
 
   const totalItems = data?.pagination.total_items || 0;
   const noData = !loading && !error && totalItems === 0;
@@ -112,7 +128,14 @@ export function VulnerabilitiesPage() {
         loading={detailLoading}
         error={detailError}
         data={detail}
-        onClose={() => setDrawerOpen(false)}
+        onClose={() => {
+          setDrawerOpen(false);
+          setFilters((prev) => {
+            const next = { ...prev };
+            delete next.vulnerabilityId;
+            return next;
+          });
+        }}
       />
     </AppShell>
   );
