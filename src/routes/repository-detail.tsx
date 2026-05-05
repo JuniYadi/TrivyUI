@@ -147,54 +147,64 @@ export function RepositoryDetailContent({ data, loading, error, retry }: Reposit
 
           <section className="grid md:grid-cols-2 gap-4">
             <SeverityChart bySeverity={data.by_severity} />
-            <section className="rounded-xl border border-slate-700 bg-slate-900/90 p-4 shadow-inner">
-              <h3 className="mb-3 text-base font-semibold">Images in repository</h3>
-              <div className="overflow-x-auto">
-                <table className="w-full border-collapse text-sm">
-                  <thead>
-                    <tr className="border-b border-slate-700 text-left text-slate-300">
-                      <th className="py-2 pr-3 font-medium">Registry</th>
-                      <th className="py-2 pr-3 font-medium">Owner</th>
-                      <th className="py-2 pr-3 font-medium">Region</th>
-                      <th className="py-2 pr-3 font-medium">Image</th>
-                      <th className="py-2 pr-3 font-medium">Vulnerabilities</th>
-                      <th className="py-2 pr-3 font-medium">Packages</th>
-                      <th className="py-2 font-medium">Scanned</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {data.images.map((image) => {
-                      const parsed = parseImageReference(image.name);
-
-                      return (
-                        <tr key={image.id} className="border-b border-slate-800/80 last:border-b-0">
-                          <td className="py-2 pr-3 whitespace-nowrap">{parsed.registry}</td>
-                          <td className="py-2 pr-3 whitespace-nowrap">{parsed.owner}</td>
-                          <td className="py-2 pr-3 whitespace-nowrap">{parsed.region}</td>
-                          <td className="py-2 pr-3">
-                            <button
-                              type="button"
-                              className="block max-w-[320px] truncate text-blue-400 hover:text-blue-300 hover:underline"
-                              title={image.name}
-                              onClick={() => void navigate({ to: "/images/$id", params: { id: String(image.id) } })}
-                            >
-                              {parsed.image}
-                            </button>
-                          </td>
-                          <td className="py-2 pr-3 whitespace-nowrap">
-                            {image.vulnerability_count} total / {image.critical_count} critical
-                          </td>
-                          <td className="py-2 pr-3 whitespace-nowrap">
-                            {image.package_count} total / {image.clean_package_count} clean / {image.vulnerable_package_count} vuln
-                          </td>
-                          <td className="py-2 whitespace-nowrap">{image.last_scanned_at ? formatRelativeTime(image.last_scanned_at) : "-"}</td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
+            <section className="rounded-xl border border-slate-700 bg-slate-900/60 p-3">
+              <h3 className="mb-2 text-sm font-semibold text-slate-200">Package Coverage</h3>
+              <div className="grid grid-cols-2 md:grid-cols-2 gap-3">
+                <StatCard label="Packages Scanned" value={data.total_packages_scanned} tone="neutral" compact />
+                <StatCard label="Clean Packages" value={data.total_clean_packages} tone="neutral" compact />
+                <StatCard label="Vulnerable Packages" value={data.total_vulnerable_packages} tone="neutral" compact />
+                <StatCard label="Clean Rate (%)" value={Math.round(data.clean_package_rate)} tone="neutral" compact />
               </div>
             </section>
+          </section>
+
+          <section className="rounded-xl border border-slate-700 bg-slate-900/90 p-4 shadow-inner">
+            <h3 className="mb-3 text-base font-semibold">Images in repository</h3>
+            <div className="overflow-x-auto">
+              <table className="w-full border-collapse text-sm">
+                <thead>
+                  <tr className="border-b border-slate-700 text-left text-slate-300">
+                    <th className="py-2 pr-3 font-medium">Registry</th>
+                    <th className="py-2 pr-3 font-medium">Owner</th>
+                    <th className="py-2 pr-3 font-medium">Region</th>
+                    <th className="py-2 pr-3 font-medium">Image</th>
+                    <th className="py-2 pr-3 font-medium">Vulnerabilities</th>
+                    <th className="py-2 pr-3 font-medium">Packages</th>
+                    <th className="py-2 font-medium">Scanned</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {data.images.map((image) => {
+                    const parsed = parseImageReference(image.name);
+
+                    return (
+                      <tr key={image.id} className="border-b border-slate-800/80 last:border-b-0">
+                        <td className="py-2 pr-3 whitespace-nowrap">{parsed.registry}</td>
+                        <td className="py-2 pr-3 whitespace-nowrap">{parsed.owner}</td>
+                        <td className="py-2 pr-3 whitespace-nowrap">{parsed.region}</td>
+                        <td className="py-2 pr-3">
+                          <button
+                            type="button"
+                            className="block max-w-[320px] truncate text-blue-400 hover:text-blue-300 hover:underline"
+                            title={image.name}
+                            onClick={() => void navigate({ to: "/images/$id", params: { id: String(image.id) } })}
+                          >
+                            {parsed.image}
+                          </button>
+                        </td>
+                        <td className="py-2 pr-3 whitespace-nowrap">
+                          {image.vulnerability_count} total / {image.critical_count} critical
+                        </td>
+                        <td className="py-2 pr-3 whitespace-nowrap">
+                          {image.package_count} total / {image.clean_package_count} clean / {image.vulnerable_package_count} vuln
+                        </td>
+                        <td className="py-2 whitespace-nowrap">{image.last_scanned_at ? formatRelativeTime(image.last_scanned_at) : "-"}</td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
           </section>
 
           <section className="rounded-xl border border-slate-700 bg-slate-900/90 p-4 shadow-inner overflow-x-auto">
