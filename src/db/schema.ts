@@ -159,4 +159,51 @@ export async function initSchema(driver: DatabaseDriver): Promise<void> {
   for (const statement of statements) {
     await driver.execute(statement);
   }
+
+  await evolveImagesSchema(driver);
+}
+
+async function evolveImagesSchema(driver: DatabaseDriver): Promise<void> {
+  const hasRepositoryBase = await hasImageColumn(driver, "repository_base");
+  if (!hasRepositoryBase) {
+    await driver.execute(
+      `ALTER TABLE images ADD COLUMN repository_base ${textColumn(driver.dialect, 512)} NOT NULL DEFAULT ''`,
+    );
+  }
+
+  const hasTag = await hasImageColumn(driver, "tag");
+  if (!hasTag) {
+    await driver.execute(`ALTER TABLE images ADD COLUMN tag ${textColumn(driver.dialect, 255)}`);
+  }
+
+  const hasTagGroup = await hasImageColumn(driver, "tag_group");
+  if (!hasTagGroup) {
+    await driver.execute(
+      `ALTER TABLE images ADD COLUMN tag_group ${textColumn(driver.dialect, 255)} NOT NULL DEFAULT 'ungrouped'`,
+    );
+  }
+
+  await driver.execute("UPDATE images SET repository_base = name WHERE repository_base IS NULL OR repository_base = ''");
+  await driver.execute("UPDATE images SET tag_group = 'ungrouped' WHERE tag_group IS NULL OR tag_group = ''");
+}
+
+async function hasImageColumn(driver: DatabaseDriver, columnName: string): Promise<boolean> {
+  if (driver.dialect === "sqlite") {
+    const rows = await driver.queryAll<{ name: string }>("PRAGMA table_info(images)");
+    return rows.some((row) => row.name === columnName);
+  }
+
+  if (driver.dialect === "mysql") {
+    const row = await driver.queryOne<{ count: number }>(
+      "SELECT COUNT(*) AS count FROM information_schema.columns WHERE table_schema = DATABASE() AND table_name = 'images' AND column_name = ?",
+      [columnName],
+    );
+    return Number(row?.count ?? 0) > 0;
+  }
+
+  const row = await driver.queryOne<{ count: number }>(
+    "SELECT COUNT(*) AS count FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'images' AND column_name = ?",
+    [columnName],
+  );
+  return Number(row?.count ?? 0) > 0;
 }

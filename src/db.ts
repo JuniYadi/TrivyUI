@@ -13,6 +13,9 @@ const FULL_SCHEMA_SQL = `
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     repository_id INTEGER NOT NULL REFERENCES repositories(id) ON DELETE CASCADE,
     name TEXT UNIQUE NOT NULL,
+    repository_base TEXT NOT NULL,
+    tag TEXT,
+    tag_group TEXT NOT NULL DEFAULT 'ungrouped',
     last_scanned_at DATETIME
   );
 
@@ -144,6 +147,7 @@ export function initDb(path = "trivy.db"): TrivyUiDb {
 export function initFullSchema(db: TrivyUiDb): void {
   db.exec("PRAGMA foreign_keys = ON;");
   db.exec(FULL_SCHEMA_SQL);
+  evolveImagesSchemaSqlite(db);
   db.query(
     `
       INSERT INTO email_templates (template_key, name, subject, html_body, text_body, enabled)
@@ -248,6 +252,28 @@ export function initFullSchema(db: TrivyUiDb): void {
     "Monthly Vulnerability Statistics\nPeriod: {{period_start}} to {{period_end}}\nOpen: {{open_count}}\nClosed/Fixed: {{closed_count}}\nExisting: {{existing_count}}\nTotal in month: {{totalCount}}\n\nCritical: {{critical}}\nHigh: {{high}}\nMedium: {{medium}}\nLow: {{low}}\nUnknown: {{unknown}}\n\nGenerated at: {{generated_at}}",
     1
   );
+}
+
+function evolveImagesSchemaSqlite(db: TrivyUiDb): void {
+  if (!hasSqliteColumn(db, "images", "repository_base")) {
+    db.exec("ALTER TABLE images ADD COLUMN repository_base TEXT NOT NULL DEFAULT '';");
+  }
+
+  if (!hasSqliteColumn(db, "images", "tag")) {
+    db.exec("ALTER TABLE images ADD COLUMN tag TEXT;");
+  }
+
+  if (!hasSqliteColumn(db, "images", "tag_group")) {
+    db.exec("ALTER TABLE images ADD COLUMN tag_group TEXT NOT NULL DEFAULT 'ungrouped';");
+  }
+
+  db.exec("UPDATE images SET repository_base = name WHERE repository_base IS NULL OR repository_base = '';");
+  db.exec("UPDATE images SET tag_group = 'ungrouped' WHERE tag_group IS NULL OR tag_group = '';");
+}
+
+function hasSqliteColumn(db: TrivyUiDb, table: string, column: string): boolean {
+  const rows = db.query(`PRAGMA table_info(${table})`).all() as Array<{ name: string }>;
+  return rows.some((row) => row.name === column);
 }
 
 export function getHealthMessage(db: TrivyUiDb): string {

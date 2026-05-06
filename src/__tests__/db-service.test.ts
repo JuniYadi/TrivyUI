@@ -1,4 +1,6 @@
 import { describe, expect, test } from "bun:test";
+import { Database } from "bun:sqlite";
+import { unlinkSync } from "node:fs";
 import { initDb } from "../db";
 import {
   insertVulnerabilities,
@@ -64,5 +66,52 @@ describe("db service", () => {
     });
 
     db.close();
+  });
+
+  test("migrates legacy sqlite images schema before image upsert", () => {
+    const path = `/tmp/trivyui-migrate-${Date.now()}-${Math.random().toString(16).slice(2)}.db`;
+    const legacy = new Database(path, { create: true });
+    legacy.exec(`
+      PRAGMA foreign_keys = ON;
+      CREATE TABLE IF NOT EXISTS repositories (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name TEXT UNIQUE NOT NULL,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE TABLE IF NOT EXISTS images (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        repository_id INTEGER NOT NULL REFERENCES repositories(id) ON DELETE CASCADE,
+        name TEXT UNIQUE NOT NULL,
+        last_scanned_at DATETIME
+      );
+    `);
+    legacy.close();
+
+    const db = initDb(path);
+
+    const imageColumns = db.query("PRAGMA table_info(images)").all() as Array<{ name: string }>;
+    const columnNames = imageColumns.map((column) => column.name);
+    expect(columnNames).toContain("repository_base");
+    expect(columnNames).toContain("tag");
+    expect(columnNames).toContain("tag_group");
+
+    const repoId = upsertRepository(db, "ghcr.io/acme/migrated");
+    const imageId = upsertImage(db, repoId, "ghcr.io/acme/migrated:1.2.3", {
+      repository_base: "ghcr.io/acme/migrated",
+      tag: "1.2.3",
+      tag_group: "ungrouped",
+    });
+
+    const imageRow = db
+      .query("SELECT repository_base, tag, tag_group FROM images WHERE id = ?1")
+      .get(imageId) as { repository_base: string; tag: string | null; tag_group: string };
+    expect(imageRow).toEqual({
+      repository_base: "ghcr.io/acme/migrated",
+      tag: "1.2.3",
+      tag_group: "ungrouped",
+    });
+
+    db.close();
+    unlinkSync(path);
   });
 });

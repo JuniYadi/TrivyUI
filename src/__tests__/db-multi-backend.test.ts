@@ -122,6 +122,27 @@ async function hasVulnerabilityIndex(db: DatabaseDriver): Promise<boolean> {
   return Number(row?.count ?? 0) > 0;
 }
 
+async function hasImageColumn(db: DatabaseDriver, column: string): Promise<boolean> {
+  if (db.dialect === "sqlite") {
+    const rows = await db.queryAll<{ name: string }>("PRAGMA table_info(images)");
+    return rows.some((row) => row.name === column);
+  }
+
+  if (db.dialect === "mysql") {
+    const row = await db.queryOne<{ count: number }>(
+      "SELECT COUNT(*) AS count FROM information_schema.columns WHERE table_schema = DATABASE() AND table_name = 'images' AND column_name = ?",
+      [column],
+    );
+    return Number(row?.count ?? 0) > 0;
+  }
+
+  const row = await db.queryOne<{ count: number }>(
+    "SELECT COUNT(*) AS count FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'images' AND column_name = ?",
+    [column],
+  );
+  return Number(row?.count ?? 0) > 0;
+}
+
 for (const backend of ["sqlite", "mysql", "postgres"] as const) {
   describe(`multi-db (${backend})`, () => {
     const unavailable = !backendAvailability[backend];
@@ -243,6 +264,53 @@ for (const backend of ["sqlite", "mysql", "postgres"] as const) {
           ["CVE-2026-0002"],
         );
         expect(invalidSeverity?.severity).toBe("UNKNOWN");
+      });
+    });
+
+    test(`migrates existing images table on ${backend}`, async () => {
+      if (unavailable) {
+        console.info(`[db-multi-backend] skipping ${backend} migration test (backend unavailable)`);
+        return;
+      }
+
+      await withBackend(backend, async (db) => {
+        await db.execute("DROP TABLE IF EXISTS images");
+        const legacyIdType = db.dialect === "mysql" ? "INT AUTO_INCREMENT PRIMARY KEY" : db.dialect === "postgres" ? "SERIAL PRIMARY KEY" : "INTEGER PRIMARY KEY AUTOINCREMENT";
+        const legacyTextType = db.dialect === "mysql" ? "VARCHAR(512)" : "TEXT";
+        const legacyTsType = db.dialect === "postgres" ? "TIMESTAMP" : "DATETIME";
+        await db.execute(`
+          CREATE TABLE images (
+            id ${legacyIdType},
+            repository_id INTEGER NOT NULL,
+            name ${legacyTextType} UNIQUE NOT NULL,
+            last_scanned_at ${legacyTsType}
+          )
+        `);
+
+        await initSchema(db);
+
+        expect(await hasImageColumn(db, "repository_base")).toBe(true);
+        expect(await hasImageColumn(db, "tag")).toBe(true);
+        expect(await hasImageColumn(db, "tag_group")).toBe(true);
+
+        const repoId = await upsertRepositoryMultiDb(db, `ghcr.io/acme/${backend}-upgrade`);
+        const imageName = `ghcr.io/acme/${backend}-upgrade:latest`;
+        const imageId = await upsertImageMultiDb(db, repoId, imageName, {
+          repository_base: `ghcr.io/acme/${backend}-upgrade`,
+          tag: "latest",
+          tag_group: "ungrouped",
+        });
+
+        const row = await db.queryOne<{ repository_base: string; tag: string | null; tag_group: string }>(
+          "SELECT repository_base, tag, tag_group FROM images WHERE id = ?",
+          [imageId],
+        );
+
+        expect(row).toEqual({
+          repository_base: `ghcr.io/acme/${backend}-upgrade`,
+          tag: "latest",
+          tag_group: "ungrouped",
+        });
       });
     });
   });
