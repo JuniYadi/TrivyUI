@@ -58,6 +58,9 @@ export function buildSchemaStatements(dialect: DatabaseDriver["dialect"]): strin
       id ${idType(dialect)},
       repository_id INTEGER NOT NULL REFERENCES repositories(id) ON DELETE CASCADE,
       name ${textColumn(dialect, 512)} UNIQUE NOT NULL,
+      repository_base ${textColumn(dialect, 512)} NOT NULL,
+      tag ${textColumn(dialect, 255)},
+      tag_group ${textColumn(dialect, 255)} NOT NULL DEFAULT 'ungrouped',
       last_scanned_at ${ts}
     )
   `);

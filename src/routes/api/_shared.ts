@@ -1,5 +1,6 @@
 import type { Database } from "bun:sqlite";
 import { insertScanPackages, insertVulnerabilities, upsertImage, upsertRepository, upsertScanResult } from "../../services/db-service";
+import { parseImageTagGrouping } from "../../services/image-tag-grouping";
 import { parseTrivyResult } from "../../services/trivy-parser";
 
 export const MAX_UPLOAD_BYTES = 10 * 1024 * 1024;
@@ -75,8 +76,13 @@ export function importTrivyPayload(db: Database, parsedJson: unknown, rawJson: s
 
   const tx = db.transaction(() => {
     const parsed = parseTrivyResult(parsedJson);
+    const imageGrouping = parseImageTagGrouping(parsed.image_name);
     const repositoryId = upsertRepository(db, parsed.repo_name);
-    const imageId = upsertImage(db, repositoryId, parsed.image_name);
+    const imageId = upsertImage(db, repositoryId, parsed.image_name, {
+      repository_base: imageGrouping.repository_base,
+      tag: imageGrouping.tag,
+      tag_group: imageGrouping.tag_group,
+    });
     const scanResultId = upsertScanResult(db, imageId, rawJson, parsed.source, parsed.scan_date);
     insertScanPackages(db, scanResultId, parsed.packages);
     insertVulnerabilities(db, scanResultId, parsed.vulnerabilities);

@@ -22,7 +22,11 @@ describe("db service", () => {
     expect(names).toContain("vulnerabilities");
 
     const repoId = upsertRepository(db, "ghcr.io/acme/trivyui");
-    const imageId = upsertImage(db, repoId, "ghcr.io/acme/trivyui:1.0.0");
+    const imageId = upsertImage(db, repoId, "ghcr.io/acme/trivyui:1.0.0", {
+      repository_base: "ghcr.io/acme/trivyui",
+      tag: "1.0.0",
+      tag_group: "ungrouped",
+    });
     const scanResultId = upsertScanResult(
       db,
       imageId,
@@ -48,6 +52,16 @@ describe("db service", () => {
       .get(scanResultId) as { count: number };
 
     expect(vulnCount.count).toBe(1);
+
+    const imageRow = db
+      .query("SELECT repository_base, tag, tag_group FROM images WHERE id = ?1")
+      .get(imageId) as { repository_base: string; tag: string | null; tag_group: string };
+
+    expect(imageRow).toEqual({
+      repository_base: "ghcr.io/acme/trivyui",
+      tag: "1.0.0",
+      tag_group: "ungrouped",
+    });
 
     db.close();
   });

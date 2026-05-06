@@ -124,6 +124,9 @@ export interface Image {
   id: number;
   repository_id: number;
   name: string;
+  repository_base: string;
+  tag: string | null;
+  tag_group: string;
   last_scanned_at: string | null;
 }
 
