@@ -362,11 +362,12 @@ function buildRepositoryDetailResponse(
         (
           SELECT COUNT(DISTINCT vs2.package_name || ':' || COALESCE(vs2.installed_version, ''))
           FROM vulnerability_states vs2
-          WHERE vs2.image_id = i.id
+          WHERE vs2.repository_id = i.repository_id
+            AND vs2.tag_group = i.tag_group
             AND (? = 'all' OR vs2.state = ?)
         ) as vulnerable_package_count
       FROM images i
-      LEFT JOIN vulnerability_states v ON v.image_id = i.id
+      LEFT JOIN vulnerability_states v ON v.repository_id = i.repository_id AND v.tag_group = i.tag_group
       WHERE i.repository_id = ?
       GROUP BY i.id, i.name, i.last_scanned_at
       ORDER BY datetime(i.last_scanned_at) DESC, i.id DESC

@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import { initDb } from "../db";
 import { importTrivyPayload } from "../routes/api/_shared";
+import { createImagesHandler } from "../routes/api/images";
 import { createRepositoriesHandler } from "../routes/api/repositories";
 
 const dbs: ReturnType<typeof initDb>[] = [];
@@ -403,6 +404,55 @@ describe("GET /api/repositories/:id", () => {
     expect(allBody.data.by_severity.HIGH).toBe(1);
     expect(allBody.data.by_severity.CRITICAL).toBe(1);
     expect(allBody.data.total_vulnerable_packages).toBe(2);
+  });
+
+  test("uses tag_group-scoped image summaries matching /api/images", async () => {
+    const db = createTestDb();
+
+    importTrivyPayload(
+      db,
+      {
+        ArtifactName: "ghcr.io/acme/svc:dev-1",
+        Metadata: { Source: "ci", CreatedAt: "2026-04-26T10:00:00.000Z" },
+        Results: [{ Vulnerabilities: [{ VulnerabilityID: "CVE-PARITY-001", Severity: "HIGH", PkgName: "glibc" }] }],
+      },
+      "{}",
+    );
+    importTrivyPayload(
+      db,
+      {
+        ArtifactName: "ghcr.io/acme/svc:dev-2",
+        Metadata: { Source: "ci", CreatedAt: "2026-04-27T10:00:00.000Z" },
+        Results: [{ Vulnerabilities: [] }],
+      },
+      "{}",
+    );
+
+    const target = db.query("SELECT id FROM repositories WHERE name = 'ghcr.io/acme/svc'").get() as { id: number };
+    const repositoriesHandler = createRepositoriesHandler(db);
+    const imagesHandler = createImagesHandler(db);
+
+    const repositoryResponse = repositoriesHandler(new Request(`http://localhost/api/repositories/${target.id}?state=done`));
+    const repositoryBody = (await repositoryResponse.json()) as {
+      data: { images: Array<{ name: string; vulnerability_count: number; critical_count: number }> };
+    };
+
+    const imagesResponse = imagesHandler(new Request("http://localhost/api/images?state=done"));
+    const imagesBody = (await imagesResponse.json()) as {
+      data: { items: Array<{ name: string; vulnerability_count: number; critical_count: number }> };
+    };
+
+    const repoByName = new Map(repositoryBody.data.images.map((image) => [image.name, image]));
+    const apiImages = imagesBody.data.items.filter((image) => image.name.startsWith("ghcr.io/acme/svc:"));
+
+    expect(repositoryResponse.status).toBe(200);
+    expect(imagesResponse.status).toBe(200);
+
+    for (const image of apiImages) {
+      const repositoryImage = repoByName.get(image.name);
+      expect(repositoryImage?.vulnerability_count).toBe(image.vulnerability_count);
+      expect(repositoryImage?.critical_count).toBe(image.critical_count);
+    }
   });
 
   test("returns full repository detail by encoded name slug", async () => {
