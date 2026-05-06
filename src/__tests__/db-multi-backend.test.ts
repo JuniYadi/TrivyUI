@@ -158,9 +158,31 @@ for (const backend of ["sqlite", "mysql", "postgres"] as const) {
 
       await withBackend(backend, async (db) => {
         const suffix = `${backend}-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`;
+        const imageName = `ghcr.io/acme/${suffix}:latest`;
 
         const repoId = await upsertRepositoryMultiDb(db, `ghcr.io/acme/${suffix}`);
-        const imageId = await upsertImageMultiDb(db, repoId, `ghcr.io/acme/${suffix}:latest`);
+        const imageId = await upsertImageMultiDb(db, repoId, imageName, {
+          repository_base: `ghcr.io/acme/${suffix}`,
+          tag: "latest",
+          tag_group: "ungrouped",
+        });
+
+        await upsertImageMultiDb(db, repoId, imageName, {
+          repository_base: `ghcr.io/acme/${suffix}`,
+          tag: "prod-12",
+          tag_group: "prod",
+        });
+
+        const imageRow = await db.queryOne<{ repository_base: string; tag: string | null; tag_group: string }>(
+          "SELECT repository_base, tag, tag_group FROM images WHERE id = ?",
+          [imageId],
+        );
+        expect(imageRow).toEqual({
+          repository_base: `ghcr.io/acme/${suffix}`,
+          tag: "prod-12",
+          tag_group: "prod",
+        });
+
         const scanResultId = await upsertScanResultMultiDb(
           db,
           imageId,
@@ -240,7 +262,11 @@ describe("multi-db unhappy path", () => {
   test("rejects or normalizes invalid severity", async () => {
     await withBackend("sqlite", async (db) => {
       const repoId = await upsertRepositoryMultiDb(db, "ghcr.io/acme/trivyui");
-      const imageId = await upsertImageMultiDb(db, repoId, "ghcr.io/acme/trivyui:invalid-severity");
+      const imageId = await upsertImageMultiDb(db, repoId, "ghcr.io/acme/trivyui:invalid-severity", {
+        repository_base: "ghcr.io/acme/trivyui",
+        tag: "invalid-severity",
+        tag_group: "ungrouped",
+      });
       const scanResultId = await upsertScanResultMultiDb(db, imageId, "{}", "manual");
 
       await insertVulnerabilitiesMultiDb(db, scanResultId, [

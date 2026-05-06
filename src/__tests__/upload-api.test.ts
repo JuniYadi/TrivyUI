@@ -139,6 +139,19 @@ describe("upload/import API endpoints", () => {
     expect(body.data.package_count).toBe(1);
     expect(body.data.vulnerable_package_count).toBe(1);
     expect(body.data.clean_package_count).toBe(0);
+
+    const imageRow = db
+      .query("SELECT repository_base, tag, tag_group FROM images WHERE name = ?1")
+      .get("ghcr.io/acme/trivyui:1.2.3") as
+      | { repository_base: string; tag: string | null; tag_group: string }
+      | null;
+
+    expect(imageRow).not.toBeNull();
+    expect(imageRow).toEqual({
+      repository_base: "ghcr.io/acme/trivyui",
+      tag: "1.2.3",
+      tag_group: "ungrouped",
+    });
   });
 
   test("POST /api/upload stays successful when notification sending fails", async () => {
