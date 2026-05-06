@@ -193,6 +193,58 @@ describe("GET /api/repositories", () => {
     expect(body.data.pagination.page).toBe(1);
     expect(body.data.pagination.limit).toBe(25);
   });
+
+  test("supports state filter and keeps open scoped by tag_group", async () => {
+    const db = createTestDb();
+
+    importTrivyPayload(
+      db,
+      {
+        ArtifactName: "ghcr.io/acme/svc:dev-1",
+        Metadata: { Source: "ci", CreatedAt: "2026-04-26T10:00:00.000Z" },
+        Results: [{ Vulnerabilities: [{ VulnerabilityID: "CVE-REPO-SCOPE", Severity: "CRITICAL", PkgName: "openssl" }] }],
+      },
+      "{}",
+    );
+    importTrivyPayload(
+      db,
+      {
+        ArtifactName: "ghcr.io/acme/svc:stg-1",
+        Metadata: { Source: "ci", CreatedAt: "2026-04-26T10:05:00.000Z" },
+        Results: [{ Vulnerabilities: [{ VulnerabilityID: "CVE-REPO-SCOPE", Severity: "CRITICAL", PkgName: "openssl" }] }],
+      },
+      "{}",
+    );
+    importTrivyPayload(
+      db,
+      {
+        ArtifactName: "ghcr.io/acme/svc:dev-2",
+        Metadata: { Source: "ci", CreatedAt: "2026-04-27T10:00:00.000Z" },
+        Results: [{ Vulnerabilities: [] }],
+      },
+      "{}",
+    );
+
+    const handler = createRepositoriesHandler(db);
+    const openResponse = handler(new Request("http://localhost/api/repositories"));
+    const openBody = (await openResponse.json()) as {
+      data: { items: Array<{ name: string; vulnerability_count: number }> };
+    };
+
+    const doneResponse = handler(new Request("http://localhost/api/repositories?state=done"));
+    const doneBody = (await doneResponse.json()) as {
+      data: { items: Array<{ name: string; vulnerability_count: number }> };
+    };
+
+    const openSvc = openBody.data.items.find((item) => item.name === "ghcr.io/acme/svc");
+    const doneSvc = doneBody.data.items.find((item) => item.name === "ghcr.io/acme/svc");
+
+    expect(openResponse.status).toBe(200);
+    expect(openSvc?.vulnerability_count).toBe(1);
+
+    expect(doneResponse.status).toBe(200);
+    expect(doneSvc?.vulnerability_count).toBe(1);
+  });
 });
 
 describe("GET /api/repositories/:id", () => {
@@ -222,6 +274,67 @@ describe("GET /api/repositories/:id", () => {
     expect(body.data.by_severity.CRITICAL).toBe(1);
     expect(body.data.images.length).toBe(2);
     expect(body.data.vulnerabilities.length).toBe(3);
+  });
+
+  test("includes group summaries and vulnerability state fields", async () => {
+    const db = createTestDb();
+
+    importTrivyPayload(
+      db,
+      {
+        ArtifactName: "ghcr.io/acme/svc:dev-1",
+        Metadata: { Source: "ci", CreatedAt: "2026-04-26T10:00:00.000Z" },
+        Results: [{ Vulnerabilities: [{ VulnerabilityID: "CVE-REPO-DETAIL", Severity: "HIGH", PkgName: "glibc" }] }],
+      },
+      "{}",
+    );
+    importTrivyPayload(
+      db,
+      {
+        ArtifactName: "ghcr.io/acme/svc:stg-1",
+        Metadata: { Source: "ci", CreatedAt: "2026-04-26T10:05:00.000Z" },
+        Results: [{ Vulnerabilities: [{ VulnerabilityID: "CVE-REPO-DETAIL", Severity: "HIGH", PkgName: "glibc" }] }],
+      },
+      "{}",
+    );
+    importTrivyPayload(
+      db,
+      {
+        ArtifactName: "ghcr.io/acme/svc:dev-2",
+        Metadata: { Source: "ci", CreatedAt: "2026-04-27T10:00:00.000Z" },
+        Results: [{ Vulnerabilities: [] }],
+      },
+      "{}",
+    );
+
+    const target = db.query("SELECT id FROM repositories WHERE name = 'ghcr.io/acme/svc'").get() as { id: number };
+    const handler = createRepositoriesHandler(db);
+    const response = handler(new Request(`http://localhost/api/repositories/${target.id}`));
+    const body = (await response.json()) as {
+      data: {
+        group_summaries: Array<{
+          group_name: string;
+          open_vulnerability_count: number;
+          last_scan_at: string | null;
+          status: string;
+        }>;
+        vulnerabilities: Array<{ tag_group: string; state: string; resolved_at: string | null }>;
+      };
+    };
+
+    const devGroup = body.data.group_summaries.find((group) => group.group_name === "dev");
+    const stgGroup = body.data.group_summaries.find((group) => group.group_name === "stg");
+
+    expect(response.status).toBe(200);
+    expect(devGroup?.open_vulnerability_count).toBe(0);
+    expect(devGroup?.status).toBe("healthy");
+    expect(stgGroup?.open_vulnerability_count).toBe(1);
+    expect(stgGroup?.status).toBe("at_risk");
+
+    expect(body.data.vulnerabilities.length).toBeGreaterThan(0);
+    expect(body.data.vulnerabilities[0]).toHaveProperty("tag_group");
+    expect(body.data.vulnerabilities[0]).toHaveProperty("state");
+    expect(body.data.vulnerabilities[0]).toHaveProperty("resolved_at");
   });
 
   test("returns full repository detail by encoded name slug", async () => {

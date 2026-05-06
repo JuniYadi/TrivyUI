@@ -156,6 +156,9 @@ export interface Vulnerability {
 export type VulnerabilitySortField = "cve_id" | "severity" | "package_name" | "score" | "scanned_at";
 
 export interface VulnerabilityWithRelations extends Vulnerability {
+  tag_group?: string;
+  state?: "open" | "done";
+  resolved_at?: string | null;
   repository: {
     id: number;
     name: string;
@@ -210,6 +213,12 @@ export interface RepositoryDetailResponse {
   total_clean_packages: number;
   clean_package_rate: number;
   images: RepositoryImageSummary[];
+  group_summaries?: Array<{
+    group_name: string;
+    open_vulnerability_count: number;
+    last_scan_at: string | null;
+    status: "healthy" | "at_risk";
+  }>;
   vulnerabilities: VulnerabilityWithRelations[];
 }
 

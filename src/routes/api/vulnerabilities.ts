@@ -4,6 +4,103 @@ import { buildSuccessResponse, sendError } from "./_shared";
 
 const ALLOWED_SORT_FIELDS: VulnerabilitySortField[] = ["cve_id", "severity", "package_name", "score", "scanned_at"];
 const ALLOWED_SEVERITIES: Severity[] = ["CRITICAL", "HIGH", "MEDIUM", "LOW", "UNKNOWN"];
+type VulnerabilityStateFilter = "open" | "done" | "all";
+
+function parseStateFilter(url: URL): VulnerabilityStateFilter {
+  const raw = (url.searchParams.get("state") || "open").toLowerCase();
+  if (raw === "done" || raw === "all") {
+    return raw;
+  }
+
+  return "open";
+}
+
+function buildStateWhereClause(state: VulnerabilityStateFilter): string {
+  if (state === "all") {
+    return "";
+  }
+
+  return "WHERE vs.state = ?";
+}
+
+const VULNERABILITY_STATE_CTE = `
+  WITH ranked_group_scans AS (
+    SELECT
+      sr.id AS scan_result_id,
+      i.repository_id,
+      i.tag_group,
+      ROW_NUMBER() OVER (
+        PARTITION BY i.repository_id, i.tag_group
+        ORDER BY datetime(sr.scan_date) DESC, sr.id DESC
+      ) AS row_num
+    FROM scan_results sr
+    JOIN images i ON i.id = sr.image_id
+  ),
+  latest_group_scans AS (
+    SELECT scan_result_id, repository_id, tag_group
+    FROM ranked_group_scans
+    WHERE row_num = 1
+  ),
+  latest_keys AS (
+    SELECT lgs.repository_id, lgs.tag_group, v.cve_id
+    FROM latest_group_scans lgs
+    JOIN vulnerabilities v ON v.scan_result_id = lgs.scan_result_id
+    GROUP BY lgs.repository_id, lgs.tag_group, v.cve_id
+  ),
+  vulnerability_rows AS (
+    SELECT
+      v.id,
+      v.scan_result_id,
+      v.cve_id,
+      v.severity,
+      v.package_name,
+      v.installed_version,
+      v.fixed_version,
+      v.title,
+      v.description,
+      v.score,
+      v.created_at,
+      sr.scan_date AS scanned_at,
+      i.repository_id,
+      i.tag_group,
+      r.name AS repository_name,
+      i.id AS image_id,
+      i.name AS image_name
+    FROM vulnerabilities v
+    JOIN scan_results sr ON sr.id = v.scan_result_id
+    JOIN images i ON i.id = sr.image_id
+    JOIN repositories r ON r.id = i.repository_id
+  ),
+  resolved_state AS (
+    SELECT
+      vr.repository_id,
+      vr.tag_group,
+      vr.cve_id,
+      MAX(datetime(vr.scanned_at)) AS resolved_at
+    FROM vulnerability_rows vr
+    LEFT JOIN latest_keys lk
+      ON lk.repository_id = vr.repository_id
+     AND lk.tag_group = vr.tag_group
+     AND lk.cve_id = vr.cve_id
+    WHERE lk.cve_id IS NULL
+    GROUP BY vr.repository_id, vr.tag_group, vr.cve_id
+  ),
+  vulnerability_states AS (
+    SELECT
+      vr.*,
+      CASE WHEN lk.cve_id IS NULL THEN 'done' ELSE 'open' END AS state,
+      CASE WHEN lk.cve_id IS NULL THEN rs.resolved_at ELSE NULL END AS resolved_at
+    FROM vulnerability_rows vr
+    LEFT JOIN latest_keys lk
+      ON lk.repository_id = vr.repository_id
+     AND lk.tag_group = vr.tag_group
+     AND lk.cve_id = vr.cve_id
+    LEFT JOIN resolved_state rs
+      ON rs.repository_id = vr.repository_id
+     AND rs.tag_group = vr.tag_group
+     AND rs.cve_id = vr.cve_id
+  )
+`;
 
 function parsePositiveInt(value: string | null, fallback: number): number {
   if (!value) {
@@ -19,7 +116,7 @@ function parsePositiveInt(value: string | null, fallback: number): number {
 }
 
 function severityCaseExpression(): string {
-  return `CASE v.severity
+  return `CASE vs.severity
     WHEN 'CRITICAL' THEN 0
     WHEN 'HIGH' THEN 1
     WHEN 'MEDIUM' THEN 2
@@ -31,19 +128,19 @@ function severityCaseExpression(): string {
 
 function buildListOrderBy(sort: VulnerabilitySortField, order: "asc" | "desc"): string {
   if (sort === "severity") {
-    return `${severityCaseExpression()} ${order === "desc" ? "ASC" : "DESC"}, datetime(sr.scan_date) DESC, v.id DESC`;
+    return `${severityCaseExpression()} ${order === "desc" ? "ASC" : "DESC"}, datetime(vs.scanned_at) DESC, vs.id DESC`;
   }
 
   const columnMap: Record<Exclude<VulnerabilitySortField, "severity">, string> = {
-    cve_id: "v.cve_id",
-    package_name: "v.package_name",
-    score: "COALESCE(v.score, -1)",
-    scanned_at: "datetime(sr.scan_date)",
+    cve_id: "vs.cve_id",
+    package_name: "vs.package_name",
+    score: "COALESCE(vs.score, -1)",
+    scanned_at: "datetime(vs.scanned_at)",
   };
 
   const direction = order === "asc" ? "ASC" : "DESC";
   const column = columnMap[sort as Exclude<VulnerabilitySortField, "severity">];
-  return `${column} ${direction}, v.id DESC`;
+  return `${column} ${direction}, vs.id DESC`;
 }
 
 function getDetailId(pathname: string): number | null {
@@ -73,6 +170,9 @@ interface ListRow {
   image_id: number;
   image_name: string;
   scanned_at: string;
+  tag_group: string;
+  state: "open" | "done";
+  resolved_at: string | null;
 }
 
 function toListItem(row: ListRow) {
@@ -97,6 +197,9 @@ function toListItem(row: ListRow) {
       name: row.image_name,
     },
     scanned_at: row.scanned_at,
+    tag_group: row.tag_group,
+    state: row.state,
+    resolved_at: row.resolved_at,
   };
 }
 
@@ -123,6 +226,7 @@ function handleVulnerabilityList(db: Database, request: Request): Response {
   const pkg = url.searchParams.get("package");
   const cveId = url.searchParams.get("cve_id");
   const search = url.searchParams.get("search")?.trim() || "";
+  const state = parseStateFilter(url);
 
   if (severity && !ALLOWED_SEVERITIES.includes(severity as Severity)) {
     return sendError(400, "INVALID_SEVERITY", "Invalid severity value");
@@ -132,46 +236,47 @@ function handleVulnerabilityList(db: Database, request: Request): Response {
   const args: Array<string | number> = [];
 
   if (severity) {
-    where.push("v.severity = ?");
+    where.push("vs.severity = ?");
     args.push(severity);
   }
 
   if (repository) {
-    where.push("r.name = ?");
+    where.push("vs.repository_name = ?");
     args.push(repository);
   }
 
   if (image) {
-    where.push("i.name = ?");
+    where.push("vs.image_name = ?");
     args.push(image);
   }
 
   if (pkg) {
-    where.push("v.package_name LIKE ?");
+    where.push("vs.package_name LIKE ?");
     args.push(`%${pkg}%`);
   }
 
   if (cveId) {
-    where.push("v.cve_id = ?");
+    where.push("vs.cve_id = ?");
     args.push(cveId);
   }
 
   if (search) {
-    where.push("(v.cve_id LIKE ? OR v.package_name LIKE ? OR COALESCE(v.description, '') LIKE ?)");
+    where.push("(vs.cve_id LIKE ? OR vs.package_name LIKE ? OR COALESCE(vs.description, '') LIKE ?)");
     args.push(`%${search}%`, `%${search}%`, `%${search}%`);
   }
 
-  const whereClause = where.length > 0 ? `WHERE ${where.join(" AND ")}` : "";
+  const stateWhere = buildStateWhereClause(state);
+  const queryArgs: Array<string | number> = state === "all" ? [...args] : [state, ...args];
+  const mergedWhere = [stateWhere, where.length > 0 ? (stateWhere ? `AND ${where.join(" AND ")}` : `WHERE ${where.join(" AND ")}`) : ""]
+    .filter(Boolean)
+    .join(" ");
 
   const baseFrom = `
-    FROM vulnerabilities v
-    JOIN scan_results sr ON sr.id = v.scan_result_id
-    JOIN images i ON i.id = sr.image_id
-    JOIN repositories r ON r.id = i.repository_id
+    FROM vulnerability_states vs
   `;
 
-  const countSql = `SELECT COUNT(*) AS total ${baseFrom} ${whereClause}`;
-  const countRow = db.query(countSql).get(...args) as { total: number };
+  const countSql = `${VULNERABILITY_STATE_CTE} SELECT COUNT(*) AS total ${baseFrom} ${mergedWhere}`;
+  const countRow = db.query(countSql).get(...queryArgs) as { total: number };
 
   const totalItems = Number(countRow?.total ?? 0);
   const totalPages = totalItems === 0 ? 0 : Math.ceil(totalItems / limit);
@@ -181,29 +286,32 @@ function handleVulnerabilityList(db: Database, request: Request): Response {
 
   const listSql = `
     SELECT
-      v.id,
-      v.scan_result_id,
-      v.cve_id,
-      v.severity,
-      v.package_name,
-      v.installed_version,
-      v.fixed_version,
-      v.title,
-      v.description,
-      v.score,
-      v.created_at,
-      r.id AS repository_id,
-      r.name AS repository_name,
-      i.id AS image_id,
-      i.name AS image_name,
-      sr.scan_date AS scanned_at
+      vs.id,
+      vs.scan_result_id,
+      vs.cve_id,
+      vs.severity,
+      vs.package_name,
+      vs.installed_version,
+      vs.fixed_version,
+      vs.title,
+      vs.description,
+      vs.score,
+      vs.created_at,
+      vs.repository_id,
+      vs.repository_name,
+      vs.image_id,
+      vs.image_name,
+      vs.scanned_at,
+      vs.tag_group,
+      vs.state,
+      vs.resolved_at
     ${baseFrom}
-    ${whereClause}
+    ${mergedWhere}
     ORDER BY ${orderBy}
     LIMIT ? OFFSET ?
   `;
 
-  const rows = db.query(listSql).all(...args, limit, offset) as ListRow[];
+  const rows = db.query(`${VULNERABILITY_STATE_CTE} ${listSql}`).all(...queryArgs, limit, offset) as ListRow[];
 
   const data: VulnerabilityListResponse = {
     items: rows.map((row) => toListItem(row)),
@@ -221,31 +329,31 @@ function handleVulnerabilityList(db: Database, request: Request): Response {
 function handleVulnerabilityDetail(db: Database, id: number): Response {
   const detailSql = `
     SELECT
-      v.id,
-      v.scan_result_id,
-      v.cve_id,
-      v.severity,
-      v.package_name,
-      v.installed_version,
-      v.fixed_version,
-      v.title,
-      v.description,
-      v.score,
-      v.created_at,
-      r.id AS repository_id,
-      r.name AS repository_name,
-      i.id AS image_id,
-      i.name AS image_name,
-      sr.scan_date AS scanned_at
-    FROM vulnerabilities v
-    JOIN scan_results sr ON sr.id = v.scan_result_id
-    JOIN images i ON i.id = sr.image_id
-    JOIN repositories r ON r.id = i.repository_id
-    WHERE v.id = ?
+      vs.id,
+      vs.scan_result_id,
+      vs.cve_id,
+      vs.severity,
+      vs.package_name,
+      vs.installed_version,
+      vs.fixed_version,
+      vs.title,
+      vs.description,
+      vs.score,
+      vs.created_at,
+      vs.repository_id,
+      vs.repository_name,
+      vs.image_id,
+      vs.image_name,
+      vs.scanned_at,
+      vs.tag_group,
+      vs.state,
+      vs.resolved_at
+    FROM vulnerability_states vs
+    WHERE vs.id = ?
     LIMIT 1
   `;
 
-  const row = db.query(detailSql).get(id) as ListRow | null;
+  const row = db.query(`${VULNERABILITY_STATE_CTE} ${detailSql}`).get(id) as ListRow | null;
   if (!row) {
     return sendError(404, "VULNERABILITY_NOT_FOUND", "Vulnerability not found");
   }
