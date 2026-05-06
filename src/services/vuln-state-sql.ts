@@ -12,7 +12,7 @@ WITH ranked_group_scans AS (
   JOIN images i ON i.id = sr.image_id
 ),
 latest_group_scans AS (
-  SELECT scan_result_id, repository_id
+  SELECT scan_result_id, repository_id, tag_group
   FROM ranked_group_scans
   WHERE row_num = 1
 ),
@@ -24,7 +24,8 @@ open_vulnerabilities AS (
     v.severity,
     v.package_name,
     v.installed_version,
-    lgs.repository_id
+    lgs.repository_id,
+    lgs.tag_group
   FROM latest_group_scans lgs
   JOIN vulnerabilities v ON v.scan_result_id = lgs.scan_result_id
 )

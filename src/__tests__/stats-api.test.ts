@@ -347,4 +347,53 @@ describe("GET /api/stats", () => {
     expect(body.data.total_clean_packages).toBe(1);
     expect(body.data.clean_package_rate).toBe(50);
   });
+
+  test("counts same CVE separately across dev and stg open-state groups", async () => {
+    const db = createTestDb();
+
+    importTrivyPayload(
+      db,
+      {
+        ArtifactName: "ghcr.io/acme/app:dev-1",
+        Metadata: { Source: "ci", CreatedAt: "2026-04-26T10:00:00.000Z" },
+        Results: [
+          {
+            Vulnerabilities: [{ VulnerabilityID: "CVE-SHARED-1", Severity: "HIGH", PkgName: "openssl" }],
+          },
+        ],
+      },
+      "{}"
+    );
+
+    importTrivyPayload(
+      db,
+      {
+        ArtifactName: "ghcr.io/acme/app:stg-1",
+        Metadata: { Source: "ci", CreatedAt: "2026-04-26T11:00:00.000Z" },
+        Results: [
+          {
+            Vulnerabilities: [{ VulnerabilityID: "CVE-SHARED-1", Severity: "HIGH", PkgName: "openssl" }],
+          },
+        ],
+      },
+      "{}"
+    );
+
+    const response = createStatsHandler(db)();
+    const body = (await response.json()) as {
+      success: boolean;
+      data: {
+        total_vulnerabilities: number;
+        by_severity: Record<string, number>;
+        top_repositories: Array<{ name: string; vulnerability_count: number }>;
+      };
+    };
+
+    expect(response.status).toBe(200);
+    expect(body.success).toBe(true);
+    expect(body.data.total_vulnerabilities).toBe(2);
+    expect(body.data.by_severity.HIGH).toBe(2);
+    expect(body.data.top_repositories[0]?.name).toBe("ghcr.io/acme/app");
+    expect(body.data.top_repositories[0]?.vulnerability_count).toBe(2);
+  });
 });

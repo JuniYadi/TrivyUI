@@ -27,7 +27,7 @@ export function createStatsHandler(db: Database) {
       const totalRow = db
         .query(
           withOpenVulnerabilityState(`
-          SELECT COUNT(DISTINCT ov.repository_id || ':' || ov.cve_id) as count
+          SELECT COUNT(DISTINCT ov.repository_id || ':' || ov.tag_group || ':' || ov.cve_id) as count
           FROM open_vulnerabilities ov
           `)
         )
@@ -57,7 +57,7 @@ export function createStatsHandler(db: Database) {
       const bySeverityRows = db
         .query(
           withOpenVulnerabilityState(`
-          SELECT ov.severity as severity, COUNT(DISTINCT ov.repository_id || ':' || ov.cve_id) as count
+          SELECT ov.severity as severity, COUNT(DISTINCT ov.repository_id || ':' || ov.tag_group || ':' || ov.cve_id) as count
           FROM open_vulnerabilities ov
           GROUP BY ov.severity
           `)
@@ -84,12 +84,12 @@ export function createStatsHandler(db: Database) {
           SELECT
             r.id as id,
             r.name as name,
-            COUNT(DISTINCT ov.cve_id) as vulnerability_count,
-            COUNT(DISTINCT CASE WHEN ov.severity = 'CRITICAL' THEN ov.cve_id END) as critical_count
+            COUNT(DISTINCT ov.repository_id || ':' || ov.tag_group || ':' || ov.cve_id) as vulnerability_count,
+            COUNT(DISTINCT CASE WHEN ov.severity = 'CRITICAL' THEN ov.repository_id || ':' || ov.tag_group || ':' || ov.cve_id END) as critical_count
           FROM repositories r
           JOIN open_vulnerabilities ov ON ov.repository_id = r.id
           GROUP BY r.id, r.name
-          HAVING COUNT(DISTINCT ov.cve_id) > 0
+          HAVING COUNT(DISTINCT ov.repository_id || ':' || ov.tag_group || ':' || ov.cve_id) > 0
           ORDER BY vulnerability_count DESC, critical_count DESC, r.name ASC
           LIMIT 10
           `)
