@@ -100,7 +100,7 @@ describe("GET /api/images", () => {
     expect(body.data.items[0]?.critical_count).toBe(1);
   });
 
-  test("supports state filter and returns open counts by default", async () => {
+  test("applies state counts at tag_group scope for each image row", async () => {
     const db = createTestDb();
 
     importTrivyPayload(
@@ -145,7 +145,8 @@ describe("GET /api/images", () => {
 
     const openDev = openBody.data.items.find((item) => item.name === "ghcr.io/acme/svc:dev-2");
     const openStg = openBody.data.items.find((item) => item.name === "ghcr.io/acme/svc:stg-1");
-    const doneDev = doneBody.data.items.find((item) => item.name === "ghcr.io/acme/svc:dev-2");
+    const doneDevLatest = doneBody.data.items.find((item) => item.name === "ghcr.io/acme/svc:dev-2");
+    const doneDevOlder = doneBody.data.items.find((item) => item.name === "ghcr.io/acme/svc:dev-1");
 
     expect(openResponse.status).toBe(200);
     expect(openDev?.vulnerability_count).toBe(0);
@@ -153,8 +154,9 @@ describe("GET /api/images", () => {
     expect(openStg?.tag_group).toBe("stg");
 
     expect(doneResponse.status).toBe(200);
-    expect(doneDev?.vulnerability_count).toBe(1);
-    expect(doneDev?.tag_group).toBe("dev");
+    expect(doneDevLatest?.vulnerability_count).toBe(1);
+    expect(doneDevLatest?.tag_group).toBe("dev");
+    expect(doneDevOlder?.vulnerability_count).toBe(1);
   });
 });
 

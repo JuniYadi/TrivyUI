@@ -229,7 +229,7 @@ function handleImageList(db: Database, request: Request): Response {
       MAX(i.last_scanned_at) AS last_scanned_at
     FROM images i
     JOIN repositories r ON r.id = i.repository_id
-    LEFT JOIN vulnerability_states vs ON vs.image_id = i.id
+    LEFT JOIN vulnerability_states vs ON vs.repository_id = i.repository_id AND vs.tag_group = i.tag_group
     GROUP BY i.id, i.name, i.tag_group, r.id, r.name
     ORDER BY ${orderBy}
     LIMIT ? OFFSET ?

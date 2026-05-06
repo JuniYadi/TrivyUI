@@ -337,6 +337,74 @@ describe("GET /api/repositories/:id", () => {
     expect(body.data.vulnerabilities[0]).toHaveProperty("resolved_at");
   });
 
+  test("aligns severity and package summary metrics with state filter", async () => {
+    const db = createTestDb();
+
+    importTrivyPayload(
+      db,
+      {
+        ArtifactName: "ghcr.io/acme/svc:dev-1",
+        Metadata: { Source: "ci", CreatedAt: "2026-04-26T10:00:00.000Z" },
+        Results: [{ Vulnerabilities: [{ VulnerabilityID: "CVE-SUM-DONE", Severity: "HIGH", PkgName: "glibc" }] }],
+      },
+      "{}",
+    );
+    importTrivyPayload(
+      db,
+      {
+        ArtifactName: "ghcr.io/acme/svc:stg-1",
+        Metadata: { Source: "ci", CreatedAt: "2026-04-26T10:05:00.000Z" },
+        Results: [
+          {
+            Vulnerabilities: [
+              { VulnerabilityID: "CVE-SUM-DONE", Severity: "HIGH", PkgName: "glibc" },
+              { VulnerabilityID: "CVE-SUM-OPEN", Severity: "CRITICAL", PkgName: "openssl" },
+            ],
+          },
+        ],
+      },
+      "{}",
+    );
+    importTrivyPayload(
+      db,
+      {
+        ArtifactName: "ghcr.io/acme/svc:dev-2",
+        Metadata: { Source: "ci", CreatedAt: "2026-04-27T10:00:00.000Z" },
+        Results: [{ Vulnerabilities: [] }],
+      },
+      "{}",
+    );
+
+    const target = db.query("SELECT id FROM repositories WHERE name = 'ghcr.io/acme/svc'").get() as { id: number };
+    const handler = createRepositoriesHandler(db);
+
+    const doneResponse = handler(new Request(`http://localhost/api/repositories/${target.id}?state=done`));
+    const doneBody = (await doneResponse.json()) as {
+      data: {
+        by_severity: { CRITICAL: number; HIGH: number; MEDIUM: number; LOW: number; UNKNOWN: number };
+        total_vulnerable_packages: number;
+      };
+    };
+
+    const allResponse = handler(new Request(`http://localhost/api/repositories/${target.id}?state=all`));
+    const allBody = (await allResponse.json()) as {
+      data: {
+        by_severity: { CRITICAL: number; HIGH: number; MEDIUM: number; LOW: number; UNKNOWN: number };
+        total_vulnerable_packages: number;
+      };
+    };
+
+    expect(doneResponse.status).toBe(200);
+    expect(doneBody.data.by_severity.HIGH).toBe(1);
+    expect(doneBody.data.by_severity.CRITICAL).toBe(0);
+    expect(doneBody.data.total_vulnerable_packages).toBe(1);
+
+    expect(allResponse.status).toBe(200);
+    expect(allBody.data.by_severity.HIGH).toBe(1);
+    expect(allBody.data.by_severity.CRITICAL).toBe(1);
+    expect(allBody.data.total_vulnerable_packages).toBe(2);
+  });
+
   test("returns full repository detail by encoded name slug", async () => {
     const db = createTestDb();
     seedData(db);

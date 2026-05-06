@@ -308,11 +308,11 @@ function buildRepositoryDetailResponse(
       `${VULNERABILITY_STATE_CTE}
       SELECT v.severity AS severity, COUNT(DISTINCT v.cve_id) AS count
       FROM vulnerability_states v
-      WHERE v.repository_id = ? AND v.state = 'open'
+      WHERE v.repository_id = ? AND (? = 'all' OR v.state = ?)
       GROUP BY v.severity
       `,
     )
-    .all(repositoryId) as SeverityRow[];
+    .all(repositoryId, state, state) as SeverityRow[];
 
   const packagesRow = db
     .query(
@@ -332,10 +332,10 @@ function buildRepositoryDetailResponse(
       SELECT COUNT(DISTINCT i.id || ':' || v.package_name || ':' || COALESCE(v.installed_version, '')) as count
       FROM vulnerability_states v
       JOIN images i ON i.id = v.image_id
-      WHERE i.repository_id = ? AND v.state = 'open'
+      WHERE i.repository_id = ? AND (? = 'all' OR v.state = ?)
       `,
     )
-    .get(repositoryId) as { count: number };
+    .get(repositoryId, state, state) as { count: number };
 
   const totalPackagesScanned = Number(packagesRow.count ?? 0);
   const totalVulnerablePackages = Number(vulnerablePackagesRow.count ?? 0);
@@ -360,10 +360,10 @@ function buildRepositoryDetailResponse(
           WHERE sr2.image_id = i.id
         ) as package_count,
         (
-          SELECT COUNT(DISTINCT v2.package_name || ':' || COALESCE(v2.installed_version, ''))
-          FROM vulnerabilities v2
-          JOIN scan_results sr3 ON sr3.id = v2.scan_result_id
-          WHERE sr3.image_id = i.id
+          SELECT COUNT(DISTINCT vs2.package_name || ':' || COALESCE(vs2.installed_version, ''))
+          FROM vulnerability_states vs2
+          WHERE vs2.image_id = i.id
+            AND (? = 'all' OR vs2.state = ?)
         ) as vulnerable_package_count
       FROM images i
       LEFT JOIN vulnerability_states v ON v.image_id = i.id
@@ -372,7 +372,7 @@ function buildRepositoryDetailResponse(
       ORDER BY datetime(i.last_scanned_at) DESC, i.id DESC
       `,
     )
-    .all(state, state, state, state, repositoryId) as RepositoryImageRow[];
+    .all(state, state, state, state, state, state, repositoryId) as RepositoryImageRow[];
 
   const groupSummaries = db
     .query(

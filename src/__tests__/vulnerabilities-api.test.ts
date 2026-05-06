@@ -334,6 +334,50 @@ describe("GET /api/vulnerabilities", () => {
       true,
     );
   });
+
+  test("returns both open and done rows for state=all in group-scoped transitions", async () => {
+    const db = createTestDb();
+
+    importTrivyPayload(
+      db,
+      {
+        ArtifactName: "ghcr.io/acme/svc:dev-1",
+        Metadata: { Source: "ci", CreatedAt: "2026-04-26T10:00:00.000Z" },
+        Results: [{ Vulnerabilities: [{ VulnerabilityID: "CVE-GROUP-ALL", Severity: "HIGH", PkgName: "glibc" }] }],
+      },
+      "{}",
+    );
+    importTrivyPayload(
+      db,
+      {
+        ArtifactName: "ghcr.io/acme/svc:stg-1",
+        Metadata: { Source: "ci", CreatedAt: "2026-04-26T10:05:00.000Z" },
+        Results: [{ Vulnerabilities: [{ VulnerabilityID: "CVE-GROUP-ALL", Severity: "HIGH", PkgName: "glibc" }] }],
+      },
+      "{}",
+    );
+    importTrivyPayload(
+      db,
+      {
+        ArtifactName: "ghcr.io/acme/svc:dev-2",
+        Metadata: { Source: "ci", CreatedAt: "2026-04-27T10:00:00.000Z" },
+        Results: [{ Vulnerabilities: [] }],
+      },
+      "{}",
+    );
+
+    const handler = createVulnerabilitiesHandler(db);
+    const response = handler(new Request("http://localhost/api/vulnerabilities?state=all"));
+    const body = (await response.json()) as {
+      data: { items: Array<{ cve_id: string; tag_group: string; state: string; resolved_at: string | null }> };
+    };
+
+    const rows = body.data.items.filter((item) => item.cve_id === "CVE-GROUP-ALL");
+
+    expect(response.status).toBe(200);
+    expect(rows.some((item) => item.tag_group === "dev" && item.state === "done" && item.resolved_at !== null)).toBe(true);
+    expect(rows.some((item) => item.tag_group === "stg" && item.state === "open" && item.resolved_at === null)).toBe(true);
+  });
 });
 
 describe("GET /api/vulnerabilities/:id", () => {
