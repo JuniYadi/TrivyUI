@@ -18,9 +18,9 @@ const NOTIFICATION_ENV_KEYS = [
 
 const MAX_FILE_SIZE = 10 * 1024 * 1024;
 
-function buildValidTrivyPayload() {
+function buildValidTrivyPayload(artifactName = "ghcr.io/acme/trivyui:1.2.3") {
   return {
-    ArtifactName: "ghcr.io/acme/trivyui:1.2.3",
+    ArtifactName: artifactName,
     Metadata: {
       Source: "ci",
       CreatedAt: "2026-04-26T00:00:00.000Z",
@@ -151,6 +151,41 @@ describe("upload/import API endpoints", () => {
       repository_base: "ghcr.io/acme/trivyui",
       tag: "1.2.3",
       tag_group: "ungrouped",
+    });
+  });
+
+  test("POST /api/upload persists tag grouping for digest-pinned tagged image", async () => {
+    const db = createTestDb();
+    const uploadHandler = createUploadHandler(db);
+
+    const formData = new FormData();
+    const file = new File(
+      [JSON.stringify(buildValidTrivyPayload("ghcr.io/acme/trivyui:dev-12@sha256:abcd"))],
+      "scan.json",
+      { type: "application/json" }
+    );
+    formData.set("file", file);
+
+    const request = new Request("http://localhost/api/upload", {
+      method: "POST",
+      body: formData,
+    });
+
+    const response = await uploadHandler(request);
+
+    expect(response.status).toBe(201);
+
+    const imageRow = db
+      .query("SELECT repository_base, tag, tag_group FROM images WHERE name = ?1")
+      .get("ghcr.io/acme/trivyui:dev-12@sha256:abcd") as
+      | { repository_base: string; tag: string | null; tag_group: string }
+      | null;
+
+    expect(imageRow).not.toBeNull();
+    expect(imageRow).toEqual({
+      repository_base: "ghcr.io/acme/trivyui",
+      tag: "dev-12",
+      tag_group: "dev",
     });
   });
 

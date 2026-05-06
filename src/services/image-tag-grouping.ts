@@ -12,7 +12,7 @@ export function parseImageTagGrouping(imageRef: string): ImageTagGrouping {
 
   const lastSlash = withoutDigest.lastIndexOf("/");
   const lastColon = withoutDigest.lastIndexOf(":");
-  const hasTag = digestIndex < 0 && lastColon > lastSlash;
+  const hasTag = lastColon > lastSlash;
   const repositoryBase = hasTag ? withoutDigest.slice(0, lastColon) : withoutDigest;
   const tag = hasTag ? withoutDigest.slice(lastColon + 1) : null;
 

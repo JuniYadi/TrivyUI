@@ -42,6 +42,22 @@ describe("trivy parser", () => {
     });
   });
 
+  test("keeps tag and group when digest and tag are both present", () => {
+    expect(parseImageTagGrouping("repo/app:dev-12@sha256:abcd")).toEqual({
+      original: "repo/app:dev-12@sha256:abcd",
+      repository_base: "repo/app",
+      tag: "dev-12",
+      tag_group: "dev",
+    });
+
+    expect(parseImageTagGrouping("ghcr.io/acme/app:prod-99@sha256:abcdef")).toEqual({
+      original: "ghcr.io/acme/app:prod-99@sha256:abcdef",
+      repository_base: "ghcr.io/acme/app",
+      tag: "prod-99",
+      tag_group: "prod",
+    });
+  });
+
   test("parses Trivy JSON Results -> Packages -> Vulnerabilities into normalized records", () => {
     const payload = {
       SchemaVersion: 2,
