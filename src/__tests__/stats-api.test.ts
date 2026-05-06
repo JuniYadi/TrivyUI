@@ -284,4 +284,67 @@ describe("GET /api/stats", () => {
     expect(body.data.recent_scans[0]?.clean_package_count).toBe(3);
     expect(body.data.recent_scans[0]?.vulnerability_count).toBe(0);
   });
+
+  test("uses latest scan per tag group for package totals in open-state metrics", async () => {
+    const db = createTestDb();
+
+    importTrivyPayload(
+      db,
+      {
+        ArtifactName: "ghcr.io/acme/app:latest",
+        Metadata: { Source: "ci", CreatedAt: "2026-04-26T10:00:00.000Z" },
+        Results: [
+          {
+            Packages: [
+              { Name: "openssl", Version: "3.0.0" },
+              { Name: "glibc", Version: "2.39" },
+              { Name: "legacy", Version: "1.0.0" },
+            ],
+            Vulnerabilities: [
+              { VulnerabilityID: "CVE-OPEN-1", Severity: "HIGH", PkgName: "openssl", InstalledVersion: "3.0.0" },
+            ],
+          },
+        ],
+      },
+      "{}"
+    );
+
+    importTrivyPayload(
+      db,
+      {
+        ArtifactName: "ghcr.io/acme/app:latest",
+        Metadata: { Source: "ci", CreatedAt: "2026-04-26T11:00:00.000Z" },
+        Results: [
+          {
+            Packages: [
+              { Name: "openssl", Version: "3.0.0" },
+              { Name: "glibc", Version: "2.39" },
+            ],
+            Vulnerabilities: [
+              { VulnerabilityID: "CVE-OPEN-1", Severity: "HIGH", PkgName: "openssl", InstalledVersion: "3.0.0" },
+            ],
+          },
+        ],
+      },
+      "{}"
+    );
+
+    const response = createStatsHandler(db)();
+    const body = (await response.json()) as {
+      success: boolean;
+      data: {
+        total_packages_scanned: number;
+        total_vulnerable_packages: number;
+        total_clean_packages: number;
+        clean_package_rate: number;
+      };
+    };
+
+    expect(response.status).toBe(200);
+    expect(body.success).toBe(true);
+    expect(body.data.total_packages_scanned).toBe(2);
+    expect(body.data.total_vulnerable_packages).toBe(1);
+    expect(body.data.total_clean_packages).toBe(1);
+    expect(body.data.clean_package_rate).toBe(50);
+  });
 });

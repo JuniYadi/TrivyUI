@@ -38,12 +38,11 @@ export function createStatsHandler(db: Database) {
       const imagesRow = db.query("SELECT COUNT(*) as count FROM images").get() as { count: number };
       const packagesRow = db
         .query(
-          `
-          SELECT COUNT(DISTINCT i.id || ':' || COALESCE(sp.result_target, '') || ':' || sp.package_name || ':' || COALESCE(sp.installed_version, '')) as count
-          FROM scan_packages sp
-          JOIN scan_results sr ON sr.id = sp.scan_result_id
-          JOIN images i ON i.id = sr.image_id
-          `
+          withOpenVulnerabilityState(`
+          SELECT COUNT(DISTINCT lgs.repository_id || ':' || sp.package_name || ':' || COALESCE(sp.installed_version, '')) as count
+          FROM latest_group_scans lgs
+          JOIN scan_packages sp ON sp.scan_result_id = lgs.scan_result_id
+          `)
         )
         .get() as { count: number };
       const vulnerablePackagesRow = db
