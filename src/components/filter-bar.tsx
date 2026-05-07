@@ -11,6 +11,7 @@ interface FilterBarProps {
 }
 
 const SEVERITY_OPTIONS: Array<Severity> = ["CRITICAL", "HIGH", "MEDIUM", "LOW", "UNKNOWN"];
+const STATE_OPTIONS: Array<"open" | "done" | "all"> = ["open", "done", "all"];
 
 export function FilterBar({ query, repositories, images, onChange, onClear }: FilterBarProps) {
   const [searchInput, setSearchInput] = useState(query.search || "");
@@ -29,7 +30,7 @@ export function FilterBar({ query, repositories, images, onChange, onClear }: Fi
 
   return (
     <section className="rounded-xl border border-slate-700 bg-slate-900/90 p-4 shadow-inner" aria-label="Vulnerability filters">
-      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-5">
+      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-6">
         <label className="grid gap-1">
           <span className="text-xs font-semibold uppercase tracking-wide text-slate-400">Search</span>
           <input
@@ -57,6 +58,26 @@ export function FilterBar({ query, repositories, images, onChange, onClear }: Fi
             {SEVERITY_OPTIONS.map((severity) => (
               <option key={severity} value={severity}>
                 {severity}
+              </option>
+            ))}
+          </select>
+        </label>
+
+        <label className="grid gap-1">
+          <span className="text-xs font-semibold uppercase tracking-wide text-slate-400">State</span>
+          <select
+            className="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-slate-200 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/50"
+            value={query.state || "open"}
+            onChange={(event) =>
+              onChange({
+                state: event.target.value as "open" | "done" | "all",
+                page: 1,
+              })
+            }
+          >
+            {STATE_OPTIONS.map((state) => (
+              <option key={state} value={state}>
+                {state === "open" ? "Open" : state === "done" ? "Done" : "All"}
               </option>
             ))}
           </select>
