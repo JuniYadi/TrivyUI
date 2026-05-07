@@ -115,7 +115,7 @@ describe("GET /api/repositories", () => {
     expect(response.status).toBe(200);
     expect(body.success).toBe(true);
     expect(body.data.pagination.page).toBe(1);
-    expect(body.data.pagination.limit).toBe(25);
+    expect(body.data.pagination.limit).toBe(10);
     expect(body.data.pagination.total_items).toBe(2);
     expect(body.data.items[0]?.name).toBe("ghcr.io/acme/api");
     expect(body.data.items[0]?.vulnerability_count).toBe(3);
@@ -192,7 +192,7 @@ describe("GET /api/repositories", () => {
     expect(response.status).toBe(200);
     expect(body.success).toBe(true);
     expect(body.data.pagination.page).toBe(1);
-    expect(body.data.pagination.limit).toBe(25);
+    expect(body.data.pagination.limit).toBe(10);
   });
 
   test("supports state filter and keeps open scoped by tag_group", async () => {
@@ -245,6 +245,27 @@ describe("GET /api/repositories", () => {
 
     expect(doneResponse.status).toBe(200);
     expect(doneSvc?.vulnerability_count).toBe(1);
+  });
+
+  test("filters repositories by search query", async () => {
+    const db = createTestDb();
+    seedData(db);
+
+    const handler = createRepositoriesHandler(db);
+    const response = handler(new Request("http://localhost/api/repositories?search=worker"));
+    const body = (await response.json()) as {
+      success: boolean;
+      data: {
+        items: Array<{ name: string }>;
+        pagination: { total_items: number };
+      };
+    };
+
+    expect(response.status).toBe(200);
+    expect(body.success).toBe(true);
+    expect(body.data.pagination.total_items).toBe(1);
+    expect(body.data.items.length).toBe(1);
+    expect(body.data.items[0]?.name).toBe("ghcr.io/acme/worker");
   });
 });
 
