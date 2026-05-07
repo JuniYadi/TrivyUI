@@ -6,6 +6,7 @@ import { ErrorBanner } from "../components/error-banner";
 import { Pagination } from "../components/pagination";
 import { useImages } from "../hooks/use-images";
 import type { ImageSortField } from "../services/types";
+import { formatRepositoryName } from "../utils/format-repository-name";
 
 function sortLabel(currentSort: ImageSortField, currentOrder: "asc" | "desc", sort: ImageSortField): string {
   if (currentSort !== sort) {
@@ -126,7 +127,9 @@ export function ImagesPage() {
                     onClick={() => void navigate({ to: "/images/$id", params: { id: String(item.id) } })}
                   >
                     <td className="py-3 pr-4">{item.name}</td>
-                    <td className="py-3 pr-4">{item.repository.name}</td>
+                    <td className="py-3 pr-4" title={item.repository.name}>
+                      {formatRepositoryName(item.repository.name)}
+                    </td>
                     <td className="py-3 pr-4">{item.vulnerability_count}</td>
                     <td className="py-3 pr-4">{item.critical_count}</td>
                     <td className="py-3">{item.last_scanned_at ? new Date(item.last_scanned_at).toLocaleString() : "-"}</td>
