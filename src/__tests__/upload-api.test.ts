@@ -16,6 +16,15 @@ const NOTIFICATION_ENV_KEYS = [
   "SMTP_TO",
 ] as const;
 
+const RETENTION_ENV_KEYS = [
+  "RETENTION_ENABLED",
+  "RETENTION_DEFAULT_KEEP",
+  "RETENTION_GROUP_RULES",
+  "RETENTION_REPO_RULES",
+] as const;
+
+const TEST_ENV_KEYS = [...NOTIFICATION_ENV_KEYS, ...RETENTION_ENV_KEYS] as const;
+
 const MAX_FILE_SIZE = 10 * 1024 * 1024;
 
 function buildValidTrivyPayload(artifactName = "ghcr.io/acme/trivyui:1.2.3") {
@@ -48,7 +57,7 @@ function buildValidTrivyPayload(artifactName = "ghcr.io/acme/trivyui:1.2.3") {
 }
 
 const dbs: ReturnType<typeof initDb>[] = [];
-const envBackup: Partial<Record<(typeof NOTIFICATION_ENV_KEYS)[number], string | undefined>> = {};
+const envBackup: Partial<Record<(typeof TEST_ENV_KEYS)[number], string | undefined>> = {};
 
 function createTestDb() {
   const db = initDb(":memory:");
@@ -61,7 +70,7 @@ afterEach(() => {
     db.close();
   }
 
-  for (const key of NOTIFICATION_ENV_KEYS) {
+  for (const key of TEST_ENV_KEYS) {
     if (envBackup[key] === undefined) {
       delete process.env[key];
     } else {
@@ -70,10 +79,14 @@ afterEach(() => {
   }
 });
 
-function setNotificationEnvWithInvalidSmtp() {
-  for (const key of NOTIFICATION_ENV_KEYS) {
+function backupTestEnv() {
+  for (const key of TEST_ENV_KEYS) {
     envBackup[key] = process.env[key];
   }
+}
+
+function setNotificationEnvWithInvalidSmtp() {
+  backupTestEnv();
 
   process.env.NOTIFY_ENABLED = "true";
   process.env.NOTIFY_MIN_SEVERITY = "HIGH";
@@ -187,6 +200,59 @@ describe("upload/import API endpoints", () => {
       tag: "dev-12",
       tag_group: "dev",
     });
+  });
+
+  test("POST /api/upload prunes old scans when retention is enabled", async () => {
+    backupTestEnv();
+
+    process.env.RETENTION_ENABLED = "true";
+    process.env.RETENTION_DEFAULT_KEEP = "unlimited";
+    process.env.RETENTION_GROUP_RULES = "dev*:2";
+    process.env.RETENTION_REPO_RULES = "";
+
+    const db = createTestDb();
+    const uploadHandler = createUploadHandler(db);
+
+    for (let i = 0; i < 4; i += 1) {
+      const payload = buildValidTrivyPayload(`ghcr.io/acme/trivyui:dev-${i}@sha256:abcd`);
+      const formData = new FormData();
+      formData.set("file", new File([JSON.stringify(payload)], `scan-${i}.json`, { type: "application/json" }));
+
+      const response = await uploadHandler(new Request("http://localhost/api/upload", { method: "POST", body: formData }));
+      expect(response.status).toBe(201);
+    }
+
+    const row = db
+      .query(
+        `
+          SELECT COUNT(*) AS count
+          FROM scan_results sr
+          JOIN images i ON i.id = sr.image_id
+          JOIN repositories r ON r.id = i.repository_id
+          WHERE r.name = ?1 AND i.tag_group = ?2
+        `,
+      )
+      .get("ghcr.io/acme/trivyui", "dev") as { count: number };
+
+    expect(Number(row.count)).toBe(2);
+
+    const remaining = db
+      .query(
+        `
+          SELECT i.name AS name
+          FROM scan_results sr
+          JOIN images i ON i.id = sr.image_id
+          JOIN repositories r ON r.id = i.repository_id
+          WHERE r.name = ?1 AND i.tag_group = ?2
+          ORDER BY datetime(sr.scan_date) DESC, sr.id DESC
+        `,
+      )
+      .all("ghcr.io/acme/trivyui", "dev") as Array<{ name: string }>;
+
+    expect(remaining.map((item) => item.name)).toEqual([
+      "ghcr.io/acme/trivyui:dev-3@sha256:abcd",
+      "ghcr.io/acme/trivyui:dev-2@sha256:abcd",
+    ]);
   });
 
   test("POST /api/upload stays successful when notification sending fails", async () => {

@@ -1,6 +1,7 @@
 import type { Database } from "bun:sqlite";
 import { insertScanPackages, insertVulnerabilities, upsertImage, upsertRepository, upsertScanResult } from "../../services/db-service";
 import { parseImageTagGrouping } from "../../services/image-tag-grouping";
+import { loadRetentionPolicyFromEnv, pruneScansForRetention } from "../../services/scan-retention";
 import { parseTrivyResult } from "../../services/trivy-parser";
 
 export const MAX_UPLOAD_BYTES = 10 * 1024 * 1024;
@@ -73,6 +74,7 @@ export function parseJsonPayload(text: string): unknown {
 
 export function importTrivyPayload(db: Database, parsedJson: unknown, rawJson: string): UploadSummary {
   let summary: UploadSummary | null = null;
+  let retentionTarget: { repository: string; tagGroup: string } | null = null;
 
   const tx = db.transaction(() => {
     const parsed = parseTrivyResult(parsedJson);
@@ -86,6 +88,10 @@ export function importTrivyPayload(db: Database, parsedJson: unknown, rawJson: s
     const scanResultId = upsertScanResult(db, imageId, rawJson, parsed.source, parsed.scan_date);
     insertScanPackages(db, scanResultId, parsed.packages);
     insertVulnerabilities(db, scanResultId, parsed.vulnerabilities);
+    retentionTarget = {
+      repository: parsed.repo_name,
+      tagGroup: imageGrouping.tag_group,
+    };
 
     const packageCount = countUniquePackages(parsed.packages);
     const vulnerablePackageCount = countUniqueVulnerablePackages(parsed.vulnerabilities);
@@ -117,6 +123,18 @@ export function importTrivyPayload(db: Database, parsedJson: unknown, rawJson: s
   });
 
   tx();
+
+  if (retentionTarget) {
+    try {
+      const retentionPolicy = loadRetentionPolicyFromEnv();
+      pruneScansForRetention(db, retentionPolicy, retentionTarget.repository, retentionTarget.tagGroup);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      console.warn(
+        `[upload] retention cleanup failed: repo=${retentionTarget.repository} tag_group=${retentionTarget.tagGroup} error=${message}`,
+      );
+    }
+  }
 
   if (!summary) {
     throw new Error("FAILED_IMPORT_TRIVY_PAYLOAD");
