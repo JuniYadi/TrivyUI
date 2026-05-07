@@ -99,7 +99,7 @@ describe("GET /api/vulnerabilities", () => {
     expect(response.status).toBe(200);
     expect(body.success).toBe(true);
     expect(body.data.pagination.page).toBe(1);
-    expect(body.data.pagination.limit).toBe(25);
+    expect(body.data.pagination.limit).toBe(10);
     expect(body.data.pagination.total_items).toBe(5);
     expect(body.data.items[0]?.severity).toBe("CRITICAL");
   });

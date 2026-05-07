@@ -1,13 +1,16 @@
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useNavigate, useParams } from "@tanstack/react-router";
 import { AppShell } from "../components/app-shell";
 import { CveDetailDrawer } from "../components/cve-detail-drawer";
 import { ErrorBanner } from "../components/error-banner";
+import { Pagination } from "../components/pagination";
 import { SeverityChart } from "../components/severity-chart";
 import { StatCard } from "../components/stat-card";
 import { useRepoDetail } from "../hooks/use-repo-detail";
 import { fetchVulnerabilityDetail } from "../hooks/use-vulnerabilities";
 import type { RepositoryDetailResponse, VulnerabilityDetailResponse } from "../services/types";
+import { filterVulnerabilitiesByGroup } from "../utils/filter-vulnerabilities-by-group";
+import { paginateList } from "../utils/paginate-list";
 
 function parseRepositoryId(value: string | undefined): number | null {
   if (!value) {
@@ -35,6 +38,8 @@ interface RepositoryDetailContentProps {
   loading: boolean;
   error: string | null;
   retry: RetryHandler;
+  state: VulnerabilityStateFilter;
+  onStateChange: (next: VulnerabilityStateFilter) => void;
 }
 
 type VulnerabilityStateFilter = "open" | "done" | "all";
@@ -106,12 +111,15 @@ function formatScore(score: number | null): string {
   return score === null ? "-" : score.toFixed(1);
 }
 
-export function RepositoryDetailContent({ data, loading, error, retry }: RepositoryDetailContentProps) {
+export function RepositoryDetailContent({ data, loading, error, retry, state, onStateChange }: RepositoryDetailContentProps) {
   const navigate = useNavigate();
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [detailLoading, setDetailLoading] = useState(false);
   const [detailError, setDetailError] = useState<string | null>(null);
   const [detail, setDetail] = useState<VulnerabilityDetailResponse | null>(null);
+  const [selectedGroup, setSelectedGroup] = useState<string | null>(null);
+  const [vulnerabilityPage, setVulnerabilityPage] = useState(1);
+  const [vulnerabilityLimit, setVulnerabilityLimit] = useState(10);
 
   const openDetail = useCallback(async (id: number) => {
     setDrawerOpen(true);
@@ -130,6 +138,22 @@ export function RepositoryDetailContent({ data, loading, error, retry }: Reposit
   }, []);
 
   const groupSummary = useMemo(() => data?.group_summaries || [], [data?.group_summaries]);
+  const filteredVulnerabilities = useMemo(() => {
+    return filterVulnerabilitiesByGroup(data?.vulnerabilities || [], selectedGroup);
+  }, [data?.vulnerabilities, selectedGroup]);
+
+  const paginatedVulnerabilities = useMemo(() => {
+    return paginateList(filteredVulnerabilities, vulnerabilityPage, vulnerabilityLimit);
+  }, [filteredVulnerabilities, vulnerabilityLimit, vulnerabilityPage]);
+
+  useEffect(() => {
+    setVulnerabilityPage(1);
+    setSelectedGroup(null);
+  }, [data?.id]);
+
+  useEffect(() => {
+    setVulnerabilityPage(1);
+  }, [selectedGroup]);
 
   return (
     <>
@@ -158,22 +182,6 @@ export function RepositoryDetailContent({ data, loading, error, retry }: Reposit
 
       {!loading && !error && data && (
         <section className="grid gap-4">
-          <section className="rounded-xl border border-slate-700 bg-slate-900/90 p-4">
-            <div className="flex flex-wrap items-end justify-between gap-3">
-              <div>
-                <p className="mt-0 text-xs font-semibold uppercase tracking-wide text-slate-400">Created at</p>
-                <p className="mb-0 text-sm">{new Date(data.created_at).toLocaleString()}</p>
-              </div>
-              <button
-                type="button"
-                className="rounded-lg border border-slate-700 bg-slate-950 px-4 py-2 text-sm font-semibold text-slate-300 transition hover:border-slate-500"
-                onClick={() => void navigate({ to: "/repositories" })}
-              >
-                Back to Repositories
-              </button>
-            </div>
-          </section>
-
           <section className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
             <StatCard label="Total Vulnerabilities" value={data.vulnerabilities.length} tone="neutral" />
             <StatCard label="Critical" value={data.by_severity.CRITICAL} tone="critical" />
@@ -200,10 +208,24 @@ export function RepositoryDetailContent({ data, loading, error, retry }: Reposit
             <section className="rounded-xl border border-slate-700 bg-slate-900/90 p-4 shadow-inner">
               <h3 className="mb-3 text-base font-semibold">Tag Group Health</h3>
               <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
-                {groupSummary.map((group) => (
-                  <article key={group.group_name} className="rounded-lg border border-slate-700 bg-slate-950/60 p-3">
+                {groupSummary.map((group, index) => {
+                  const groupName = group.group_name || "ungrouped";
+                  const isSelected = selectedGroup === groupName;
+
+                  return (
+                  <button
+                    key={`${groupName}-${index}`}
+                    type="button"
+                    className={
+                      isSelected
+                        ? "rounded-lg border border-blue-500 bg-blue-500/10 p-3 text-left"
+                        : "rounded-lg border border-slate-700 bg-slate-950/60 p-3 text-left hover:border-slate-500"
+                    }
+                    onClick={() => setSelectedGroup((prev) => (prev === groupName ? null : groupName))}
+                    title={isSelected ? "Clear tag group filter" : `Filter vulnerabilities by ${groupName}`}
+                  >
                     <div className="mb-2 flex items-center justify-between gap-2">
-                      <p className="m-0 text-sm font-semibold">{group.group_name}</p>
+                      <p className={isSelected ? "m-0 text-sm font-semibold text-blue-300" : "m-0 text-sm font-semibold text-slate-100"}>{groupName}</p>
                       <span
                         className={
                           group.status === "at_risk"
@@ -218,8 +240,9 @@ export function RepositoryDetailContent({ data, loading, error, retry }: Reposit
                     <p className="m-0 text-xs text-slate-400">
                       Last scan: {group.last_scan_at ? new Date(group.last_scan_at).toLocaleString() : "-"}
                     </p>
-                  </article>
-                ))}
+                  </button>
+                  );
+                })}
               </div>
             </section>
           )}
@@ -274,7 +297,37 @@ export function RepositoryDetailContent({ data, loading, error, retry }: Reposit
           </section>
 
           <section className="rounded-xl border border-slate-700 bg-slate-900/90 p-4 shadow-inner overflow-x-auto">
-            <h3 className="mb-3 text-base font-semibold">Vulnerabilities</h3>
+            <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+              <h3 className="text-base font-semibold">Vulnerabilities</h3>
+              <div className="flex flex-wrap items-center gap-2">
+                {STATE_FILTERS.map((item) => (
+                  <button
+                    key={item}
+                    type="button"
+                    className={
+                      state === item
+                        ? "rounded-full border border-blue-500 bg-blue-500/20 px-3 py-1 text-xs font-semibold uppercase tracking-wide text-blue-200"
+                        : "rounded-full border border-slate-700 bg-slate-950 px-3 py-1 text-xs font-semibold uppercase tracking-wide text-slate-300 hover:border-slate-500"
+                    }
+                    onClick={() => onStateChange(item)}
+                  >
+                    {item}
+                  </button>
+                ))}
+                {selectedGroup && (
+                  <button
+                    type="button"
+                    className="rounded-full border border-blue-500/60 bg-blue-500/10 px-3 py-1 text-xs font-semibold text-blue-200"
+                    onClick={() => setSelectedGroup(null)}
+                  >
+                    Group: {selectedGroup} x
+                  </button>
+                )}
+              </div>
+            </div>
+            <p className="mb-3 text-xs text-slate-400">
+              Showing {paginatedVulnerabilities.pagination.total_items} vulnerabilities{selectedGroup ? ` in group ${selectedGroup}` : ""}.
+            </p>
             <table className="w-full table-fixed border-collapse text-sm">
               <thead>
                 <tr className="border-b border-slate-700 text-left">
@@ -290,7 +343,7 @@ export function RepositoryDetailContent({ data, loading, error, retry }: Reposit
                 </tr>
               </thead>
               <tbody>
-                {data.vulnerabilities.map((item) => (
+                {paginatedVulnerabilities.items.map((item) => (
                   <tr key={item.id} className="cursor-pointer border-b border-slate-800 last:border-0 hover:bg-slate-800/50" onClick={() => void openDetail(item.id)}>
                     <td className="py-3 pr-4">{item.cve_id}</td>
                     <td className="py-3 pr-4">
@@ -328,6 +381,18 @@ export function RepositoryDetailContent({ data, loading, error, retry }: Reposit
                 ))}
               </tbody>
             </table>
+
+            <Pagination
+              page={paginatedVulnerabilities.pagination.page}
+              totalPages={paginatedVulnerabilities.pagination.total_pages}
+              totalItems={paginatedVulnerabilities.pagination.total_items}
+              limit={paginatedVulnerabilities.pagination.limit}
+              onPageChange={(page) => setVulnerabilityPage(page)}
+              onLimitChange={(limit) => {
+                setVulnerabilityLimit(limit);
+                setVulnerabilityPage(1);
+              }}
+            />
           </section>
         </section>
       )}
@@ -352,23 +417,7 @@ export function RepositoryDetailPage() {
 
   return (
     <AppShell activeRoute="/repositories/:id" title={data?.name || "Repository Detail"} subtitle="Severity summary, images, and vulnerabilities for the selected repository.">
-      <section className="mb-4 flex flex-wrap items-center gap-2">
-        {STATE_FILTERS.map((item) => (
-          <button
-            key={item}
-            type="button"
-            className={
-              state === item
-                ? "rounded-full border border-blue-500 bg-blue-500/20 px-3 py-1 text-xs font-semibold uppercase tracking-wide text-blue-200"
-                : "rounded-full border border-slate-700 bg-slate-950 px-3 py-1 text-xs font-semibold uppercase tracking-wide text-slate-300 hover:border-slate-500"
-            }
-            onClick={() => setState(item)}
-          >
-            {item}
-          </button>
-        ))}
-      </section>
-      <RepositoryDetailContent data={data} loading={loading} error={error} retry={retry} />
+      <RepositoryDetailContent data={data} loading={loading} error={error} retry={retry} state={state} onStateChange={setState} />
     </AppShell>
   );
 }

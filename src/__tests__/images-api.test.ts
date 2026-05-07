@@ -93,7 +93,7 @@ describe("GET /api/images", () => {
     expect(response.status).toBe(200);
     expect(body.success).toBe(true);
     expect(body.data.pagination.page).toBe(1);
-    expect(body.data.pagination.limit).toBe(25);
+    expect(body.data.pagination.limit).toBe(10);
     expect(body.data.pagination.total_items).toBe(2);
     expect(body.data.items[0]?.name).toBe("ghcr.io/acme/api:latest");
     expect(body.data.items[0]?.vulnerability_count).toBe(2);
@@ -157,6 +157,27 @@ describe("GET /api/images", () => {
     expect(doneDevLatest?.vulnerability_count).toBe(1);
     expect(doneDevLatest?.tag_group).toBe("dev");
     expect(doneDevOlder?.vulnerability_count).toBe(1);
+  });
+
+  test("filters images by search query", async () => {
+    const db = createTestDb();
+    seedData(db);
+
+    const handler = createImagesHandler(db);
+    const response = handler(new Request("http://localhost/api/images?search=worker"));
+    const body = (await response.json()) as {
+      success: boolean;
+      data: {
+        items: Array<{ name: string }>;
+        pagination: { total_items: number };
+      };
+    };
+
+    expect(response.status).toBe(200);
+    expect(body.success).toBe(true);
+    expect(body.data.pagination.total_items).toBe(1);
+    expect(body.data.items.length).toBe(1);
+    expect(body.data.items[0]?.name).toBe("ghcr.io/acme/worker:latest");
   });
 });
 

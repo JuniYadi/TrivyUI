@@ -56,6 +56,7 @@ export function Pagination({ page, totalPages, limit, totalItems, onPageChange, 
       <label className="flex items-center gap-2">
         <span className="text-sm font-semibold text-slate-400">Page size</span>
         <select className="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-1.5 text-sm text-slate-200 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/50" value={limit} onChange={(event) => onLimitChange(Number(event.target.value))}>
+          <option value={10}>10</option>
           <option value={25}>25</option>
           <option value={50}>50</option>
           <option value={100}>100</option>

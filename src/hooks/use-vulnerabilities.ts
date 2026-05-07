@@ -32,12 +32,12 @@ type ApiResponse<T> = ApiSuccess<T> | ApiFailure;
 
 const DEFAULT_QUERY: VulnerabilityQueryParams = {
   page: 1,
-  limit: 25,
+  limit: 10,
   sort: "severity",
   order: "desc",
 };
 
-const ALLOWED_LIMITS = [25, 50, 100] as const;
+const ALLOWED_LIMITS = [10, 25, 50, 100] as const;
 
 function isSeverity(value: string): value is Severity {
   return ["CRITICAL", "HIGH", "MEDIUM", "LOW", "UNKNOWN"].includes(value);
@@ -51,14 +51,14 @@ export function parseVulnerabilityParams(search = window.location.search): Vulne
   const params = new URLSearchParams(search);
 
   const page = Number.parseInt(params.get("page") || "1", 10);
-  const limit = Number.parseInt(params.get("limit") || "25", 10);
+  const limit = Number.parseInt(params.get("limit") || "10", 10);
   const sortRaw = params.get("sort") || "severity";
   const orderRaw = (params.get("order") || "desc").toLowerCase();
   const severityRaw = (params.get("severity") || "").toUpperCase();
 
   const parsed: VulnerabilityQueryParams = {
     page: Number.isFinite(page) && page > 0 ? page : 1,
-    limit: ALLOWED_LIMITS.includes(limit as (typeof ALLOWED_LIMITS)[number]) ? limit : 25,
+    limit: ALLOWED_LIMITS.includes(limit as (typeof ALLOWED_LIMITS)[number]) ? limit : 10,
     sort: isSortField(sortRaw) ? sortRaw : "severity",
     order: orderRaw === "asc" ? "asc" : "desc",
   };
@@ -242,7 +242,7 @@ export function hasActiveFilters(query: VulnerabilityQueryParams): boolean {
       query.package ||
       query.state ||
       query.page !== 1 ||
-      query.limit !== 25 ||
+      query.limit !== 10 ||
       query.sort !== "severity" ||
       query.order !== "desc",
   );

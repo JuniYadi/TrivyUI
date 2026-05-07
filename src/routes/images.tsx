@@ -1,4 +1,4 @@
-import { useCallback } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useNavigate } from "@tanstack/react-router";
 import { AppShell } from "../components/app-shell";
 import { EmptyState } from "../components/empty-state";
@@ -6,6 +6,7 @@ import { ErrorBanner } from "../components/error-banner";
 import { Pagination } from "../components/pagination";
 import { useImages } from "../hooks/use-images";
 import type { ImageSortField } from "../services/types";
+import { formatRepositoryName } from "../utils/format-repository-name";
 
 function sortLabel(currentSort: ImageSortField, currentOrder: "asc" | "desc", sort: ImageSortField): string {
   if (currentSort !== sort) {
@@ -26,6 +27,30 @@ function ImagesSkeleton() {
 export function ImagesPage() {
   const { query, data, loading, error, retry, setFilters } = useImages();
   const navigate = useNavigate();
+  const [searchInput, setSearchInput] = useState(query.search || "");
+
+  useEffect(() => {
+    setSearchInput(query.search || "");
+  }, [query.search]);
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      setFilters((prev) => {
+        const nextSearch = searchInput.trim();
+        if ((prev.search || "") === nextSearch) {
+          return prev;
+        }
+
+        return {
+          ...prev,
+          page: 1,
+          search: nextSearch || undefined,
+        };
+      });
+    }, 300);
+
+    return () => window.clearTimeout(timer);
+  }, [searchInput, setFilters]);
 
   const onSortChange = useCallback(
     (sort: ImageSortField) => {
@@ -45,6 +70,20 @@ export function ImagesPage() {
     <AppShell activeRoute="/images" title="Images" subtitle="Browse container images, repository mapping, and vulnerability totals.">
       {loading && <ImagesSkeleton />}
       {!loading && error && <ErrorBanner message={error} onRetry={retry} />}
+      {!loading && !error && (
+        <section className="rounded-xl border border-slate-700 bg-slate-900/90 p-4 shadow-inner">
+          <label className="grid gap-1">
+            <span className="text-xs font-semibold uppercase tracking-wide text-slate-400">Search</span>
+            <input
+              type="search"
+              placeholder="Search image or repository"
+              value={searchInput}
+              onChange={(event) => setSearchInput(event.target.value)}
+              className="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-slate-200 placeholder-slate-500 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/50"
+            />
+          </label>
+        </section>
+      )}
       {!loading && !error && totalItems === 0 && <EmptyState />}
 
       {!loading && !error && data && data.items.length > 0 && (
@@ -88,7 +127,9 @@ export function ImagesPage() {
                     onClick={() => void navigate({ to: "/images/$id", params: { id: String(item.id) } })}
                   >
                     <td className="py-3 pr-4">{item.name}</td>
-                    <td className="py-3 pr-4">{item.repository.name}</td>
+                    <td className="py-3 pr-4" title={item.repository.name}>
+                      {formatRepositoryName(item.repository.name)}
+                    </td>
                     <td className="py-3 pr-4">{item.vulnerability_count}</td>
                     <td className="py-3 pr-4">{item.critical_count}</td>
                     <td className="py-3">{item.last_scanned_at ? new Date(item.last_scanned_at).toLocaleString() : "-"}</td>

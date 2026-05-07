@@ -207,7 +207,7 @@ function handleVulnerabilityList(db: Database, request: Request): Response {
   const url = new URL(request.url);
 
   const page = parsePositiveInt(url.searchParams.get("page"), 1);
-  const limit = parsePositiveInt(url.searchParams.get("limit"), 25);
+  const limit = parsePositiveInt(url.searchParams.get("limit"), 10);
   if (!Number.isFinite(page) || !Number.isFinite(limit) || page < 1 || limit < 1 || limit > 100) {
     return sendError(400, "INVALID_PAGINATION", "Invalid page or limit. page must be >= 1 and limit must be 1..100");
   }
