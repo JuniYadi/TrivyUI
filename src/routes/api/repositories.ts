@@ -79,10 +79,10 @@ function parsePositiveInt(value: string | null, fallback: number): number {
 
 function parsePageAndLimit(url: URL): { page: number; limit: number } {
   const rawPage = parsePositiveInt(url.searchParams.get("page"), 1);
-  const rawLimit = parsePositiveInt(url.searchParams.get("limit"), 25);
+  const rawLimit = parsePositiveInt(url.searchParams.get("limit"), 10);
 
   const page = Number.isFinite(rawPage) && rawPage >= 1 ? rawPage : 1;
-  const limit = Number.isFinite(rawLimit) && rawLimit >= 1 && rawLimit <= 100 ? rawLimit : 25;
+  const limit = Number.isFinite(rawLimit) && rawLimit >= 1 && rawLimit <= 100 ? rawLimit : 10;
 
   return { page, limit };
 }
@@ -228,9 +228,24 @@ function handleRepositoryList(db: Database, request: Request): Response {
 
   const { page, limit } = parsePageAndLimit(url);
   const state = parseStateFilter(url);
+  const search = url.searchParams.get("search")?.trim() || "";
   const offset = (page - 1) * limit;
 
-  const totalRow = db.query("SELECT COUNT(*) AS total FROM repositories").get() as { total: number } | null;
+  const whereClauses: string[] = [];
+  const whereArgs: Array<string> = [];
+  if (search) {
+    whereClauses.push("LOWER(r.name) LIKE LOWER(?)");
+    whereArgs.push(`%${search}%`);
+  }
+
+  const whereSql = whereClauses.length > 0 ? `WHERE ${whereClauses.join(" AND ")}` : "";
+
+  const totalSql = `
+    SELECT COUNT(*) AS total
+    FROM repositories r
+    ${whereSql}
+  `;
+  const totalRow = db.query(totalSql).get(...whereArgs) as { total: number } | null;
   const totalItems = Number(totalRow?.total ?? 0);
   const totalPages = totalItems === 0 ? 0 : Math.ceil(totalItems / limit);
 
@@ -246,12 +261,15 @@ function handleRepositoryList(db: Database, request: Request): Response {
     FROM repositories r
     LEFT JOIN images i ON i.repository_id = r.id
     LEFT JOIN vulnerability_states vs ON vs.repository_id = r.id
+    ${whereSql}
     GROUP BY r.id, r.name
     ORDER BY ${orderBy}
     LIMIT ? OFFSET ?
   `;
 
-  const rows = db.query(`${VULNERABILITY_STATE_CTE} ${listSql}`).all(state, state, state, state, limit, offset) as RepositoryListRow[];
+  const rows = db
+    .query(`${VULNERABILITY_STATE_CTE} ${listSql}`)
+    .all(state, state, state, state, ...whereArgs, limit, offset) as RepositoryListRow[];
 
   const data: RepositoryListResponse = {
     items: rows.map((row) => ({
