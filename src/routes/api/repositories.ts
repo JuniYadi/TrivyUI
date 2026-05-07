@@ -329,10 +329,9 @@ function buildRepositoryDetailResponse(
   const vulnerablePackagesRow = db
     .query(
       `${VULNERABILITY_STATE_CTE}
-      SELECT COUNT(DISTINCT i.id || ':' || v.package_name || ':' || COALESCE(v.installed_version, '')) as count
+      SELECT COUNT(DISTINCT v.package_name || ':' || COALESCE(v.installed_version, '')) as count
       FROM vulnerability_states v
-      JOIN images i ON i.id = v.image_id
-      WHERE i.repository_id = ? AND (? = 'all' OR v.state = ?)
+      WHERE v.repository_id = ? AND (? = 'all' OR v.state = ?)
       `,
     )
     .get(repositoryId, state, state) as { count: number };
