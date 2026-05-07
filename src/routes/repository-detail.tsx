@@ -1,4 +1,4 @@
-import { useCallback, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import { useNavigate, useParams } from "@tanstack/react-router";
 import { AppShell } from "../components/app-shell";
 import { CveDetailDrawer } from "../components/cve-detail-drawer";
@@ -36,6 +36,10 @@ interface RepositoryDetailContentProps {
   error: string | null;
   retry: RetryHandler;
 }
+
+type VulnerabilityStateFilter = "open" | "done" | "all";
+
+const STATE_FILTERS: VulnerabilityStateFilter[] = ["open", "done", "all"];
 
 type ParsedImageRef = {
   registry: string;
@@ -93,6 +97,11 @@ const SEVERITY_STYLES: Record<string, string> = {
   UNKNOWN: "rounded-full bg-gray-800 px-2 py-0.5 text-xs font-bold text-gray-300",
 };
 
+const STATE_STYLES: Record<string, string> = {
+  open: "rounded-full bg-rose-950 px-2 py-0.5 text-xs font-bold uppercase tracking-wide text-rose-200",
+  done: "rounded-full bg-emerald-950 px-2 py-0.5 text-xs font-bold uppercase tracking-wide text-emerald-200",
+};
+
 function formatScore(score: number | null): string {
   return score === null ? "-" : score.toFixed(1);
 }
@@ -119,6 +128,8 @@ export function RepositoryDetailContent({ data, loading, error, retry }: Reposit
       setDetailLoading(false);
     }
   }, []);
+
+  const groupSummary = useMemo(() => data?.group_summaries || [], [data?.group_summaries]);
 
   return (
     <>
@@ -185,6 +196,34 @@ export function RepositoryDetailContent({ data, loading, error, retry }: Reposit
             </section>
           </section>
 
+          {groupSummary.length > 0 && (
+            <section className="rounded-xl border border-slate-700 bg-slate-900/90 p-4 shadow-inner">
+              <h3 className="mb-3 text-base font-semibold">Tag Group Health</h3>
+              <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+                {groupSummary.map((group) => (
+                  <article key={group.group_name} className="rounded-lg border border-slate-700 bg-slate-950/60 p-3">
+                    <div className="mb-2 flex items-center justify-between gap-2">
+                      <p className="m-0 text-sm font-semibold">{group.group_name}</p>
+                      <span
+                        className={
+                          group.status === "at_risk"
+                            ? "rounded-full bg-rose-950 px-2 py-0.5 text-xs font-bold uppercase tracking-wide text-rose-200"
+                            : "rounded-full bg-emerald-950 px-2 py-0.5 text-xs font-bold uppercase tracking-wide text-emerald-200"
+                        }
+                      >
+                        {group.status === "at_risk" ? "at risk" : "healthy"}
+                      </span>
+                    </div>
+                    <p className="m-0 text-sm text-slate-300">Open vulnerabilities: {group.open_vulnerability_count}</p>
+                    <p className="m-0 text-xs text-slate-400">
+                      Last scan: {group.last_scan_at ? new Date(group.last_scan_at).toLocaleString() : "-"}
+                    </p>
+                  </article>
+                ))}
+              </div>
+            </section>
+          )}
+
           <section className="rounded-xl border border-slate-700 bg-slate-900/90 p-4 shadow-inner">
             <h3 className="mb-3 text-base font-semibold">Images in repository</h3>
             <div className="overflow-x-auto">
@@ -243,6 +282,8 @@ export function RepositoryDetailContent({ data, loading, error, retry }: Reposit
                   <th className="pb-3 pr-4">Severity</th>
                   <th className="pb-3 pr-4 w-[220px]">Package</th>
                   <th className="hidden md:table-cell pb-3 pr-4 w-[260px]">Image</th>
+                  <th className="hidden md:table-cell pb-3 pr-4">Group</th>
+                  <th className="hidden lg:table-cell pb-3 pr-4">State</th>
                   <th className="pb-3 pr-4">Installed</th>
                   <th className="hidden lg:table-cell pb-3 pr-4">Fixed</th>
                   <th className="pb-3">Score</th>
@@ -274,6 +315,12 @@ export function RepositoryDetailContent({ data, loading, error, retry }: Reposit
                         {parseImageReference(item.image.name).image}
                       </button>
                     </td>
+                    <td className="hidden md:table-cell py-3 pr-4">{item.tag_group || "ungrouped"}</td>
+                    <td className="hidden lg:table-cell py-3 pr-4">
+                      <span className={STATE_STYLES[item.state || ""] || "rounded-full bg-slate-800 px-2 py-0.5 text-xs font-bold uppercase tracking-wide text-slate-300"}>
+                        {item.state || "-"}
+                      </span>
+                    </td>
                     <td className="py-3 pr-4">{item.installed_version || "-"}</td>
                     <td className="hidden lg:table-cell py-3 pr-4">{item.fixed_version || "-"}</td>
                     <td className="py-3">{formatScore(item.score)}</td>
@@ -298,12 +345,29 @@ export function RepositoryDetailContent({ data, loading, error, retry }: Reposit
 
 export function RepositoryDetailPage() {
   const { id: rawId, repoName } = useParams({ strict: false }) as { id?: string; repoName?: string };
+  const [state, setState] = useState<VulnerabilityStateFilter>("open");
   const id = parseRepositoryId(rawId);
   const identifier = id !== null ? { type: "id" as const, value: id } : repoName ? { type: "name" as const, value: repoName } : null;
-  const { data, loading, error, retry } = useRepoDetail(identifier);
+  const { data, loading, error, retry } = useRepoDetail(identifier, state);
 
   return (
     <AppShell activeRoute="/repositories/:id" title={data?.name || "Repository Detail"} subtitle="Severity summary, images, and vulnerabilities for the selected repository.">
+      <section className="mb-4 flex flex-wrap items-center gap-2">
+        {STATE_FILTERS.map((item) => (
+          <button
+            key={item}
+            type="button"
+            className={
+              state === item
+                ? "rounded-full border border-blue-500 bg-blue-500/20 px-3 py-1 text-xs font-semibold uppercase tracking-wide text-blue-200"
+                : "rounded-full border border-slate-700 bg-slate-950 px-3 py-1 text-xs font-semibold uppercase tracking-wide text-slate-300 hover:border-slate-500"
+            }
+            onClick={() => setState(item)}
+          >
+            {item}
+          </button>
+        ))}
+      </section>
       <RepositoryDetailContent data={data} loading={loading} error={error} retry={retry} />
     </AppShell>
   );
