@@ -12,17 +12,40 @@ export interface RetentionPolicy {
   repoRules: RetentionRule[];
 }
 
+interface RetentionPolicyParseResult {
+  policy: RetentionPolicy;
+  warnings: string[];
+}
+
 export function loadRetentionPolicyFromEnv(): RetentionPolicy {
+  return parseRetentionPolicyFromEnv().policy;
+}
+
+export function loadRetentionPolicyParseDiagnosticsFromEnv(): string[] {
+  return parseRetentionPolicyFromEnv().warnings;
+}
+
+function parseRetentionPolicyFromEnv(): RetentionPolicyParseResult {
   const enabled = (process.env.RETENTION_ENABLED || "false").trim().toLowerCase() === "true";
-  const defaultKeep = parseKeep((process.env.RETENTION_DEFAULT_KEEP || "unlimited").trim());
+  const warnings: string[] = [];
+  const defaultKeepRaw = (process.env.RETENTION_DEFAULT_KEEP || "unlimited").trim();
+  const defaultKeep = parseKeep(defaultKeepRaw);
   const groupRules = parseRules((process.env.RETENTION_GROUP_RULES || "").trim(), false);
   const repoRules = parseRules((process.env.RETENTION_REPO_RULES || "").trim(), true);
 
+  const resolvedDefaultKeep = defaultKeep === undefined ? null : defaultKeep;
+  if (defaultKeep === undefined) {
+    warnings.push(`Invalid RETENTION_DEFAULT_KEEP value "${defaultKeepRaw}". Falling back to "unlimited".`);
+  }
+
   return {
-    enabled,
-    defaultKeep: defaultKeep === undefined ? null : defaultKeep,
-    groupRules,
-    repoRules,
+    policy: {
+      enabled,
+      defaultKeep: resolvedDefaultKeep,
+      groupRules,
+      repoRules,
+    },
+    warnings,
   };
 }
 
@@ -103,7 +126,11 @@ function parseKeep(value: string): number | null | undefined {
     return null;
   }
 
-  const parsed = Number.parseInt(value, 10);
+  if (!/^\d+$/.test(normalized)) {
+    return undefined;
+  }
+
+  const parsed = Number.parseInt(normalized, 10);
   if (!Number.isFinite(parsed) || parsed < 1) {
     return undefined;
   }

@@ -1,5 +1,9 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { loadRetentionPolicyFromEnv, resolveRetentionKeep } from "../services/scan-retention";
+import {
+  loadRetentionPolicyFromEnv,
+  loadRetentionPolicyParseDiagnosticsFromEnv,
+  resolveRetentionKeep,
+} from "../services/scan-retention";
 
 const ENV_KEYS = [
   "RETENTION_ENABLED",
@@ -83,5 +87,32 @@ describe("scan retention config", () => {
     expect(resolveRetentionKeep(policy, "repo", "dev-api-hotfix-12")).toBe(2);
     expect(resolveRetentionKeep(policy, "repo", "dev-api-12")).toBe(4);
     expect(resolveRetentionKeep(policy, "repo", "dev-web-12")).toBe(10);
+  });
+
+  test("rejects non-numeric keep values with numeric suffixes", () => {
+    backupEnv();
+    process.env.RETENTION_ENABLED = "true";
+    process.env.RETENTION_DEFAULT_KEEP = "25";
+    process.env.RETENTION_GROUP_RULES = "dev-*:10x";
+
+    const policy = loadRetentionPolicyFromEnv();
+
+    expect(resolveRetentionKeep(policy, "repo", "dev-1")).toBe(25);
+    expect(policy.groupRules).toHaveLength(0);
+  });
+
+  test("reports invalid RETENTION_DEFAULT_KEEP while failing open to unlimited", () => {
+    backupEnv();
+    process.env.RETENTION_ENABLED = "true";
+    process.env.RETENTION_DEFAULT_KEEP = "10x";
+
+    const policy = loadRetentionPolicyFromEnv();
+    const diagnostics = loadRetentionPolicyParseDiagnosticsFromEnv();
+
+    expect(policy.defaultKeep).toBeNull();
+    expect(resolveRetentionKeep(policy, "repo", "misc")).toBeNull();
+    expect(diagnostics).toEqual([
+      'Invalid RETENTION_DEFAULT_KEEP value "10x". Falling back to "unlimited".',
+    ]);
   });
 });
