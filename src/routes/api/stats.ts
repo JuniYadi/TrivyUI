@@ -5,6 +5,7 @@ import type {
   Severity,
   SeverityBreakdown,
 } from "../../services/types";
+import { withOpenVulnerabilityState } from "../../services/vuln-state-sql";
 import { buildSuccessResponse, sendError } from "./_shared";
 
 const SEVERITIES: Severity[] = ["CRITICAL", "HIGH", "MEDIUM", "LOW", "UNKNOWN"];
@@ -25,12 +26,10 @@ export function createStatsHandler(db: Database) {
     try {
       const totalRow = db
         .query(
-          `
-          SELECT COUNT(DISTINCT i.repository_id || ':' || v.cve_id) as count
-          FROM vulnerabilities v
-          JOIN scan_results sr ON sr.id = v.scan_result_id
-          JOIN images i ON i.id = sr.image_id
-          `
+          withOpenVulnerabilityState(`
+          SELECT COUNT(DISTINCT ov.repository_id || ':' || ov.tag_group || ':' || ov.cve_id) as count
+          FROM open_vulnerabilities ov
+          `)
         )
         .get() as { count: number };
       const repositoriesRow = db
@@ -39,34 +38,29 @@ export function createStatsHandler(db: Database) {
       const imagesRow = db.query("SELECT COUNT(*) as count FROM images").get() as { count: number };
       const packagesRow = db
         .query(
-          `
-          SELECT COUNT(DISTINCT i.id || ':' || COALESCE(sp.result_target, '') || ':' || sp.package_name || ':' || COALESCE(sp.installed_version, '')) as count
-          FROM scan_packages sp
-          JOIN scan_results sr ON sr.id = sp.scan_result_id
-          JOIN images i ON i.id = sr.image_id
-          `
+          withOpenVulnerabilityState(`
+          SELECT COUNT(DISTINCT lgs.repository_id || ':' || sp.package_name || ':' || COALESCE(sp.installed_version, '')) as count
+          FROM latest_group_scans lgs
+          JOIN scan_packages sp ON sp.scan_result_id = lgs.scan_result_id
+          `)
         )
         .get() as { count: number };
       const vulnerablePackagesRow = db
         .query(
-          `
-          SELECT COUNT(DISTINCT i.id || ':' || v.package_name || ':' || COALESCE(v.installed_version, '')) as count
-          FROM vulnerabilities v
-          JOIN scan_results sr ON sr.id = v.scan_result_id
-          JOIN images i ON i.id = sr.image_id
-          `
+          withOpenVulnerabilityState(`
+          SELECT COUNT(DISTINCT ov.repository_id || ':' || ov.package_name || ':' || COALESCE(ov.installed_version, '')) as count
+          FROM open_vulnerabilities ov
+          `)
         )
         .get() as { count: number };
 
       const bySeverityRows = db
         .query(
-          `
-          SELECT v.severity as severity, COUNT(DISTINCT i.repository_id || ':' || v.cve_id) as count
-          FROM vulnerabilities v
-          JOIN scan_results sr ON sr.id = v.scan_result_id
-          JOIN images i ON i.id = sr.image_id
-          GROUP BY v.severity
-          `
+          withOpenVulnerabilityState(`
+          SELECT ov.severity as severity, COUNT(DISTINCT ov.repository_id || ':' || ov.tag_group || ':' || ov.cve_id) as count
+          FROM open_vulnerabilities ov
+          GROUP BY ov.severity
+          `)
         )
         .all() as Array<{ severity: string; count: number }>;
 
@@ -86,21 +80,19 @@ export function createStatsHandler(db: Database) {
 
       const top_repositories = db
         .query(
-          `
+          withOpenVulnerabilityState(`
           SELECT
             r.id as id,
             r.name as name,
-            COUNT(DISTINCT v.cve_id) as vulnerability_count,
-            COUNT(DISTINCT CASE WHEN v.severity = 'CRITICAL' THEN v.cve_id END) as critical_count
+            COUNT(DISTINCT ov.repository_id || ':' || ov.tag_group || ':' || ov.cve_id) as vulnerability_count,
+            COUNT(DISTINCT CASE WHEN ov.severity = 'CRITICAL' THEN ov.repository_id || ':' || ov.tag_group || ':' || ov.cve_id END) as critical_count
           FROM repositories r
-          JOIN images i ON i.repository_id = r.id
-          JOIN scan_results sr ON sr.image_id = i.id
-          LEFT JOIN vulnerabilities v ON v.scan_result_id = sr.id
+          JOIN open_vulnerabilities ov ON ov.repository_id = r.id
           GROUP BY r.id, r.name
-          HAVING COUNT(DISTINCT v.cve_id) > 0
+          HAVING COUNT(DISTINCT ov.repository_id || ':' || ov.tag_group || ':' || ov.cve_id) > 0
           ORDER BY vulnerability_count DESC, critical_count DESC, r.name ASC
           LIMIT 10
-          `
+          `)
         )
         .all() as DashboardTopRepository[];
 

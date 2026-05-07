@@ -11,6 +11,59 @@ import { buildSuccessResponse, sendError } from "./_shared";
 
 const ALLOWED_SORT_FIELDS: ImageSortField[] = ["name", "repository", "vulnerability_count", "critical_count", "last_scanned_at"];
 const ALLOWED_SEVERITIES: Severity[] = ["CRITICAL", "HIGH", "MEDIUM", "LOW", "UNKNOWN"];
+type VulnerabilityStateFilter = "open" | "done" | "all";
+
+function parseStateFilter(url: URL): VulnerabilityStateFilter {
+  const raw = (url.searchParams.get("state") || "open").toLowerCase();
+  if (raw === "done" || raw === "all") {
+    return raw;
+  }
+
+  return "open";
+}
+
+const VULNERABILITY_STATE_CTE = `
+  WITH ranked_group_scans AS (
+    SELECT sr.id AS scan_result_id, i.repository_id, i.tag_group,
+      ROW_NUMBER() OVER (PARTITION BY i.repository_id, i.tag_group ORDER BY datetime(sr.scan_date) DESC, sr.id DESC) AS row_num
+    FROM scan_results sr
+    JOIN images i ON i.id = sr.image_id
+  ),
+  latest_group_scans AS (
+    SELECT scan_result_id, repository_id, tag_group
+    FROM ranked_group_scans
+    WHERE row_num = 1
+  ),
+  latest_keys AS (
+    SELECT lgs.repository_id, lgs.tag_group, v.cve_id
+    FROM latest_group_scans lgs
+    JOIN vulnerabilities v ON v.scan_result_id = lgs.scan_result_id
+    GROUP BY lgs.repository_id, lgs.tag_group, v.cve_id
+  ),
+  vulnerability_rows AS (
+    SELECT v.id, v.scan_result_id, v.cve_id, v.severity, v.package_name, v.installed_version, v.fixed_version, v.title,
+      v.description, v.score, v.created_at, sr.scan_date AS scanned_at, i.repository_id, i.tag_group,
+      r.name AS repository_name, i.id AS image_id, i.name AS image_name
+    FROM vulnerabilities v
+    JOIN scan_results sr ON sr.id = v.scan_result_id
+    JOIN images i ON i.id = sr.image_id
+    JOIN repositories r ON r.id = i.repository_id
+  ),
+  resolved_state AS (
+    SELECT vr.repository_id, vr.tag_group, vr.cve_id, MAX(datetime(vr.scanned_at)) AS resolved_at
+    FROM vulnerability_rows vr
+    LEFT JOIN latest_keys lk ON lk.repository_id = vr.repository_id AND lk.tag_group = vr.tag_group AND lk.cve_id = vr.cve_id
+    WHERE lk.cve_id IS NULL
+    GROUP BY vr.repository_id, vr.tag_group, vr.cve_id
+  ),
+  vulnerability_states AS (
+    SELECT vr.*, CASE WHEN lk.cve_id IS NULL THEN 'done' ELSE 'open' END AS state,
+      CASE WHEN lk.cve_id IS NULL THEN rs.resolved_at ELSE NULL END AS resolved_at
+    FROM vulnerability_rows vr
+    LEFT JOIN latest_keys lk ON lk.repository_id = vr.repository_id AND lk.tag_group = vr.tag_group AND lk.cve_id = vr.cve_id
+    LEFT JOIN resolved_state rs ON rs.repository_id = vr.repository_id AND rs.tag_group = vr.tag_group AND rs.cve_id = vr.cve_id
+  )
+`;
 
 function parsePositiveInt(value: string | null, fallback: number): number {
   if (!value) {
@@ -51,8 +104,8 @@ function buildListOrderBy(sort: ImageSortField, order: "asc" | "desc"): string {
   const map: Record<ImageSortField, string> = {
     name: "i.name",
     repository: "r.name",
-    vulnerability_count: "COUNT(v.id)",
-    critical_count: "SUM(CASE WHEN v.severity = 'CRITICAL' THEN 1 ELSE 0 END)",
+    vulnerability_count: "vulnerability_count",
+    critical_count: "critical_count",
     last_scanned_at: "MAX(datetime(i.last_scanned_at))",
   };
 
@@ -67,6 +120,7 @@ interface ImageListRow {
   vulnerability_count: number;
   critical_count: number;
   last_scanned_at: string | null;
+  tag_group: string;
 }
 
 interface SeverityRow {
@@ -91,6 +145,9 @@ interface VulnerabilityRow {
   image_id: number;
   image_name: string;
   scanned_at: string;
+  tag_group: string;
+  state: "open" | "done";
+  resolved_at: string | null;
 }
 
 function buildSeverityBreakdown(rows: SeverityRow[]): SeverityBreakdown {
@@ -133,6 +190,9 @@ function toVulnerabilityWithRelations(row: VulnerabilityRow): VulnerabilityWithR
       name: row.image_name,
     },
     scanned_at: row.scanned_at,
+    tag_group: row.tag_group,
+    state: row.state,
+    resolved_at: row.resolved_at,
   };
 }
 
@@ -148,6 +208,7 @@ function handleImageList(db: Database, request: Request): Response {
   const order = orderRaw === "asc" ? "asc" : "desc";
 
   const { page, limit } = parsePageAndLimit(url);
+  const state = parseStateFilter(url);
   const offset = (page - 1) * limit;
 
   const totalRow = db.query("SELECT COUNT(*) AS total FROM images").get() as { total: number } | null;
@@ -160,21 +221,21 @@ function handleImageList(db: Database, request: Request): Response {
     SELECT
       i.id,
       i.name,
+      i.tag_group,
       r.id AS repository_id,
       r.name AS repository_name,
-      COUNT(v.id) AS vulnerability_count,
-      SUM(CASE WHEN v.severity = 'CRITICAL' THEN 1 ELSE 0 END) AS critical_count,
+      COUNT(DISTINCT CASE WHEN (? = 'all' OR vs.state = ?) THEN vs.cve_id END) AS vulnerability_count,
+      COUNT(DISTINCT CASE WHEN (? = 'all' OR vs.state = ?) AND vs.severity = 'CRITICAL' THEN vs.cve_id END) AS critical_count,
       MAX(i.last_scanned_at) AS last_scanned_at
     FROM images i
     JOIN repositories r ON r.id = i.repository_id
-    LEFT JOIN scan_results sr ON sr.image_id = i.id
-    LEFT JOIN vulnerabilities v ON v.scan_result_id = sr.id
-    GROUP BY i.id, i.name, r.id, r.name
+    LEFT JOIN vulnerability_states vs ON vs.repository_id = i.repository_id AND vs.tag_group = i.tag_group
+    GROUP BY i.id, i.name, i.tag_group, r.id, r.name
     ORDER BY ${orderBy}
     LIMIT ? OFFSET ?
   `;
 
-  const rows = db.query(listSql).all(limit, offset) as ImageListRow[];
+  const rows = db.query(`${VULNERABILITY_STATE_CTE} ${listSql}`).all(state, state, state, state, limit, offset) as ImageListRow[];
 
   const data: ImageListResponse = {
     items: rows.map((row) => ({
@@ -184,6 +245,7 @@ function handleImageList(db: Database, request: Request): Response {
         id: Number(row.repository_id),
         name: row.repository_name,
       },
+      tag_group: row.tag_group,
       vulnerability_count: Number(row.vulnerability_count ?? 0),
       critical_count: Number(row.critical_count ?? 0),
       last_scanned_at: row.last_scanned_at,
@@ -206,6 +268,7 @@ function handleImageDetail(db: Database, id: number): Response {
       SELECT
         i.id,
         i.name,
+        i.tag_group,
         i.last_scanned_at,
         COALESCE(
           (
@@ -227,6 +290,7 @@ function handleImageDetail(db: Database, id: number): Response {
     | {
         id: number;
         name: string;
+        tag_group: string;
         last_scanned_at: string | null;
         created_at: string;
         repository_id: number;
@@ -240,11 +304,10 @@ function handleImageDetail(db: Database, id: number): Response {
 
   const severityRows = db
     .query(
-      `
+      `${VULNERABILITY_STATE_CTE}
       SELECT v.severity AS severity, COUNT(v.id) AS count
-      FROM vulnerabilities v
-      JOIN scan_results sr ON sr.id = v.scan_result_id
-      WHERE sr.image_id = ?
+      FROM vulnerability_states v
+      WHERE v.image_id = ? AND v.state = 'open'
       GROUP BY v.severity
       `,
     )
@@ -252,7 +315,7 @@ function handleImageDetail(db: Database, id: number): Response {
 
   const vulnerabilities = db
     .query(
-      `
+      `${VULNERABILITY_STATE_CTE}
       SELECT
         v.id,
         v.scan_result_id,
@@ -265,17 +328,17 @@ function handleImageDetail(db: Database, id: number): Response {
         v.description,
         v.score,
         v.created_at,
-        r.id AS repository_id,
-        r.name AS repository_name,
-        i.id AS image_id,
-        i.name AS image_name,
-        sr.scan_date AS scanned_at
-      FROM vulnerabilities v
-      JOIN scan_results sr ON sr.id = v.scan_result_id
-      JOIN images i ON i.id = sr.image_id
-      JOIN repositories r ON r.id = i.repository_id
-      WHERE i.id = ?
-      ORDER BY datetime(sr.scan_date) DESC, v.id DESC
+        v.repository_id,
+        v.repository_name,
+        v.image_id,
+        v.image_name,
+        v.scanned_at,
+        v.tag_group,
+        v.state,
+        v.resolved_at
+      FROM vulnerability_states v
+      WHERE v.image_id = ?
+      ORDER BY datetime(v.scanned_at) DESC, v.id DESC
       `,
     )
     .all(id) as VulnerabilityRow[];

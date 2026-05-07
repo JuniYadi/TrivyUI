@@ -1,7 +1,63 @@
 import { describe, expect, test } from "bun:test";
 import { detectSchemaVersion, parseTrivyResult } from "../services/trivy-parser";
+import { parseImageTagGrouping } from "../services/image-tag-grouping";
 
 describe("trivy parser", () => {
+  test("parses image tag grouping variants", () => {
+    expect(parseImageTagGrouping("ghcr.io/acme/app:dev-01")).toEqual({
+      original: "ghcr.io/acme/app:dev-01",
+      repository_base: "ghcr.io/acme/app",
+      tag: "dev-01",
+      tag_group: "dev",
+    });
+
+    expect(parseImageTagGrouping("ghcr.io/acme/app:stg-14")).toEqual({
+      original: "ghcr.io/acme/app:stg-14",
+      repository_base: "ghcr.io/acme/app",
+      tag: "stg-14",
+      tag_group: "stg",
+    });
+
+    expect(parseImageTagGrouping("ghcr.io/acme/app:dev-new-12")).toEqual({
+      original: "ghcr.io/acme/app:dev-new-12",
+      repository_base: "ghcr.io/acme/app",
+      tag: "dev-new-12",
+      tag_group: "dev-new",
+    });
+  });
+
+  test("returns ungrouped for digest refs and tagless images", () => {
+    expect(parseImageTagGrouping("ghcr.io/acme/app@sha256:abcdef")).toEqual({
+      original: "ghcr.io/acme/app@sha256:abcdef",
+      repository_base: "ghcr.io/acme/app",
+      tag: null,
+      tag_group: "ungrouped",
+    });
+
+    expect(parseImageTagGrouping("ghcr.io/acme/app")).toEqual({
+      original: "ghcr.io/acme/app",
+      repository_base: "ghcr.io/acme/app",
+      tag: null,
+      tag_group: "ungrouped",
+    });
+  });
+
+  test("keeps tag and group when digest and tag are both present", () => {
+    expect(parseImageTagGrouping("repo/app:dev-12@sha256:abcd")).toEqual({
+      original: "repo/app:dev-12@sha256:abcd",
+      repository_base: "repo/app",
+      tag: "dev-12",
+      tag_group: "dev",
+    });
+
+    expect(parseImageTagGrouping("ghcr.io/acme/app:prod-99@sha256:abcdef")).toEqual({
+      original: "ghcr.io/acme/app:prod-99@sha256:abcdef",
+      repository_base: "ghcr.io/acme/app",
+      tag: "prod-99",
+      tag_group: "prod",
+    });
+  });
+
   test("parses Trivy JSON Results -> Packages -> Vulnerabilities into normalized records", () => {
     const payload = {
       SchemaVersion: 2,

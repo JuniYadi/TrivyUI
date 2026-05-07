@@ -1,4 +1,5 @@
 import type { DatabaseDriver } from "../db/driver";
+import type { ImageGroupingFields } from "./db-service";
 import type { NormalizedPackage, NormalizedVulnerability, Severity } from "./types";
 
 const ALLOWED_SEVERITIES: Severity[] = ["CRITICAL", "HIGH", "MEDIUM", "LOW", "UNKNOWN"];
@@ -16,10 +17,32 @@ export async function upsertRepositoryMultiDb(db: DatabaseDriver, name: string):
   return Number(row.id);
 }
 
-export async function upsertImageMultiDb(db: DatabaseDriver, repoId: number, name: string): Promise<number> {
+export async function upsertImageMultiDb(
+  db: DatabaseDriver,
+  repoId: number,
+  name: string,
+  grouping?: ImageGroupingFields,
+): Promise<number> {
   const normalizedName = normalizeName(name, "unknown-image");
+  const repositoryBase = normalizeName(grouping?.repository_base ?? normalizedName, "unknown-repository");
+  const tag = normalizeOptionalText(grouping?.tag ?? null);
+  const tagGroup = normalizeName(grouping?.tag_group ?? "ungrouped", "ungrouped");
 
-  await insertIgnore(db, "images", ["repository_id", "name"], [repoId, normalizedName]);
+  await insertIgnore(
+    db,
+    "images",
+    ["repository_id", "name", "repository_base", "tag", "tag_group"],
+    [repoId, normalizedName, repositoryBase, tag, tagGroup],
+  );
+
+  await db.execute(
+    `
+      UPDATE images
+      SET repository_id = ?, repository_base = ?, tag = ?, tag_group = ?
+      WHERE name = ?
+    `,
+    [repoId, repositoryBase, tag, tagGroup, normalizedName],
+  );
 
   const row = await db.queryOne<{ id: number }>("SELECT id FROM images WHERE name = ?", [normalizedName]);
   if (!row) {

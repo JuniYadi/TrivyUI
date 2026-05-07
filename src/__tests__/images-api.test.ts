@@ -99,6 +99,65 @@ describe("GET /api/images", () => {
     expect(body.data.items[0]?.vulnerability_count).toBe(2);
     expect(body.data.items[0]?.critical_count).toBe(1);
   });
+
+  test("applies state counts at tag_group scope for each image row", async () => {
+    const db = createTestDb();
+
+    importTrivyPayload(
+      db,
+      {
+        ArtifactName: "ghcr.io/acme/svc:dev-1",
+        Metadata: { Source: "ci", CreatedAt: "2026-04-26T10:00:00.000Z" },
+        Results: [{ Vulnerabilities: [{ VulnerabilityID: "CVE-IMG-SCOPE", Severity: "HIGH", PkgName: "glibc" }] }],
+      },
+      "{}",
+    );
+    importTrivyPayload(
+      db,
+      {
+        ArtifactName: "ghcr.io/acme/svc:stg-1",
+        Metadata: { Source: "ci", CreatedAt: "2026-04-26T10:05:00.000Z" },
+        Results: [{ Vulnerabilities: [{ VulnerabilityID: "CVE-IMG-SCOPE", Severity: "HIGH", PkgName: "glibc" }] }],
+      },
+      "{}",
+    );
+    importTrivyPayload(
+      db,
+      {
+        ArtifactName: "ghcr.io/acme/svc:dev-2",
+        Metadata: { Source: "ci", CreatedAt: "2026-04-27T10:00:00.000Z" },
+        Results: [{ Vulnerabilities: [] }],
+      },
+      "{}",
+    );
+
+    const handler = createImagesHandler(db);
+
+    const openResponse = handler(new Request("http://localhost/api/images"));
+    const openBody = (await openResponse.json()) as {
+      data: { items: Array<{ name: string; vulnerability_count: number; tag_group: string }> };
+    };
+
+    const doneResponse = handler(new Request("http://localhost/api/images?state=done"));
+    const doneBody = (await doneResponse.json()) as {
+      data: { items: Array<{ name: string; vulnerability_count: number; tag_group: string }> };
+    };
+
+    const openDev = openBody.data.items.find((item) => item.name === "ghcr.io/acme/svc:dev-2");
+    const openStg = openBody.data.items.find((item) => item.name === "ghcr.io/acme/svc:stg-1");
+    const doneDevLatest = doneBody.data.items.find((item) => item.name === "ghcr.io/acme/svc:dev-2");
+    const doneDevOlder = doneBody.data.items.find((item) => item.name === "ghcr.io/acme/svc:dev-1");
+
+    expect(openResponse.status).toBe(200);
+    expect(openDev?.vulnerability_count).toBe(0);
+    expect(openStg?.vulnerability_count).toBe(1);
+    expect(openStg?.tag_group).toBe("stg");
+
+    expect(doneResponse.status).toBe(200);
+    expect(doneDevLatest?.vulnerability_count).toBe(1);
+    expect(doneDevLatest?.tag_group).toBe("dev");
+    expect(doneDevOlder?.vulnerability_count).toBe(1);
+  });
 });
 
 describe("GET /api/images/:id", () => {
@@ -128,6 +187,26 @@ describe("GET /api/images/:id", () => {
     expect(body.data.repository.name).toBe("ghcr.io/acme/api");
     expect(body.data.by_severity.CRITICAL).toBe(1);
     expect(body.data.vulnerabilities.length).toBe(2);
+  });
+
+  test("includes vulnerability state fields in detail response", async () => {
+    const db = createTestDb();
+    seedData(db);
+
+    const target = db.query("SELECT id FROM images WHERE name = 'ghcr.io/acme/api:latest'").get() as { id: number };
+    const handler = createImagesHandler(db);
+    const response = handler(new Request(`http://localhost/api/images/${target.id}`));
+    const body = (await response.json()) as {
+      data: {
+        vulnerabilities: Array<{ tag_group: string; state: string; resolved_at: string | null }>;
+      };
+    };
+
+    expect(response.status).toBe(200);
+    expect(body.data.vulnerabilities.length).toBeGreaterThan(0);
+    expect(body.data.vulnerabilities[0]).toHaveProperty("tag_group");
+    expect(body.data.vulnerabilities[0]).toHaveProperty("state");
+    expect(body.data.vulnerabilities[0]).toHaveProperty("resolved_at");
   });
 
   test("returns 404 for missing image", async () => {

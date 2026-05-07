@@ -1,6 +1,12 @@
 import type { Database } from "bun:sqlite";
 import type { NormalizedPackage, NormalizedVulnerability, Severity } from "./types";
 
+export interface ImageGroupingFields {
+  repository_base: string;
+  tag: string | null;
+  tag_group: string;
+}
+
 const ALLOWED_SEVERITIES: Severity[] = [
   "CRITICAL",
   "HIGH",
@@ -25,13 +31,30 @@ export function upsertRepository(db: Database, name: string): number {
   return row.id;
 }
 
-export function upsertImage(db: Database, repoId: number, name: string): number {
+export function upsertImage(
+  db: Database,
+  repoId: number,
+  name: string,
+  grouping?: ImageGroupingFields
+): number {
   const normalizedName = normalizeName(name, "unknown-image");
+  const repositoryBase = normalizeName(grouping?.repository_base ?? normalizedName, "unknown-repository");
+  const tag = normalizeOptionalText(grouping?.tag ?? null);
+  const tagGroup = normalizeName(grouping?.tag_group ?? "ungrouped", "ungrouped");
 
-  db.query(`INSERT OR IGNORE INTO images (repository_id, name) VALUES (?1, ?2)`).run(
+  db.query(
+    `INSERT OR IGNORE INTO images (repository_id, name, repository_base, tag, tag_group) VALUES (?1, ?2, ?3, ?4, ?5)`
+  ).run(
     repoId,
-    normalizedName
+    normalizedName,
+    repositoryBase,
+    tag,
+    tagGroup
   );
+
+  db.query(
+    `UPDATE images SET repository_id = ?1, repository_base = ?2, tag = ?3, tag_group = ?4 WHERE name = ?5`
+  ).run(repoId, repositoryBase, tag, tagGroup, normalizedName);
 
   const row = db
     .query(`SELECT id FROM images WHERE name = ?1`)
