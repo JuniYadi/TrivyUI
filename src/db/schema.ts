@@ -185,6 +185,7 @@ async function evolveImagesSchema(driver: DatabaseDriver): Promise<void> {
 
   await driver.execute("UPDATE images SET repository_base = name WHERE repository_base IS NULL OR repository_base = ''");
   await driver.execute("UPDATE images SET tag_group = 'ungrouped' WHERE tag_group IS NULL OR tag_group = ''");
+  await driver.execute("UPDATE images SET tag_group = tag WHERE tag_group = 'ungrouped' AND tag IS NOT NULL AND tag <> ''");
 }
 
 async function hasImageColumn(driver: DatabaseDriver, columnName: string): Promise<boolean> {
