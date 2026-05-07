@@ -40,7 +40,9 @@ function seedScanResult(targetDb: ReturnType<typeof initDb>): number {
   targetDb.query("INSERT INTO repositories (name) VALUES (?1)").run("ghcr.io/acme/trivyui");
   const repoRow = targetDb.query("SELECT id FROM repositories WHERE name = ?1").get("ghcr.io/acme/trivyui") as { id: number };
 
-  targetDb.query("INSERT INTO images (repository_id, name) VALUES (?1, ?2)").run(repoRow.id, "ghcr.io/acme/trivyui:latest");
+  targetDb
+    .query("INSERT INTO images (repository_id, name, repository_base, tag, tag_group) VALUES (?1, ?2, ?3, ?4, ?5)")
+    .run(repoRow.id, "ghcr.io/acme/trivyui:latest", "ghcr.io/acme/trivyui", "latest", "latest");
   const imageRow = targetDb
     .query("SELECT id FROM images WHERE name = ?1")
     .get("ghcr.io/acme/trivyui:latest") as { id: number };
