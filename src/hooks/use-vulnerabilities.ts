@@ -11,6 +11,7 @@ export interface VulnerabilityQueryParams {
   image?: string;
   package?: string;
   search?: string;
+  state?: "open" | "done" | "all";
   vulnerabilityId?: number;
 }
 
@@ -86,6 +87,11 @@ export function parseVulnerabilityParams(search = window.location.search): Vulne
     parsed.search = searchText;
   }
 
+  const stateRaw = (params.get("state") || "").toLowerCase();
+  if (stateRaw === "open" || stateRaw === "done" || stateRaw === "all") {
+    parsed.state = stateRaw;
+  }
+
   const vulnerabilityIdRaw = params.get("vulnerabilityId") || params.get("vuln");
   if (vulnerabilityIdRaw) {
     const vulnerabilityId = Number.parseInt(vulnerabilityIdRaw, 10);
@@ -109,6 +115,7 @@ export function toQueryString(query: VulnerabilityQueryParams): string {
   if (query.image) params.set("image", query.image);
   if (query.package) params.set("package", query.package);
   if (query.search) params.set("search", query.search);
+  if (query.state) params.set("state", query.state);
   if (query.vulnerabilityId) params.set("vulnerabilityId", String(query.vulnerabilityId));
 
   return params.toString();
@@ -227,5 +234,16 @@ export function useVulnerabilities() {
 }
 
 export function hasActiveFilters(query: VulnerabilityQueryParams): boolean {
-  return Boolean(query.search || query.severity || query.repository || query.image || query.package || query.page !== 1 || query.limit !== 25 || query.sort !== "severity" || query.order !== "desc");
+  return Boolean(
+    query.search ||
+      query.severity ||
+      query.repository ||
+      query.image ||
+      query.package ||
+      query.state ||
+      query.page !== 1 ||
+      query.limit !== 25 ||
+      query.sort !== "severity" ||
+      query.order !== "desc",
+  );
 }
