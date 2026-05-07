@@ -74,6 +74,7 @@ export function parseJsonPayload(text: string): unknown {
 
 export function importTrivyPayload(db: Database, parsedJson: unknown, rawJson: string): UploadSummary {
   let summary: UploadSummary | null = null;
+  let retentionTarget: { repository: string; tagGroup: string } | null = null;
 
   const tx = db.transaction(() => {
     const parsed = parseTrivyResult(parsedJson);
@@ -87,8 +88,10 @@ export function importTrivyPayload(db: Database, parsedJson: unknown, rawJson: s
     const scanResultId = upsertScanResult(db, imageId, rawJson, parsed.source, parsed.scan_date);
     insertScanPackages(db, scanResultId, parsed.packages);
     insertVulnerabilities(db, scanResultId, parsed.vulnerabilities);
-    const retentionPolicy = loadRetentionPolicyFromEnv();
-    pruneScansForRetention(db, retentionPolicy, parsed.repo_name, imageGrouping.tag_group);
+    retentionTarget = {
+      repository: parsed.repo_name,
+      tagGroup: imageGrouping.tag_group,
+    };
 
     const packageCount = countUniquePackages(parsed.packages);
     const vulnerablePackageCount = countUniqueVulnerablePackages(parsed.vulnerabilities);
@@ -120,6 +123,11 @@ export function importTrivyPayload(db: Database, parsedJson: unknown, rawJson: s
   });
 
   tx();
+
+  if (retentionTarget) {
+    const retentionPolicy = loadRetentionPolicyFromEnv();
+    pruneScansForRetention(db, retentionPolicy, retentionTarget.repository, retentionTarget.tagGroup);
+  }
 
   if (!summary) {
     throw new Error("FAILED_IMPORT_TRIVY_PAYLOAD");
