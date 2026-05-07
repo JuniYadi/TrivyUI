@@ -269,6 +269,7 @@ function evolveImagesSchemaSqlite(db: TrivyUiDb): void {
 
   db.exec("UPDATE images SET repository_base = name WHERE repository_base IS NULL OR repository_base = '';");
   db.exec("UPDATE images SET tag_group = 'ungrouped' WHERE tag_group IS NULL OR tag_group = '';");
+  db.exec("UPDATE images SET tag_group = tag WHERE tag_group = 'ungrouped' AND tag IS NOT NULL AND tag <> '';");
 }
 
 function hasSqliteColumn(db: TrivyUiDb, table: string, column: string): boolean {
