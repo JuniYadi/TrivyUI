@@ -5,10 +5,11 @@
   "type": "module",
   "scripts": {
     "tw:build": "tailwindcss -i ./src/styles/tailwind.css -o ./src/styles/tailwind.generated.css",
-    "dev": "bun run tw:build && bun run --hot src/index.ts",
+    "dev": "bun run db:backfill-tag-groups && bun run tw:build && bun run --hot src/index.ts",
     "start": "bun run --cwd dist index.js",
     "build": "bun run tw:build && rm -rf dist && bun build --target=bun --production --sourcemap --outdir=dist ./src/index.ts",
     "db:seed-dashboard": "bun run scripts/seed-dashboard.ts",
+    "db:backfill-tag-groups": "bun run scripts/backfill-image-tag-groups.ts",
     "notify:weekly": "bun run scripts/send-weekly-reminder.ts",
     "notify:monthly": "bun run scripts/send-monthly-stats.ts"
   },
