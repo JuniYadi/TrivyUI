@@ -150,7 +150,7 @@ describe("upload/import API endpoints", () => {
     expect(imageRow).toEqual({
       repository_base: "ghcr.io/acme/trivyui",
       tag: "1.2.3",
-      tag_group: "ungrouped",
+      tag_group: "1.2.3",
     });
   });
 
