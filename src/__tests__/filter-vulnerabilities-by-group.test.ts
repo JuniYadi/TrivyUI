@@ -18,4 +18,11 @@ describe("filterVulnerabilitiesByGroup", () => {
     expect(result.length).toBe(2);
     expect(result.every((item) => item.tag_group === "dev")).toBe(true);
   });
+
+  test("matches group values case-insensitively and trims spaces", () => {
+    const noisy = [{ id: 5, tag_group: " Dev " }, { id: 6, tag_group: "stg" }];
+    const result = filterVulnerabilitiesByGroup(noisy, "dev");
+    expect(result.length).toBe(1);
+    expect(result[0]?.id).toBe(5);
+  });
 });
