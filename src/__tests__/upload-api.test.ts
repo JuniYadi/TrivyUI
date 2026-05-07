@@ -154,7 +154,7 @@ describe("upload/import API endpoints", () => {
     });
   });
 
-  test("POST /api/upload persists tag grouping for digest-pinned tagged image", async () => {
+test("POST /api/upload persists tag grouping for digest-pinned tagged image", async () => {
     const db = createTestDb();
     const uploadHandler = createUploadHandler(db);
 
@@ -187,6 +187,70 @@ describe("upload/import API endpoints", () => {
       tag: "dev-12",
       tag_group: "dev",
     });
+  });
+
+  test("POST /api/upload prunes old scans when retention is enabled", async () => {
+    const previousRetentionEnabled = process.env.RETENTION_ENABLED;
+    const previousRetentionDefaultKeep = process.env.RETENTION_DEFAULT_KEEP;
+    const previousRetentionGroupRules = process.env.RETENTION_GROUP_RULES;
+    const previousRetentionRepoRules = process.env.RETENTION_REPO_RULES;
+
+    process.env.RETENTION_ENABLED = "true";
+    process.env.RETENTION_DEFAULT_KEEP = "unlimited";
+    process.env.RETENTION_GROUP_RULES = "dev*:2";
+    process.env.RETENTION_REPO_RULES = "";
+
+    try {
+      const db = createTestDb();
+      const uploadHandler = createUploadHandler(db);
+
+      for (let i = 0; i < 4; i += 1) {
+        const payload = buildValidTrivyPayload(`ghcr.io/acme/trivyui:dev-${i}@sha256:abcd`);
+        const formData = new FormData();
+        formData.set("file", new File([JSON.stringify(payload)], `scan-${i}.json`, { type: "application/json" }));
+
+        const response = await uploadHandler(new Request("http://localhost/api/upload", { method: "POST", body: formData }));
+        expect(response.status).toBe(201);
+      }
+
+      const row = db
+        .query(
+          `
+            SELECT COUNT(*) AS count
+            FROM scan_results sr
+            JOIN images i ON i.id = sr.image_id
+            JOIN repositories r ON r.id = i.repository_id
+            WHERE r.name = ?1 AND i.tag_group = ?2
+          `,
+        )
+        .get("ghcr.io/acme/trivyui", "dev") as { count: number };
+
+      expect(Number(row.count)).toBe(2);
+    } finally {
+      if (previousRetentionEnabled === undefined) {
+        delete process.env.RETENTION_ENABLED;
+      } else {
+        process.env.RETENTION_ENABLED = previousRetentionEnabled;
+      }
+
+      if (previousRetentionDefaultKeep === undefined) {
+        delete process.env.RETENTION_DEFAULT_KEEP;
+      } else {
+        process.env.RETENTION_DEFAULT_KEEP = previousRetentionDefaultKeep;
+      }
+
+      if (previousRetentionGroupRules === undefined) {
+        delete process.env.RETENTION_GROUP_RULES;
+      } else {
+        process.env.RETENTION_GROUP_RULES = previousRetentionGroupRules;
+      }
+
+      if (previousRetentionRepoRules === undefined) {
+        delete process.env.RETENTION_REPO_RULES;
+      } else {
+        process.env.RETENTION_REPO_RULES = previousRetentionRepoRules;
+      }
+    }
   });
 
   test("POST /api/upload stays successful when notification sending fails", async () => {
