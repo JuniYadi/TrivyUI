@@ -50,7 +50,7 @@ export function ImagesPage() {
           search: nextSearch || undefined,
         };
       });
-    }, 1000);
+    }, 1500);
 
     return () => window.clearTimeout(timer);
   }, [searchInput, setFilters]);
