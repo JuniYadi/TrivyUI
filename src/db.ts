@@ -317,11 +317,8 @@ function backfillImageTagGroups(db: TrivyUiDb): void {
     updated += 1;
   }
 
-  if (updated === 0) {
-    console.log("[DB] ✅ all good");
-  } else {
-    console.log(`[DB] ❗ Patch ${updated} Data on images Table`);
-  }
+  const resultLine = updated === 0 ? "[DB] ✅ all good" : `[DB] ❗ Patch ${updated} Data on images Table`;
+  console.log(resultLine);
 }
 
 function hasSqliteColumn(db: TrivyUiDb, table: string, column: string): boolean {
