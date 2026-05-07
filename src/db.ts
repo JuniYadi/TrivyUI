@@ -1,4 +1,5 @@
 import { Database } from "bun:sqlite";
+import { parseImageTagGrouping } from "./services/image-tag-grouping";
 
 export type TrivyUiDb = Database;
 
@@ -252,6 +253,8 @@ export function initFullSchema(db: TrivyUiDb): void {
     "Monthly Vulnerability Statistics\nPeriod: {{period_start}} to {{period_end}}\nOpen: {{open_count}}\nClosed/Fixed: {{closed_count}}\nExisting: {{existing_count}}\nTotal in month: {{totalCount}}\n\nCritical: {{critical}}\nHigh: {{high}}\nMedium: {{medium}}\nLow: {{low}}\nUnknown: {{unknown}}\n\nGenerated at: {{generated_at}}",
     1
   );
+
+  backfillImageTagGroups(db);
 }
 
 function evolveImagesSchemaSqlite(db: TrivyUiDb): void {
@@ -270,6 +273,55 @@ function evolveImagesSchemaSqlite(db: TrivyUiDb): void {
   db.exec("UPDATE images SET repository_base = name WHERE repository_base IS NULL OR repository_base = '';");
   db.exec("UPDATE images SET tag_group = 'ungrouped' WHERE tag_group IS NULL OR tag_group = '';");
   db.exec("UPDATE images SET tag_group = tag WHERE tag_group = 'ungrouped' AND tag IS NOT NULL AND tag <> '';");
+}
+
+function backfillImageTagGroups(db: TrivyUiDb): void {
+  console.log("[DB] Checking DB and comparation for patch");
+
+  const rows = db
+    .query("SELECT id, name, repository_base, tag, tag_group FROM images")
+    .all() as Array<{
+      id: number;
+      name: string;
+      repository_base: string | null;
+      tag: string | null;
+      tag_group: string | null;
+    }>;
+
+  let updated = 0;
+
+  for (const row of rows) {
+    const parsed = parseImageTagGrouping(row.name);
+    const currentRepositoryBase = (row.repository_base || "").trim();
+    const currentTagGroup = (row.tag_group || "").trim();
+
+    const nextRepositoryBase = currentRepositoryBase || parsed.repository_base;
+    const nextTag = row.tag ?? parsed.tag;
+    const nextTagGroup = currentTagGroup && currentTagGroup !== "ungrouped" ? currentTagGroup : parsed.tag_group;
+
+    const shouldUpdate =
+      currentRepositoryBase !== nextRepositoryBase ||
+      (row.tag || null) !== (nextTag || null) ||
+      currentTagGroup !== nextTagGroup;
+
+    if (!shouldUpdate) {
+      continue;
+    }
+
+    db.query("UPDATE images SET repository_base = ?1, tag = ?2, tag_group = ?3 WHERE id = ?4").run(
+      nextRepositoryBase,
+      nextTag,
+      nextTagGroup,
+      row.id,
+    );
+    updated += 1;
+  }
+
+  if (updated === 0) {
+    console.log("[DB] ✅ all good");
+  } else {
+    console.log(`[DB] ❗ Patch ${updated} Data on images Table`);
+  }
 }
 
 function hasSqliteColumn(db: TrivyUiDb, table: string, column: string): boolean {
