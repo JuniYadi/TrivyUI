@@ -49,7 +49,7 @@ export function RepositoriesPage() {
           search: nextSearch || undefined,
         };
       });
-    }, 1000);
+    }, 1500);
 
     return () => window.clearTimeout(timer);
   }, [searchInput, setFilters]);
