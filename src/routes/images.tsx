@@ -28,6 +28,7 @@ export function ImagesPage() {
   const { query, data, loading, error, retry, setFilters } = useImages();
   const navigate = useNavigate();
   const [searchInput, setSearchInput] = useState(query.search || "");
+  const [isSearching, setIsSearching] = useState(false);
 
   useEffect(() => {
     setSearchInput(query.search || "");
@@ -41,16 +42,24 @@ export function ImagesPage() {
           return prev;
         }
 
+        setIsSearching(true);
+
         return {
           ...prev,
           page: 1,
           search: nextSearch || undefined,
         };
       });
-    }, 300);
+    }, 1000);
 
     return () => window.clearTimeout(timer);
   }, [searchInput, setFilters]);
+
+  useEffect(() => {
+    if (!loading) {
+      setIsSearching(false);
+    }
+  }, [loading]);
 
   const onSortChange = useCallback(
     (sort: ImageSortField) => {
@@ -68,9 +77,9 @@ export function ImagesPage() {
 
   return (
     <AppShell activeRoute="/images" title="Images" subtitle="Browse container images, repository mapping, and vulnerability totals.">
-      {loading && <ImagesSkeleton />}
+      {loading && !isSearching && <ImagesSkeleton />}
       {!loading && error && <ErrorBanner message={error} onRetry={retry} />}
-      {!loading && !error && (
+      {!error && (
         <section className="rounded-xl border border-slate-700 bg-slate-900/90 p-4 shadow-inner">
           <label className="grid gap-1">
             <span className="text-xs font-semibold uppercase tracking-wide text-slate-400">Search</span>
@@ -81,6 +90,15 @@ export function ImagesPage() {
               onChange={(event) => setSearchInput(event.target.value)}
               className="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-slate-200 placeholder-slate-500 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/50"
             />
+            {isSearching && loading && (
+              <div className="mt-1 inline-flex items-center gap-2 text-xs text-slate-400">
+                <span
+                  className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-slate-600 border-t-blue-400"
+                  aria-hidden="true"
+                />
+                <span>Searching...</span>
+              </div>
+            )}
           </label>
         </section>
       )}
