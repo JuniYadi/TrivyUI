@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useNavigate } from "@tanstack/react-router";
 import { AppShell } from "../components/app-shell";
 import { EmptyState } from "../components/empty-state";
@@ -29,6 +29,7 @@ export function ImagesPage() {
   const navigate = useNavigate();
   const [searchInput, setSearchInput] = useState(query.search || "");
   const [isSearching, setIsSearching] = useState(false);
+  const searchStartedAtRef = useRef(0);
 
   useEffect(() => {
     setSearchInput(query.search || "");
@@ -42,6 +43,7 @@ export function ImagesPage() {
           return prev;
         }
 
+        searchStartedAtRef.current = Date.now();
         setIsSearching(true);
 
         return {
@@ -57,7 +59,11 @@ export function ImagesPage() {
 
   useEffect(() => {
     if (!loading) {
-      setIsSearching(false);
+      const MIN_SPINNER_MS = 500;
+      const elapsed = Date.now() - searchStartedAtRef.current;
+      const remaining = Math.max(0, MIN_SPINNER_MS - elapsed);
+      const timer = window.setTimeout(() => setIsSearching(false), remaining);
+      return () => window.clearTimeout(timer);
     }
   }, [loading]);
 
