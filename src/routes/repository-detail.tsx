@@ -1,13 +1,15 @@
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useNavigate, useParams } from "@tanstack/react-router";
 import { AppShell } from "../components/app-shell";
 import { CveDetailDrawer } from "../components/cve-detail-drawer";
 import { ErrorBanner } from "../components/error-banner";
+import { Pagination } from "../components/pagination";
 import { SeverityChart } from "../components/severity-chart";
 import { StatCard } from "../components/stat-card";
 import { useRepoDetail } from "../hooks/use-repo-detail";
 import { fetchVulnerabilityDetail } from "../hooks/use-vulnerabilities";
 import type { RepositoryDetailResponse, VulnerabilityDetailResponse } from "../services/types";
+import { paginateList } from "../utils/paginate-list";
 
 function parseRepositoryId(value: string | undefined): number | null {
   if (!value) {
@@ -112,6 +114,8 @@ export function RepositoryDetailContent({ data, loading, error, retry }: Reposit
   const [detailLoading, setDetailLoading] = useState(false);
   const [detailError, setDetailError] = useState<string | null>(null);
   const [detail, setDetail] = useState<VulnerabilityDetailResponse | null>(null);
+  const [vulnerabilityPage, setVulnerabilityPage] = useState(1);
+  const [vulnerabilityLimit, setVulnerabilityLimit] = useState(10);
 
   const openDetail = useCallback(async (id: number) => {
     setDrawerOpen(true);
@@ -130,6 +134,13 @@ export function RepositoryDetailContent({ data, loading, error, retry }: Reposit
   }, []);
 
   const groupSummary = useMemo(() => data?.group_summaries || [], [data?.group_summaries]);
+  const paginatedVulnerabilities = useMemo(() => {
+    return paginateList(data?.vulnerabilities || [], vulnerabilityPage, vulnerabilityLimit);
+  }, [data?.vulnerabilities, vulnerabilityLimit, vulnerabilityPage]);
+
+  useEffect(() => {
+    setVulnerabilityPage(1);
+  }, [data?.id]);
 
   return (
     <>
@@ -290,7 +301,7 @@ export function RepositoryDetailContent({ data, loading, error, retry }: Reposit
                 </tr>
               </thead>
               <tbody>
-                {data.vulnerabilities.map((item) => (
+                {paginatedVulnerabilities.items.map((item) => (
                   <tr key={item.id} className="cursor-pointer border-b border-slate-800 last:border-0 hover:bg-slate-800/50" onClick={() => void openDetail(item.id)}>
                     <td className="py-3 pr-4">{item.cve_id}</td>
                     <td className="py-3 pr-4">
@@ -328,6 +339,18 @@ export function RepositoryDetailContent({ data, loading, error, retry }: Reposit
                 ))}
               </tbody>
             </table>
+
+            <Pagination
+              page={paginatedVulnerabilities.pagination.page}
+              totalPages={paginatedVulnerabilities.pagination.total_pages}
+              totalItems={paginatedVulnerabilities.pagination.total_items}
+              limit={paginatedVulnerabilities.pagination.limit}
+              onPageChange={(page) => setVulnerabilityPage(page)}
+              onLimitChange={(limit) => {
+                setVulnerabilityLimit(limit);
+                setVulnerabilityPage(1);
+              }}
+            />
           </section>
         </section>
       )}
