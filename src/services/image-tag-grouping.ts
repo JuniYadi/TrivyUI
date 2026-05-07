@@ -31,7 +31,7 @@ function toTagGroup(tag: string | null): string {
 
   const match = /^(.*)-\d+$/.exec(tag);
   if (!match || !match[1]) {
-    return "ungrouped";
+    return tag;
   }
 
   return match[1];
