@@ -6,6 +6,7 @@ export interface ImageQueryParams {
   limit: number;
   sort: ImageSortField;
   order: "asc" | "desc";
+  search?: string;
 }
 
 interface ApiSuccess<T> {
@@ -23,7 +24,7 @@ interface ApiFailure {
 
 type ApiResponse<T> = ApiSuccess<T> | ApiFailure;
 
-const ALLOWED_LIMITS = [25, 50, 100] as const;
+const ALLOWED_LIMITS = [10, 25, 50, 100] as const;
 
 function isSortField(value: string): value is ImageSortField {
   return ["name", "repository", "vulnerability_count", "critical_count", "last_scanned_at"].includes(value);
@@ -33,16 +34,23 @@ export function parseImageParams(search = window.location.search): ImageQueryPar
   const params = new URLSearchParams(search);
 
   const page = Number.parseInt(params.get("page") || "1", 10);
-  const limit = Number.parseInt(params.get("limit") || "25", 10);
+  const limit = Number.parseInt(params.get("limit") || "10", 10);
   const sortRaw = params.get("sort") || "vulnerability_count";
   const orderRaw = (params.get("order") || "desc").toLowerCase();
+  const searchRaw = params.get("search")?.trim();
 
-  return {
+  const parsed: ImageQueryParams = {
     page: Number.isFinite(page) && page > 0 ? page : 1,
-    limit: ALLOWED_LIMITS.includes(limit as (typeof ALLOWED_LIMITS)[number]) ? limit : 25,
+    limit: ALLOWED_LIMITS.includes(limit as (typeof ALLOWED_LIMITS)[number]) ? limit : 10,
     sort: isSortField(sortRaw) ? sortRaw : "vulnerability_count",
     order: orderRaw === "asc" ? "asc" : "desc",
   };
+
+  if (searchRaw) {
+    parsed.search = searchRaw;
+  }
+
+  return parsed;
 }
 
 function toQueryString(query: ImageQueryParams): string {
@@ -51,6 +59,9 @@ function toQueryString(query: ImageQueryParams): string {
   params.set("limit", String(query.limit));
   params.set("sort", query.sort);
   params.set("order", query.order);
+  if (query.search) {
+    params.set("search", query.search);
+  }
   return params.toString();
 }
 
