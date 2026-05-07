@@ -23,6 +23,12 @@ NOTIFY_ENABLED=false
 NOTIFY_MIN_SEVERITY=HIGH
 APP_BASE_URL=http://localhost:3000
 
+# Optional scan retention (opt-in; defaults keep scans unlimited)
+RETENTION_ENABLED=false
+RETENTION_DEFAULT_KEEP=unlimited
+RETENTION_GROUP_RULES=dev-*:10,stg-*:10,prd-*:unlimited,prod-*:unlimited,production-*:unlimited
+RETENTION_REPO_RULES=
+
 ```
 
 Variable reference:
@@ -39,6 +45,14 @@ Variable reference:
 - `NOTIFY_ENABLED`: enables/disables notifications globally.
 - `NOTIFY_MIN_SEVERITY`: minimum severity trigger (`CRITICAL`, `HIGH`, `MEDIUM`, `LOW`, `UNKNOWN`).
 - `APP_BASE_URL`: base URL used for dashboard links in email body.
+- `RETENTION_ENABLED`: enables scan-retention cleanup when set to `true` (opt-in; `false` by default).
+- `RETENTION_DEFAULT_KEEP`: fallback keep policy when no rule matches (`unlimited` by default).
+- `RETENTION_GROUP_RULES`: comma-separated `<pattern>:<keep>` rules by scan group name.
+- `RETENTION_REPO_RULES`: comma-separated `<pattern>:<keep>` rules by repository/image name.
+
+Practical retention example:
+- Use `RETENTION_GROUP_RULES=dev-*:10,stg-*:10,prd-*:unlimited,prod-*:unlimited,production-*:unlimited` to keep only the newest 10 scans for dev/stg groups while keeping prod groups unlimited.
+- Set `RETENTION_ENABLED=true` to apply rules; leave `RETENTION_DEFAULT_KEEP=unlimited` to keep unmatched groups/repos untouched.
 
 Notes:
 - Current HTTP runtime in `src/index.ts` initializes SQLite (`initDb()`), so `MYSQL_URL` is documented as connection format reference.
