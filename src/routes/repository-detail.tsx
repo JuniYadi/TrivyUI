@@ -325,6 +325,9 @@ export function RepositoryDetailContent({ data, loading, error, retry, state, on
                 )}
               </div>
             </div>
+            <p className="mb-3 text-xs text-slate-400">
+              Showing {paginatedVulnerabilities.pagination.total_items} vulnerabilities{selectedGroup ? ` in group ${selectedGroup}` : ""}.
+            </p>
             <table className="w-full table-fixed border-collapse text-sm">
               <thead>
                 <tr className="border-b border-slate-700 text-left">
