@@ -48,11 +48,12 @@ Variable reference:
 - `RETENTION_ENABLED`: enables scan-retention cleanup when set to `true` (opt-in; `false` by default).
 - `RETENTION_DEFAULT_KEEP`: fallback keep policy when no rule matches (`unlimited` by default).
 - `RETENTION_GROUP_RULES`: comma-separated `<pattern>:<keep>` rules by scan group name.
-- `RETENTION_REPO_RULES`: comma-separated `<pattern>:<keep>` rules by repository/image name.
+- `RETENTION_REPO_RULES`: comma-separated `<pattern>:<keep>` rules by repository/image name; higher priority than `RETENTION_GROUP_RULES`.
 
 Practical retention example:
 - Use `RETENTION_GROUP_RULES=dev-*:10,stg-*:10,prd-*:unlimited,prod-*:unlimited,production-*:unlimited` to keep only the newest 10 scans for dev/stg groups while keeping prod groups unlimited.
 - Set `RETENTION_ENABLED=true` to apply rules; leave `RETENTION_DEFAULT_KEEP=unlimited` to keep unmatched groups/repos untouched.
+- Leave `RETENTION_REPO_RULES=` empty to disable per-repo overrides.
 
 Notes:
 - Current HTTP runtime in `src/index.ts` initializes SQLite (`initDb()`), so `MYSQL_URL` is documented as connection format reference.
