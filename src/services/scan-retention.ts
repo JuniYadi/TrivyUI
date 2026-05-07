@@ -1,3 +1,5 @@
+import type { Database } from "bun:sqlite";
+
 export interface RetentionRule {
   repository: string | null;
   pattern: string;
@@ -65,6 +67,56 @@ export function resolveRetentionKeep(policy: RetentionPolicy, repository: string
   }
 
   return policy.defaultKeep;
+}
+
+export function pruneScansForRetention(
+  db: Database,
+  policy: RetentionPolicy,
+  repository: string,
+  tagGroup: string,
+): number {
+  if (!policy.enabled) {
+    return 0;
+  }
+
+  const keep = resolveRetentionKeep(policy, repository, tagGroup);
+  if (keep === null) {
+    return 0;
+  }
+
+  const ids = db
+    .query(
+      `
+        SELECT sr.id AS id
+        FROM scan_results sr
+        JOIN images i ON i.id = sr.image_id
+        JOIN repositories r ON r.id = i.repository_id
+        WHERE r.name = ?1 AND LOWER(i.tag_group) = LOWER(?2)
+        ORDER BY datetime(sr.scan_date) DESC, sr.id DESC
+      `,
+    )
+    .all(repository, tagGroup) as Array<{ id: number }>;
+
+  if (ids.length <= keep) {
+    return 0;
+  }
+
+  const toDelete = ids
+    .slice(keep)
+    .map((row) => Number(row.id))
+    .filter((id) => Number.isFinite(id));
+
+  if (toDelete.length === 0) {
+    return 0;
+  }
+
+  const deleteTx = db.transaction((scanIds: number[]) => {
+    const placeholders = scanIds.map(() => "?").join(",");
+    db.query(`DELETE FROM scan_results WHERE id IN (${placeholders})`).run(...scanIds);
+  });
+
+  deleteTx(toDelete);
+  return toDelete.length;
 }
 
 function parseRules(input: string, requiresRepo: boolean): RetentionRule[] {

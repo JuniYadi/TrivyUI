@@ -1,9 +1,13 @@
 import { afterEach, describe, expect, test } from "bun:test";
+import { initDb } from "../db";
 import {
   loadRetentionPolicyFromEnv,
   loadRetentionPolicyParseDiagnosticsFromEnv,
+  pruneScansForRetention,
   resolveRetentionKeep,
+  type RetentionPolicy,
 } from "../services/scan-retention";
+import { upsertImage, upsertRepository, upsertScanResult } from "../services/db-service";
 
 const ENV_KEYS = [
   "RETENTION_ENABLED",
@@ -114,5 +118,63 @@ describe("scan retention config", () => {
     expect(diagnostics).toEqual([
       'Invalid RETENTION_DEFAULT_KEEP value "10x". Falling back to "unlimited".',
     ]);
+  });
+});
+
+describe("scan retention pruning", () => {
+  test("prunes old scans and keeps latest N per (repo, tag_group)", () => {
+    const db = initDb(":memory:");
+
+    const repoId = upsertRepository(db, "ghcr.io/acme/trivyui");
+    const imageId = upsertImage(db, repoId, "ghcr.io/acme/trivyui:dev-1", {
+      repository_base: "ghcr.io/acme/trivyui",
+      tag: "dev-1",
+      tag_group: "dev",
+    });
+
+    for (let i = 0; i < 5; i += 1) {
+      upsertScanResult(db, imageId, JSON.stringify({ i }), "test", `2026-05-0${i + 1}T00:00:00.000Z`);
+    }
+
+    const policy: RetentionPolicy = {
+      enabled: true,
+      defaultKeep: null,
+      groupRules: [{ repository: null, pattern: "dev*", keep: 2, index: 0 }],
+      repoRules: [],
+    };
+
+    const deleted = pruneScansForRetention(db, policy, "ghcr.io/acme/trivyui", "dev");
+
+    expect(deleted).toBe(3);
+    const row = db.query("SELECT COUNT(*) AS count FROM scan_results WHERE image_id = ?1").get(imageId) as { count: number };
+    expect(Number(row.count)).toBe(2);
+
+    db.close();
+  });
+
+  test("does not prune when resolved keep is unlimited", () => {
+    const db = initDb(":memory:");
+    const repoId = upsertRepository(db, "ghcr.io/acme/trivyui");
+    const imageId = upsertImage(db, repoId, "ghcr.io/acme/trivyui:prod-1", {
+      repository_base: "ghcr.io/acme/trivyui",
+      tag: "prod-1",
+      tag_group: "prod",
+    });
+
+    for (let i = 0; i < 3; i += 1) {
+      upsertScanResult(db, imageId, JSON.stringify({ i }), "test", `2026-06-0${i + 1}T00:00:00.000Z`);
+    }
+
+    const policy: RetentionPolicy = {
+      enabled: true,
+      defaultKeep: null,
+      groupRules: [{ repository: null, pattern: "prod*", keep: null, index: 0 }],
+      repoRules: [],
+    };
+
+    const deleted = pruneScansForRetention(db, policy, "ghcr.io/acme/trivyui", "prod");
+    expect(deleted).toBe(0);
+
+    db.close();
   });
 });
