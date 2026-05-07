@@ -208,20 +208,24 @@ export function RepositoryDetailContent({ data, loading, error, retry, state, on
             <section className="rounded-xl border border-slate-700 bg-slate-900/90 p-4 shadow-inner">
               <h3 className="mb-3 text-base font-semibold">Tag Group Health</h3>
               <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
-                {groupSummary.map((group) => {
-                  const isSelected = selectedGroup === group.group_name;
+                {groupSummary.map((group, index) => {
+                  const groupName = group.group_name || "ungrouped";
+                  const isSelected = selectedGroup === groupName;
 
                   return (
-                  <article key={group.group_name} className="rounded-lg border border-slate-700 bg-slate-950/60 p-3">
+                  <button
+                    key={`${groupName}-${index}`}
+                    type="button"
+                    className={
+                      isSelected
+                        ? "rounded-lg border border-blue-500 bg-blue-500/10 p-3 text-left"
+                        : "rounded-lg border border-slate-700 bg-slate-950/60 p-3 text-left hover:border-slate-500"
+                    }
+                    onClick={() => setSelectedGroup((prev) => (prev === groupName ? null : groupName))}
+                    title={isSelected ? "Clear tag group filter" : `Filter vulnerabilities by ${groupName}`}
+                  >
                     <div className="mb-2 flex items-center justify-between gap-2">
-                      <button
-                        type="button"
-                        className={isSelected ? "m-0 text-sm font-semibold text-blue-300" : "m-0 text-sm font-semibold text-slate-100 hover:text-blue-300"}
-                        onClick={() => setSelectedGroup((prev) => (prev === group.group_name ? null : group.group_name))}
-                        title={isSelected ? "Clear tag group filter" : `Filter vulnerabilities by ${group.group_name}`}
-                      >
-                        {group.group_name}
-                      </button>
+                      <p className={isSelected ? "m-0 text-sm font-semibold text-blue-300" : "m-0 text-sm font-semibold text-slate-100"}>{groupName}</p>
                       <span
                         className={
                           group.status === "at_risk"
@@ -236,7 +240,7 @@ export function RepositoryDetailContent({ data, loading, error, retry, state, on
                     <p className="m-0 text-xs text-slate-400">
                       Last scan: {group.last_scan_at ? new Date(group.last_scan_at).toLocaleString() : "-"}
                     </p>
-                  </article>
+                  </button>
                   );
                 })}
               </div>
