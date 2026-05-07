@@ -119,6 +119,33 @@ describe("scan retention config", () => {
       'Invalid RETENTION_DEFAULT_KEEP value "10x". Falling back to "unlimited".',
     ]);
   });
+
+  test("ignores malformed rule entries and falls back safely", () => {
+    backupEnv();
+    process.env.RETENTION_ENABLED = "true";
+    process.env.RETENTION_DEFAULT_KEEP = "unlimited";
+    process.env.RETENTION_GROUP_RULES = "bad,dev-*:x,stg-*:0,dev-*:3";
+
+    const policy = loadRetentionPolicyFromEnv();
+
+    expect(resolveRetentionKeep(policy, "repo", "dev-11")).toBe(3);
+    expect(resolveRetentionKeep(policy, "repo", "anything-else")).toBeNull();
+    expect(policy.groupRules).toHaveLength(1);
+  });
+
+  test("matches production-like unlimited patterns case-insensitively", () => {
+    backupEnv();
+    process.env.RETENTION_ENABLED = "true";
+    process.env.RETENTION_DEFAULT_KEEP = "10";
+    process.env.RETENTION_GROUP_RULES = "prd-*:unlimited,prod-*:unlimited,production-*:unlimited";
+
+    const policy = loadRetentionPolicyFromEnv();
+
+    expect(resolveRetentionKeep(policy, "repo", "PRD-101")).toBeNull();
+    expect(resolveRetentionKeep(policy, "repo", "prod-release")).toBeNull();
+    expect(resolveRetentionKeep(policy, "repo", "PRODUCTION-hotfix")).toBeNull();
+    expect(resolveRetentionKeep(policy, "repo", "dev-22")).toBe(10);
+  });
 });
 
 describe("scan retention pruning", () => {
