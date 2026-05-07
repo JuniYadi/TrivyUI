@@ -406,4 +406,30 @@ describe("GET /api/vulnerabilities/:id", () => {
     expect(body.data.repository.name).toContain("ghcr.io/acme/api");
     expect(body.data.image.name).toContain("ghcr.io/acme/api");
   });
+
+  test("returns 404 when vulnerability id is missing", async () => {
+    const db = createTestDb();
+    seedData(db);
+
+    const handler = createVulnerabilitiesHandler(db);
+    const response = handler(new Request("http://localhost/api/vulnerabilities/999999"));
+    const body = (await response.json()) as { success: boolean; error: { code: string } };
+
+    expect(response.status).toBe(404);
+    expect(body.success).toBe(false);
+    expect(body.error.code).toBe("VULNERABILITY_NOT_FOUND");
+  });
+
+  test("returns 404 for unknown vulnerabilities endpoint", async () => {
+    const db = createTestDb();
+    seedData(db);
+
+    const handler = createVulnerabilitiesHandler(db);
+    const response = handler(new Request("http://localhost/api/vulnerabilities/not-a-number"));
+    const body = (await response.json()) as { success: boolean; error: { code: string } };
+
+    expect(response.status).toBe(404);
+    expect(body.success).toBe(false);
+    expect(body.error.code).toBe("NOT_FOUND");
+  });
 });
