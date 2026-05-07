@@ -125,8 +125,15 @@ export function importTrivyPayload(db: Database, parsedJson: unknown, rawJson: s
   tx();
 
   if (retentionTarget) {
-    const retentionPolicy = loadRetentionPolicyFromEnv();
-    pruneScansForRetention(db, retentionPolicy, retentionTarget.repository, retentionTarget.tagGroup);
+    try {
+      const retentionPolicy = loadRetentionPolicyFromEnv();
+      pruneScansForRetention(db, retentionPolicy, retentionTarget.repository, retentionTarget.tagGroup);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      console.warn(
+        `[upload] retention cleanup failed: repo=${retentionTarget.repository} tag_group=${retentionTarget.tagGroup} error=${message}`,
+      );
+    }
   }
 
   if (!summary) {
