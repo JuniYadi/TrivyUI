@@ -226,30 +226,29 @@ export function VulnerabilitiesPage() {
     setIgnoreBusy(true);
     setIgnoreError(null);
 
-    const result = await submitIgnoreFlow({
-      target: ignoreTarget,
-      reason: ignoreReason,
-      expiresAt: ignoreExpiresAt,
-      createIgnore: (payload) => createTrivyIgnoreRecord(fetch, payload),
-    });
+    try {
+      const result = await submitIgnoreFlow({
+        target: ignoreTarget,
+        reason: ignoreReason,
+        expiresAt: ignoreExpiresAt,
+        createIgnore: (payload) => createTrivyIgnoreRecord(fetch, payload),
+      });
 
-    if (result.ok) {
       const next = applyIgnoreSubmitResult({ currentTarget: ignoreTarget, currentReason: ignoreReason, currentExpiresAt: ignoreExpiresAt, result });
       setIgnoreNotice(next.notice);
       setIgnoreTarget(next.target);
       setIgnoreReason(next.reason);
       setIgnoreExpiresAt(next.expiresAt);
       setIgnoreError(next.error);
-    } else {
-      const next = applyIgnoreSubmitResult({ currentTarget: ignoreTarget, currentReason: ignoreReason, currentExpiresAt: ignoreExpiresAt, result });
-      setIgnoreNotice(next.notice);
-      setIgnoreTarget(next.target);
-      setIgnoreReason(next.reason);
-      setIgnoreExpiresAt(next.expiresAt);
-      setIgnoreError(next.error);
+    } catch (error) {
+      setIgnoreError(error instanceof Error ? error.message : "Failed to create ignore rule");
+      setIgnoreNotice(null);
+      setIgnoreTarget(ignoreTarget);
+      setIgnoreReason(ignoreReason);
+      setIgnoreExpiresAt(ignoreExpiresAt);
+    } finally {
+      setIgnoreBusy(false);
     }
-
-    setIgnoreBusy(false);
   }, [ignoreTarget, ignoreBusy, ignoreReason, ignoreExpiresAt]);
 
   const totalItems = data?.pagination.total_items || 0;
