@@ -166,6 +166,8 @@ export interface VulnerabilityWithRelations extends Vulnerability {
   image: {
     id: number;
     name: string;
+    repository_id: number;
+    repository_name?: string | null;
   };
   scanned_at: string;
 }
