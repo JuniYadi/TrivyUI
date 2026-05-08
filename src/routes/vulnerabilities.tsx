@@ -19,6 +19,29 @@ type SubmitIgnoreFlowOptions = {
   createIgnore: (payload: CreateTrivyIgnorePayload) => Promise<unknown>;
 };
 
+type IgnoreModalOpenState = {
+  target: VulnerabilityWithRelations;
+  reason: string;
+  expiresAt: string;
+  error: string | null;
+  notice: string | null;
+};
+
+type ApplyIgnoreSubmitResultOptions = {
+  currentTarget: VulnerabilityWithRelations;
+  currentReason: string;
+  currentExpiresAt: string;
+  result: SubmitIgnoreFlowResult;
+};
+
+type IgnoreSubmitState = {
+  target: VulnerabilityWithRelations | null;
+  reason: string;
+  expiresAt: string;
+  error: string | null;
+  notice: string | null;
+};
+
 type SubmitIgnoreFlowResult =
   | {
       ok: true;
@@ -53,6 +76,36 @@ export async function submitIgnoreFlow({ target, reason, expiresAt, createIgnore
       error: validateResponseErrorMessage(error, "Failed to create ignore rule"),
     };
   }
+}
+
+export function openIgnoreModalState({ item }: { item: VulnerabilityWithRelations; previousNotice?: string | null }): IgnoreModalOpenState {
+  return {
+    target: item,
+    reason: "",
+    expiresAt: "",
+    error: null,
+    notice: null,
+  };
+}
+
+export function applyIgnoreSubmitResult({ currentTarget, currentReason, currentExpiresAt, result }: ApplyIgnoreSubmitResultOptions): IgnoreSubmitState {
+  if (result.ok) {
+    return {
+      target: null,
+      reason: "",
+      expiresAt: "",
+      error: null,
+      notice: result.notice,
+    };
+  }
+
+  return {
+    target: currentTarget,
+    reason: currentReason,
+    expiresAt: currentExpiresAt,
+    error: result.error,
+    notice: null,
+  };
 }
 
 function VulnerabilitySkeleton() {
@@ -138,12 +191,13 @@ export function VulnerabilitiesPage() {
   );
 
   const onIgnoreRequest = useCallback((item: VulnerabilityWithRelations) => {
-    setIgnoreTarget(item);
-    setIgnoreReason("");
-    setIgnoreExpiresAt("");
-    setIgnoreError(null);
-    setIgnoreNotice(null);
-  }, []);
+    const next = openIgnoreModalState({ item, previousNotice: ignoreNotice });
+    setIgnoreTarget(next.target);
+    setIgnoreReason(next.reason);
+    setIgnoreExpiresAt(next.expiresAt);
+    setIgnoreError(next.error);
+    setIgnoreNotice(next.notice);
+  }, [ignoreNotice]);
 
   const onCloseIgnoreModal = useCallback(() => {
     if (ignoreBusy) {
@@ -170,12 +224,19 @@ export function VulnerabilitiesPage() {
     });
 
     if (result.ok) {
-      setIgnoreNotice(result.notice);
-      setIgnoreTarget(null);
-      setIgnoreReason("");
-      setIgnoreExpiresAt("");
+      const next = applyIgnoreSubmitResult({ currentTarget: ignoreTarget, currentReason: ignoreReason, currentExpiresAt: ignoreExpiresAt, result });
+      setIgnoreNotice(next.notice);
+      setIgnoreTarget(next.target);
+      setIgnoreReason(next.reason);
+      setIgnoreExpiresAt(next.expiresAt);
+      setIgnoreError(next.error);
     } else {
-      setIgnoreError(result.error);
+      const next = applyIgnoreSubmitResult({ currentTarget: ignoreTarget, currentReason: ignoreReason, currentExpiresAt: ignoreExpiresAt, result });
+      setIgnoreNotice(next.notice);
+      setIgnoreTarget(next.target);
+      setIgnoreReason(next.reason);
+      setIgnoreExpiresAt(next.expiresAt);
+      setIgnoreError(next.error);
     }
 
     setIgnoreBusy(false);

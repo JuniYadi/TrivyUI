@@ -1,6 +1,6 @@
 import { describe, expect, mock, test } from "bun:test";
 import type { VulnerabilityWithRelations } from "../services/types";
-import { buildIgnorePayload, submitIgnoreFlow } from "../routes/vulnerabilities";
+import { applyIgnoreSubmitResult, buildIgnorePayload, openIgnoreModalState, submitIgnoreFlow } from "../routes/vulnerabilities";
 
 function sampleVulnerability(): VulnerabilityWithRelations {
   return {
@@ -22,6 +22,19 @@ function sampleVulnerability(): VulnerabilityWithRelations {
 }
 
 describe("vulnerabilities ignore flow", () => {
+  test("open helper resets modal state and clears stale errors", () => {
+    const next = openIgnoreModalState({
+      item: sampleVulnerability(),
+      previousNotice: "old success",
+    });
+
+    expect(next.target?.id).toBe(12);
+    expect(next.reason).toBe("");
+    expect(next.expiresAt).toBe("");
+    expect(next.error).toBeNull();
+    expect(next.notice).toBeNull();
+  });
+
   test("maps selected row fields into ignore payload", () => {
     const payload = buildIgnorePayload(sampleVulnerability(), "accepted risk", "2026-05-20T12:30");
 
@@ -75,5 +88,34 @@ describe("vulnerabilities ignore flow", () => {
       ok: false,
       error: "backend exploded",
     });
+  });
+
+  test("state transition keeps modal open on failure and closes on success", () => {
+    const target = sampleVulnerability();
+    const failed = applyIgnoreSubmitResult({
+      currentTarget: target,
+      currentReason: "accepted risk",
+      currentExpiresAt: "2026-05-20T12:30",
+      result: { ok: false, error: "boom" },
+    });
+
+    expect(failed.target?.id).toBe(12);
+    expect(failed.error).toBe("boom");
+    expect(failed.notice).toBeNull();
+    expect(failed.reason).toBe("accepted risk");
+    expect(failed.expiresAt).toBe("2026-05-20T12:30");
+
+    const succeeded = applyIgnoreSubmitResult({
+      currentTarget: target,
+      currentReason: "accepted risk",
+      currentExpiresAt: "2026-05-20T12:30",
+      result: { ok: true, notice: "created" },
+    });
+
+    expect(succeeded.target).toBeNull();
+    expect(succeeded.error).toBeNull();
+    expect(succeeded.reason).toBe("");
+    expect(succeeded.expiresAt).toBe("");
+    expect(succeeded.notice).toBe("created");
   });
 });
