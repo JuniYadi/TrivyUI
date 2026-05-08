@@ -121,6 +121,38 @@ describe("GET /api/vulnerabilities", () => {
     expect(body.data.items.every((item) => item.severity === "CRITICAL")).toBe(true);
   });
 
+  test("includes image repository linkage for ignore payload mapping", async () => {
+    const db = createTestDb();
+    seedData(db);
+
+    const handler = createVulnerabilitiesHandler(db);
+    const response = handler(new Request("http://localhost/api/vulnerabilities?limit=1"));
+    const body = (await response.json()) as {
+      success: boolean;
+      data: {
+        items: Array<{
+          image: {
+            id: number;
+            name: string;
+            repository_id: number;
+            repository_name: string;
+          };
+          repository: {
+            id: number;
+            name: string;
+          };
+        }>;
+      };
+    };
+
+    expect(response.status).toBe(200);
+    expect(body.success).toBe(true);
+    expect(body.data.items.length).toBe(1);
+    expect(body.data.items[0]?.image.repository_id).toBeGreaterThan(0);
+    expect(body.data.items[0]?.image.repository_id).toBe(body.data.items[0]?.repository.id);
+    expect(body.data.items[0]?.image.repository_name).toBe(body.data.items[0]?.repository.name);
+  });
+
   test("filters by search over cve/package/description", async () => {
     const db = createTestDb();
     seedData(db);

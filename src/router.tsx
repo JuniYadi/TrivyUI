@@ -9,6 +9,7 @@ import { UploadPage } from "./routes/upload";
 import { SettingsPage } from "./routes/settings";
 import { ApiKeysPage } from "./routes/api-keys";
 import { EmailTemplatesPage } from "./routes/email-templates";
+import { TrivyIgnorePage } from "./routes/trivy-ignore";
 
 export const APP_ROUTE_PATHS = [
   "/dashboard",
@@ -22,6 +23,7 @@ export const APP_ROUTE_PATHS = [
   "/settings",
   "/api-keys",
   "/email-templates",
+  "/trivy-ignore",
 ] as const;
 
 const rootRoute = createRootRoute({
@@ -105,6 +107,12 @@ const emailTemplatesRoute = createRoute({
   component: EmailTemplatesPage,
 });
 
+const trivyIgnoreRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/trivy-ignore",
+  component: TrivyIgnorePage,
+});
+
 const routeTree = rootRoute.addChildren([
   indexRoute,
   dashboardRoute,
@@ -118,6 +126,7 @@ const routeTree = rootRoute.addChildren([
   settingsRoute,
   apiKeysRoute,
   emailTemplatesRoute,
+  trivyIgnoreRoute,
 ]);
 
 export const router = createRouter({ routeTree });

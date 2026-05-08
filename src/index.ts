@@ -10,6 +10,8 @@ import { createImagesHandler } from "./routes/api/images";
 import { createNotificationSettingsHandler } from "./routes/api/settings";
 import { createApiKeysHandler } from "./routes/api/api-keys";
 import { createEmailTemplatesHandler } from "./routes/api/email-templates";
+import { createTrivyIgnoreGenerateHandler } from "./routes/api/trivy-ignore-generate";
+import { createTrivyIgnoreHandler } from "./routes/api/trivy-ignore";
 import { enforcePostApiKeyAuth } from "./services/api-key-auth";
 import { registerBunCronJobs } from "./services/scheduled-notifications";
 import homepage from "./index.html";
@@ -26,6 +28,8 @@ const imagesHandler = createImagesHandler(db);
 const notificationSettingsHandler = createNotificationSettingsHandler(db);
 const apiKeysHandler = createApiKeysHandler(db);
 const emailTemplatesHandler = createEmailTemplatesHandler(db);
+const trivyIgnoreHandler = createTrivyIgnoreHandler(db);
+const trivyIgnoreGenerateHandler = createTrivyIgnoreGenerateHandler(db);
 const HTML_PATH = new URL("./index.html", import.meta.url);
 
 export const SPA_ROUTES = {
@@ -41,10 +45,15 @@ export const SPA_ROUTES = {
   "/settings": homepage,
   "/api-keys": homepage,
   "/email-templates": homepage,
+  "/trivy-ignore": homepage,
 } as const;
 
 function methodNotAllowed(method: string, endpoint: string): Response {
-  return sendError(405, "METHOD_NOT_ALLOWED", `Method ${method} is not allowed for ${endpoint}`);
+  return sendError(
+    405,
+    "METHOD_NOT_ALLOWED",
+    `Method ${method} is not allowed for ${endpoint}`,
+  );
 }
 
 async function serveAsset(pathname: string): Promise<Response> {
@@ -109,7 +118,10 @@ export async function handleRequest(request: Request): Promise<Response> {
     return statsHandler();
   }
 
-  if (pathname === "/api/vulnerabilities" || pathname.startsWith("/api/vulnerabilities/")) {
+  if (
+    pathname === "/api/vulnerabilities" ||
+    pathname.startsWith("/api/vulnerabilities/")
+  ) {
     if (request.method !== "GET") {
       return methodNotAllowed(request.method, "/api/vulnerabilities");
     }
@@ -117,7 +129,10 @@ export async function handleRequest(request: Request): Promise<Response> {
     return vulnerabilitiesHandler(request);
   }
 
-  if (pathname === "/api/repositories" || pathname.startsWith("/api/repositories/")) {
+  if (
+    pathname === "/api/repositories" ||
+    pathname.startsWith("/api/repositories/")
+  ) {
     if (request.method !== "GET") {
       return methodNotAllowed(request.method, "/api/repositories");
     }
@@ -142,19 +157,49 @@ export async function handleRequest(request: Request): Promise<Response> {
   }
 
   if (pathname === "/api/api-keys" || pathname.startsWith("/api/api-keys/")) {
-    if (request.method !== "GET" && request.method !== "POST" && request.method !== "DELETE") {
+    if (
+      request.method !== "GET" &&
+      request.method !== "POST" &&
+      request.method !== "DELETE"
+    ) {
       return methodNotAllowed(request.method, "/api/api-keys");
     }
 
     return apiKeysHandler(request);
   }
 
-  if (pathname === "/api/email-templates" || pathname.startsWith("/api/email-templates/")) {
+  if (
+    pathname === "/api/email-templates" ||
+    pathname.startsWith("/api/email-templates/")
+  ) {
     if (request.method !== "GET" && request.method !== "PUT") {
       return methodNotAllowed(request.method, "/api/email-templates");
     }
 
     return emailTemplatesHandler(request);
+  }
+
+  if (
+    pathname === "/api/trivy-ignores" ||
+    pathname.startsWith("/api/trivy-ignores/")
+  ) {
+    if (
+      request.method !== "GET" &&
+      request.method !== "POST" &&
+      request.method !== "DELETE"
+    ) {
+      return methodNotAllowed(request.method, "/api/trivy-ignores");
+    }
+
+    return trivyIgnoreHandler(request);
+  }
+
+  if (pathname === "/api/trivy-ignore/generate") {
+    if (request.method !== "GET") {
+      return methodNotAllowed(request.method, "/api/trivy-ignore/generate");
+    }
+
+    return trivyIgnoreGenerateHandler(request);
   }
 
   if (pathname.startsWith("/api/")) {

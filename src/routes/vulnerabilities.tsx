@@ -4,10 +4,119 @@ import { CveDetailDrawer } from "../components/cve-detail-drawer";
 import { EmptyState } from "../components/empty-state";
 import { ErrorBanner } from "../components/error-banner";
 import { FilterBar } from "../components/filter-bar";
+import { IgnoreVulnerabilityModal } from "../components/ignore-vulnerability-modal";
 import { Pagination } from "../components/pagination";
 import { VulnerabilityTable } from "../components/vulnerability-table";
+import { createTrivyIgnoreRecord, validateResponseErrorMessage } from "../hooks/use-trivy-ignores";
 import { fetchVulnerabilityDetail, hasActiveFilters, useVulnerabilities } from "../hooks/use-vulnerabilities";
-import type { VulnerabilityDetailResponse, VulnerabilitySortField } from "../services/types";
+import type { CreateTrivyIgnorePayload } from "../hooks/use-trivy-ignores";
+import type { VulnerabilityDetailResponse, VulnerabilitySortField, VulnerabilityWithRelations } from "../services/types";
+
+type SubmitIgnoreFlowOptions = {
+  target: VulnerabilityWithRelations;
+  reason: string;
+  expiresAt: string;
+  createIgnore: (payload: CreateTrivyIgnorePayload) => Promise<unknown>;
+};
+
+type IgnoreModalOpenState = {
+  target: VulnerabilityWithRelations;
+  reason: string;
+  expiresAt: string;
+  error: string | null;
+  notice: string | null;
+};
+
+type ApplyIgnoreSubmitResultOptions = {
+  currentTarget: VulnerabilityWithRelations;
+  currentReason: string;
+  currentExpiresAt: string;
+  result: SubmitIgnoreFlowResult;
+};
+
+type IgnoreSubmitState = {
+  target: VulnerabilityWithRelations | null;
+  reason: string;
+  expiresAt: string;
+  error: string | null;
+  notice: string | null;
+};
+
+type SubmitIgnoreFlowResult =
+  | {
+      ok: true;
+      notice: string;
+    }
+  | {
+      ok: false;
+      error: string;
+    };
+
+export function buildIgnorePayload(target: VulnerabilityWithRelations, reason: string, expiresAt: string): CreateTrivyIgnorePayload {
+  const trimmedReason = reason.trim();
+  return {
+    cve_id: target.cve_id,
+    repository_id: target.image.repository_id,
+    scope: "all_tags",
+    reason: trimmedReason || undefined,
+    expires_at: expiresAt ? new Date(expiresAt).toISOString() : undefined,
+  };
+}
+
+export async function submitIgnoreFlow({ target, reason, expiresAt, createIgnore }: SubmitIgnoreFlowOptions): Promise<SubmitIgnoreFlowResult> {
+  try {
+    await createIgnore(buildIgnorePayload(target, reason, expiresAt));
+    return {
+      ok: true,
+      notice: `Ignore rule created for ${target.cve_id} on "${target.image.repository_name || target.repository.name}".`,
+    };
+  } catch (error) {
+    const message = validateResponseErrorMessage(error, "Failed to create ignore rule");
+    return {
+      ok: false,
+      error: mapIgnoreErrorMessage(message),
+    };
+  }
+}
+
+export function mapIgnoreErrorMessage(message: string): string {
+  const normalized = message.toLowerCase();
+  if (normalized.includes("already") || normalized.includes("exists") || normalized.includes("conflict")) {
+    return "This CVE is already ignored for this repository.";
+  }
+
+  return message || "Failed to create ignore rule";
+}
+
+export function openIgnoreModalState({ item }: { item: VulnerabilityWithRelations; previousNotice?: string | null }): IgnoreModalOpenState {
+  return {
+    target: item,
+    reason: "",
+    expiresAt: "",
+    error: null,
+    notice: null,
+  };
+}
+
+export function applyIgnoreSubmitResult({ currentTarget, currentReason, currentExpiresAt, result }: ApplyIgnoreSubmitResultOptions): IgnoreSubmitState {
+  if (result.ok) {
+    return {
+      target: null,
+      reason: "",
+      expiresAt: "",
+      error: null,
+      notice: result.notice,
+    };
+  }
+
+  return {
+    target: currentTarget,
+    reason: currentReason,
+    expiresAt: currentExpiresAt,
+    error: result.error,
+    notice: null,
+  };
+}
 
 function VulnerabilitySkeleton() {
   return (
@@ -24,6 +133,12 @@ export function VulnerabilitiesPage() {
   const [detailLoading, setDetailLoading] = useState(false);
   const [detailError, setDetailError] = useState<string | null>(null);
   const [detail, setDetail] = useState<VulnerabilityDetailResponse | null>(null);
+  const [ignoreTarget, setIgnoreTarget] = useState<VulnerabilityWithRelations | null>(null);
+  const [ignoreReason, setIgnoreReason] = useState("");
+  const [ignoreExpiresAt, setIgnoreExpiresAt] = useState("");
+  const [ignoreBusy, setIgnoreBusy] = useState(false);
+  const [ignoreError, setIgnoreError] = useState<string | null>(null);
+  const [ignoreNotice, setIgnoreNotice] = useState<string | null>(null);
 
   const onChange = useCallback(
     (patch: Partial<typeof query>) => {
@@ -85,6 +200,57 @@ export function VulnerabilitiesPage() {
     [setFilters],
   );
 
+  const onIgnoreRequest = useCallback((item: VulnerabilityWithRelations) => {
+    const next = openIgnoreModalState({ item, previousNotice: ignoreNotice });
+    setIgnoreTarget(next.target);
+    setIgnoreReason(next.reason);
+    setIgnoreExpiresAt(next.expiresAt);
+    setIgnoreError(next.error);
+    setIgnoreNotice(next.notice);
+  }, [ignoreNotice]);
+
+  const onCloseIgnoreModal = useCallback(() => {
+    if (ignoreBusy) {
+      return;
+    }
+
+    setIgnoreTarget(null);
+    setIgnoreError(null);
+  }, [ignoreBusy]);
+
+  const handleConfirmIgnore = useCallback(async () => {
+    if (!ignoreTarget || ignoreBusy) {
+      return;
+    }
+
+    setIgnoreBusy(true);
+    setIgnoreError(null);
+
+    try {
+      const result = await submitIgnoreFlow({
+        target: ignoreTarget,
+        reason: ignoreReason,
+        expiresAt: ignoreExpiresAt,
+        createIgnore: (payload) => createTrivyIgnoreRecord(fetch, payload),
+      });
+
+      const next = applyIgnoreSubmitResult({ currentTarget: ignoreTarget, currentReason: ignoreReason, currentExpiresAt: ignoreExpiresAt, result });
+      setIgnoreNotice(next.notice);
+      setIgnoreTarget(next.target);
+      setIgnoreReason(next.reason);
+      setIgnoreExpiresAt(next.expiresAt);
+      setIgnoreError(next.error);
+    } catch (error) {
+      setIgnoreError(error instanceof Error ? error.message : "Failed to create ignore rule");
+      setIgnoreNotice(null);
+      setIgnoreTarget(ignoreTarget);
+      setIgnoreReason(ignoreReason);
+      setIgnoreExpiresAt(ignoreExpiresAt);
+    } finally {
+      setIgnoreBusy(false);
+    }
+  }, [ignoreTarget, ignoreBusy, ignoreReason, ignoreExpiresAt]);
+
   const totalItems = data?.pagination.total_items || 0;
   const noData = !loading && !error && totalItems === 0;
   const noScans = noData && !hasActiveFilters(query);
@@ -111,7 +277,8 @@ export function VulnerabilitiesPage() {
 
       {!loading && !error && data && data.items.length > 0 && (
         <>
-          <VulnerabilityTable items={data.items} query={query} onSortChange={onSortChange} onSelect={onSelectRow} />
+          {ignoreNotice ? <p className="mb-3 rounded-lg border border-emerald-700/50 bg-emerald-950/40 px-3 py-2 text-sm text-emerald-200">{ignoreNotice}</p> : null}
+          <VulnerabilityTable items={data.items} query={query} onSortChange={onSortChange} onSelect={onSelectRow} onIgnoreRequest={onIgnoreRequest} />
           <Pagination
             page={data.pagination.page}
             totalPages={data.pagination.total_pages}
@@ -136,6 +303,20 @@ export function VulnerabilitiesPage() {
             return next;
           });
         }}
+      />
+
+      <IgnoreVulnerabilityModal
+        open={Boolean(ignoreTarget)}
+        cveId={ignoreTarget?.cve_id || ""}
+        repositoryName={ignoreTarget?.image.repository_name || ignoreTarget?.repository.name || "Unknown repository"}
+        reason={ignoreReason}
+        expiresAt={ignoreExpiresAt}
+        busy={ignoreBusy}
+        error={ignoreError}
+        onReasonChange={setIgnoreReason}
+        onExpiresAtChange={setIgnoreExpiresAt}
+        onCancel={onCloseIgnoreModal}
+        onConfirm={handleConfirmIgnore}
       />
     </AppShell>
   );

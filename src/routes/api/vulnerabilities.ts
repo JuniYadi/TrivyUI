@@ -195,6 +195,8 @@ function toListItem(row: ListRow) {
     image: {
       id: Number(row.image_id),
       name: row.image_name,
+      repository_id: Number(row.repository_id),
+      repository_name: row.repository_name,
     },
     scanned_at: row.scanned_at,
     tag_group: row.tag_group,
