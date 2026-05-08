@@ -71,11 +71,21 @@ export async function submitIgnoreFlow({ target, reason, expiresAt, createIgnore
       notice: `Ignore rule created for ${target.cve_id} on "${target.image.repository_name || target.repository.name}".`,
     };
   } catch (error) {
+    const message = validateResponseErrorMessage(error, "Failed to create ignore rule");
     return {
       ok: false,
-      error: validateResponseErrorMessage(error, "Failed to create ignore rule"),
+      error: mapIgnoreErrorMessage(message),
     };
   }
+}
+
+export function mapIgnoreErrorMessage(message: string): string {
+  const normalized = message.toLowerCase();
+  if (normalized.includes("already") || normalized.includes("exists") || normalized.includes("conflict")) {
+    return "This CVE is already ignored for this repository.";
+  }
+
+  return message || "Failed to create ignore rule";
 }
 
 export function openIgnoreModalState({ item }: { item: VulnerabilityWithRelations; previousNotice?: string | null }): IgnoreModalOpenState {

@@ -1,6 +1,6 @@
 import { describe, expect, mock, test } from "bun:test";
 import type { VulnerabilityWithRelations } from "../services/types";
-import { applyIgnoreSubmitResult, buildIgnorePayload, openIgnoreModalState, submitIgnoreFlow } from "../routes/vulnerabilities";
+import { applyIgnoreSubmitResult, buildIgnorePayload, mapIgnoreErrorMessage, openIgnoreModalState, submitIgnoreFlow } from "../routes/vulnerabilities";
 
 function sampleVulnerability(): VulnerabilityWithRelations {
   return {
@@ -88,6 +88,17 @@ describe("vulnerabilities ignore flow", () => {
       ok: false,
       error: "backend exploded",
     });
+  });
+
+  test("maps duplicate-style backend errors to user-friendly text", () => {
+    expect(mapIgnoreErrorMessage("already exists")).toBe("This CVE is already ignored for this repository.");
+    expect(mapIgnoreErrorMessage("CONFLICT on unique key")).toBe("This CVE is already ignored for this repository.");
+    expect(mapIgnoreErrorMessage("record exists for scope")).toBe("This CVE is already ignored for this repository.");
+  });
+
+  test("keeps fallback and non-duplicate errors unchanged", () => {
+    expect(mapIgnoreErrorMessage("backend exploded")).toBe("backend exploded");
+    expect(mapIgnoreErrorMessage("")).toBe("Failed to create ignore rule");
   });
 
   test("state transition keeps modal open on failure and closes on success", () => {
