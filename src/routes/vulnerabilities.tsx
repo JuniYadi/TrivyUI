@@ -111,7 +111,7 @@ export function VulnerabilitiesPage() {
 
       {!loading && !error && data && data.items.length > 0 && (
         <>
-          <VulnerabilityTable items={data.items} query={query} onSortChange={onSortChange} onSelect={onSelectRow} />
+          <VulnerabilityTable items={data.items} query={query} onSortChange={onSortChange} onSelect={onSelectRow} onIgnoreRequest={() => {}} />
           <Pagination
             page={data.pagination.page}
             totalPages={data.pagination.total_pages}
