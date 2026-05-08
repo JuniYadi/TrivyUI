@@ -18,6 +18,10 @@ describe("app routing", () => {
     expect(APP_ROUTE_PATHS.includes("/api-keys")).toBe(true);
   });
 
+  test("contains /trivy-ignore as valid route", () => {
+    expect(APP_ROUTE_PATHS.includes("/trivy-ignore")).toBe(true);
+  });
+
   test("contains dynamic detail routes", () => {
     expect(APP_ROUTE_PATHS.includes("/repositories/$id")).toBe(true);
     expect(APP_ROUTE_PATHS.includes("/images/$id")).toBe(true);

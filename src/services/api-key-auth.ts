@@ -10,20 +10,28 @@ function isPublicMethod(method: string): boolean {
   return method === "GET" || method === "HEAD" || method === "OPTIONS";
 }
 
+function isProtectedMutatingMethod(method: string): boolean {
+  return !isPublicMethod(method);
+}
+
 function shouldProtectRequest(url: URL, method: string): boolean {
   if (!url.pathname.startsWith("/api/")) {
     return false;
   }
 
   if (isPublicMethod(method)) {
-    return false;
+    return url.pathname === "/api/trivy-ignore/generate";
   }
 
-  if (method !== "POST") {
+  if (!isProtectedMutatingMethod(method)) {
     return false;
   }
 
   if (url.pathname === "/api/api-keys") {
+    return false;
+  }
+
+  if (url.pathname.startsWith("/api/settings/notifications")) {
     return false;
   }
 

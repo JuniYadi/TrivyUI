@@ -57,6 +57,11 @@ describe("db schema statements", () => {
     expect(sql).toContain("DOUBLE");
     expect(sql).toContain("CREATE UNIQUE INDEX idx_scan_packages_unique ON scan_packages(scan_result_id, result_target(255), package_name, installed_version(255))");
     expect(sql).toContain("INSERT IGNORE INTO _health_check (id, msg) VALUES (1, 'ok')");
+    expect(sql).toContain("CREATE TABLE IF NOT EXISTS trivy_ignores (");
+    expect(sql).toContain("CREATE TABLE IF NOT EXISTS trivy_ignore_tags (");
+    expect(sql).toContain("CREATE INDEX idx_trivy_ignores_cve_id ON trivy_ignores(cve_id)");
+    expect(sql).toContain("CREATE INDEX idx_trivy_ignores_repository_id ON trivy_ignores(repository_id)");
+    expect(sql).toContain("CREATE INDEX idx_trivy_ignores_expires_at ON trivy_ignores(expires_at)");
   });
 
   test("builds postgres-specific score and health statements", () => {

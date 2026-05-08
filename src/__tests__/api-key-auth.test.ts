@@ -150,4 +150,33 @@ describe("api key auth policy", () => {
 
     expect(response).toBeNull();
   });
+
+  test("protects trivy ignore mutating endpoints when enabled", async () => {
+    const db = createTestDb();
+    process.env.API_KEY_ENABLED = "true";
+
+    const getList = await enforcePostApiKeyAuth(db, new Request("http://localhost/api/trivy-ignores", { method: "GET" }));
+    const postCreate = await enforcePostApiKeyAuth(
+      db,
+      new Request("http://localhost/api/trivy-ignores", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ cve_id: "CVE-2026-PASS", repository_id: null, scope: "all_tags" }),
+      }),
+    );
+    const deleteItem = await enforcePostApiKeyAuth(db, new Request("http://localhost/api/trivy-ignores/123", { method: "DELETE" }));
+
+    expect(getList).toBeNull();
+    expect(postCreate?.status).toBe(401);
+    expect(deleteItem?.status).toBe(401);
+  });
+
+  test("protects trivy-ignore generate GET when enabled", async () => {
+    const db = createTestDb();
+    process.env.API_KEY_ENABLED = "true";
+
+    const response = await enforcePostApiKeyAuth(db, new Request("http://localhost/api/trivy-ignore/generate", { method: "GET" }));
+
+    expect(response?.status).toBe(401);
+  });
 });

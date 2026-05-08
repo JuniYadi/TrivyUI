@@ -108,6 +108,27 @@ export function buildSchemaStatements(dialect: DatabaseDriver["dialect"]): strin
     )
   `);
 
+  statements.push(`
+    CREATE TABLE IF NOT EXISTS trivy_ignores (
+      id ${idType(dialect)},
+      cve_id ${textColumn(dialect, 128)} NOT NULL,
+      repository_id INTEGER REFERENCES repositories(id) ON DELETE CASCADE,
+      scope TEXT NOT NULL DEFAULT 'all_tags' CHECK(scope IN ('all_tags', 'selected_tags')),
+      reason TEXT,
+      expires_at ${ts},
+      created_at ${ts} DEFAULT CURRENT_TIMESTAMP
+    )
+  `);
+
+  statements.push(`
+    CREATE TABLE IF NOT EXISTS trivy_ignore_tags (
+      ignore_id INTEGER NOT NULL,
+      tag_group ${textColumn(dialect, 255)} NOT NULL,
+      PRIMARY KEY (ignore_id, tag_group),
+      FOREIGN KEY (ignore_id) REFERENCES trivy_ignores(id) ON DELETE CASCADE
+    )
+  `);
+
   const createIndex = (name: string, column: string): string => {
     if (dialect === "mysql") {
       return `CREATE INDEX ${name} ON vulnerabilities(${column})`;
@@ -134,6 +155,18 @@ export function buildSchemaStatements(dialect: DatabaseDriver["dialect"]): strin
       "CREATE UNIQUE INDEX IF NOT EXISTS idx_scan_packages_unique ON scan_packages(scan_result_id, result_target, package_name, installed_version)"
     );
   }
+
+  const createIndexIfMissing = (name: string, table: string, column: string): string => {
+    if (dialect === "mysql") {
+      return `CREATE INDEX ${name} ON ${table}(${column})`;
+    }
+
+    return `CREATE INDEX IF NOT EXISTS ${name} ON ${table}(${column})`;
+  };
+
+  statements.push(createIndexIfMissing("idx_trivy_ignores_cve_id", "trivy_ignores", "cve_id"));
+  statements.push(createIndexIfMissing("idx_trivy_ignores_repository_id", "trivy_ignores", "repository_id"));
+  statements.push(createIndexIfMissing("idx_trivy_ignores_expires_at", "trivy_ignores", "expires_at"));
 
   statements.push(`
     CREATE TABLE IF NOT EXISTS _health_check (

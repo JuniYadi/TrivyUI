@@ -14,7 +14,8 @@ interface AppShellProps {
     | "/images/:id"
     | "/settings"
     | "/api-keys"
-    | "/email-templates";
+    | "/email-templates"
+    | "/trivy-ignore";
   children: ReactNode;
 }
 
@@ -77,6 +78,12 @@ export function AppShell({ title, subtitle, activeRoute, children }: AppShellPro
               className={`shell-nav__link ${activeRoute === "/email-templates" ? "shell-nav__link--active" : ""}`}
             >
               Email Templates
+            </Link>
+            <Link
+              to="/trivy-ignore"
+              className={`shell-nav__link ${activeRoute === "/trivy-ignore" ? "shell-nav__link--active" : ""}`}
+            >
+              Trivy Ignore
             </Link>
           </nav>
         </header>
