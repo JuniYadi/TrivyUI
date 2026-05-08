@@ -238,7 +238,7 @@ export function TrivyIgnorePage() {
       repository_id: Number.isInteger(repositoryIdNumber) && repositoryIdNumber > 0 ? repositoryIdNumber : null,
       scope,
       reason: reason.trim() ? reason.trim() : undefined,
-      expires_at: parseDateLocal(expiresAt.trim()),
+      expires_at: expiresAt.trim() ? parseDateLocal(expiresAt.trim()) : undefined,
       ...(scope === "selected_tags" ? { tag_groups: tagGroups } : null),
     } as {
       cve_id: string;
