@@ -51,6 +51,8 @@ describe("server routing", () => {
     const notificationSettings = await handleRequest(makeRequest("/api/settings/notifications"));
     const emailTemplates = await handleRequest(makeRequest("/api/email-templates"));
     const apiKeys = await handleRequest(makeRequest("/api/api-keys"));
+    const trivyIgnores = await handleRequest(makeRequest("/api/trivy-ignores"));
+    const trivyIgnoreGenerate = await handleRequest(makeRequest("/api/trivy-ignore/generate"));
 
     expect(health.status).toBe(200);
     expect(stats.status).toBe(200);
@@ -60,10 +62,12 @@ describe("server routing", () => {
     expect(notificationSettings.status).toBe(200);
     expect(emailTemplates.status).toBe(200);
     expect(apiKeys.status).toBe(200);
+    expect(trivyIgnores.status).toBe(200);
+    expect(trivyIgnoreGenerate.status).toBe(200);
   });
 
   test("serves SPA fallback for app routes", async () => {
-    const appRoutes = ["/dashboard", "/vulnerabilities", "/repositories", "/images", "/upload", "/settings", "/api-keys", "/email-templates"];
+    const appRoutes = ["/dashboard", "/vulnerabilities", "/repositories", "/images", "/upload", "/settings", "/api-keys", "/email-templates", "/trivy-ignore"];
 
     for (const route of appRoutes) {
       const response = await handleRequest(makeRequest(route));
@@ -81,6 +85,18 @@ describe("server routing", () => {
 
   test("returns 405 for unsupported method on api-keys endpoint", async () => {
     const response = await handleRequest(makeRequest("/api/api-keys", "PUT"));
+    const body = (await response.json()) as {
+      success: boolean;
+      error: { code: string; message: string };
+    };
+
+    expect(response.status).toBe(405);
+    expect(body.success).toBe(false);
+    expect(body.error.code).toBe("METHOD_NOT_ALLOWED");
+  });
+
+  test("returns 405 for unsupported method on trivy-ignore generate endpoint", async () => {
+    const response = await handleRequest(makeRequest("/api/trivy-ignore/generate", "POST"));
     const body = (await response.json()) as {
       success: boolean;
       error: { code: string; message: string };
