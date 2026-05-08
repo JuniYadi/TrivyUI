@@ -95,6 +95,18 @@ describe("trivy ignore management API", () => {
     expect(body.data.some((row) => row.repository_id === repoB)).toBe(false);
   });
 
+  test("GET returns 400 for invalid repository filter", async () => {
+    const db = createTestDb();
+    const handler = createTrivyIgnoreHandler(db);
+
+    const response = await handler(new Request("http://localhost/api/trivy-ignores?repo_id=abc", { method: "GET" }));
+    const body = (await response.json()) as { success: boolean; error: { code: string } };
+
+    expect(response.status).toBe(400);
+    expect(body.success).toBe(false);
+    expect(body.error.code).toBe("INVALID_REQUEST");
+  });
+
   test("POST rejects selected_tags without tag groups", async () => {
     const db = createTestDb();
     const handler = createTrivyIgnoreHandler(db);
@@ -138,6 +150,21 @@ describe("trivy ignore management API", () => {
     expect(missing.status).toBe(404);
     expect(missingBody.error.code).toBe("NOT_FOUND");
   });
+
+  test("DELETE rejects malformed id and GET /:id is method not allowed", async () => {
+    const db = createTestDb();
+    const handler = createTrivyIgnoreHandler(db);
+
+    const badDelete = await handler(new Request("http://localhost/api/trivy-ignores/abc", { method: "DELETE" }));
+    const badDeleteBody = (await badDelete.json()) as { success: boolean; error: { code: string } };
+    expect(badDelete.status).toBe(400);
+    expect(badDeleteBody.error.code).toBe("INVALID_REQUEST");
+
+    const getById = await handler(new Request("http://localhost/api/trivy-ignores/123", { method: "GET" }));
+    const getByIdBody = (await getById.json()) as { success: boolean; error: { code: string } };
+    expect(getById.status).toBe(405);
+    expect(getByIdBody.error.code).toBe("METHOD_NOT_ALLOWED");
+  });
 });
 
 describe("trivy ignore generate API", () => {
@@ -174,6 +201,18 @@ describe("trivy ignore generate API", () => {
     expect(response.status).toBe(200);
     expect(response.headers.get("content-type")?.startsWith("text/plain")).toBe(true);
     expect(text).toBe("CVE-2026-GLOBAL\nCVE-2026-REPO\n");
+  });
+
+  test("returns 405 for non-GET method", async () => {
+    const db = createTestDb();
+    const generateHandler = createTrivyIgnoreGenerateHandler(db);
+
+    const response = await generateHandler(new Request("http://localhost/api/trivy-ignore/generate", { method: "POST" }));
+    const body = (await response.json()) as { success: boolean; error: { code: string } };
+
+    expect(response.status).toBe(405);
+    expect(body.success).toBe(false);
+    expect(body.error.code).toBe("METHOD_NOT_ALLOWED");
   });
 });
 
