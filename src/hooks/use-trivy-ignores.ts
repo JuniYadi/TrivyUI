@@ -162,12 +162,12 @@ export function useTrivyIgnores(repoFilter?: number | null, apiKey?: string) {
     const created = await createTrivyIgnoreRecord(fetch, payload, apiKey);
     await load();
     return created;
-  }, [load]);
+  }, [load, apiKey]);
 
   const remove = useCallback(async (id: number): Promise<void> => {
     await deleteTrivyIgnoreRecord(fetch, id, apiKey);
     await load();
-  }, [load]);
+  }, [load, apiKey]);
 
   const retry = useCallback(async () => {
     await load();
