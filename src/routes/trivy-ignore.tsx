@@ -1,13 +1,17 @@
 import { useEffect, useMemo, useState } from "react";
 import { AppShell } from "../components/app-shell";
+import { CveDetailDrawer } from "../components/cve-detail-drawer";
 import { EmptyState } from "../components/empty-state";
 import { ErrorBanner } from "../components/error-banner";
+import { fetchVulnerabilityDetail } from "../hooks/use-vulnerabilities";
 import {
   TRIVY_IGNORE_API_KEY_STORAGE_KEY,
   useTrivyIgnores,
   validateResponseErrorMessage,
 } from "../hooks/use-trivy-ignores";
 import type { TrivyIgnoreRow } from "../services/trivy-ignore";
+import type { VulnerabilityDetailResponse } from "../services/types";
+import { formatRepositoryName } from "../utils/format-repository-name";
 
 interface ApiErrorState {
   success: boolean;
@@ -46,7 +50,7 @@ export function buildTrivyIgnoreGenerateCommand(origin?: string, repositoryName?
 }
 
 function repositoryLabel(row: TrivyIgnoreRow): string {
-  return row.repository_id === null ? "Global" : row.repository_name || `Repository #${row.repository_id}`;
+  return row.repository_id === null ? "Global" : formatRepositoryName(row.repository_name || `Repository #${row.repository_id}`);
 }
 
 interface TrivyIgnoreRepository {
@@ -64,6 +68,7 @@ interface TrivyIgnoreListPanelProps {
   onRepoFilterChange: (repoFilter: string) => void;
   onRetry: () => void;
   onDelete: (id: number) => void;
+  onSelectCve: (row: TrivyIgnoreRow) => void;
 }
 
 export function TrivyIgnoreListPanel({
@@ -76,6 +81,7 @@ export function TrivyIgnoreListPanel({
   onRepoFilterChange,
   onRetry,
   onDelete,
+  onSelectCve,
 }: TrivyIgnoreListPanelProps) {
   const hasRows = items.length > 0;
 
@@ -88,12 +94,12 @@ export function TrivyIgnoreListPanel({
           <select
             value={repoFilter}
             onChange={(event) => onRepoFilterChange(event.target.value)}
-            className="rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-slate-200 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/50"
+            className="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-slate-200 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/50"
           >
             <option value="">All repositories</option>
-            {repositories.map((repo) => (
+            {repositories.slice(0, 10).map((repo) => (
               <option key={repo.id} value={repo.id}>
-                {repo.name}
+                {formatRepositoryName(repo.name)}
               </option>
             ))}
           </select>
@@ -120,8 +126,12 @@ export function TrivyIgnoreListPanel({
             <tbody>
               {items.map((row) => (
                 <tr key={row.id} className="border-b border-slate-800 last:border-0">
-                  <td className="px-3 py-2 font-semibold text-blue-300">{row.cve_id}</td>
-                  <td className="px-3 py-2">{repositoryLabel(row)}</td>
+                  <td className="px-3 py-2 font-semibold text-blue-300">
+                    <button type="button" className="hover:underline" onClick={() => onSelectCve(row)} aria-label={`View details for ${row.cve_id}`}>
+                      {row.cve_id}
+                    </button>
+                  </td>
+                  <td className="px-3 py-2" title={row.repository_name || undefined}>{repositoryLabel(row)}</td>
                   <td className="px-3 py-2">
                     <div>{ScopeLabel(row.scope)}</div>
                     {row.scope === "selected_tags" && (
@@ -164,6 +174,10 @@ export function TrivyIgnorePage() {
   const [submitError, setSubmitError] = useState("");
   const [formMessage, setFormMessage] = useState("");
   const [deletingId, setDeletingId] = useState<number | null>(null);
+  const [drawerOpen, setDrawerOpen] = useState(false);
+  const [detailLoading, setDetailLoading] = useState(false);
+  const [detailError, setDetailError] = useState<string | null>(null);
+  const [detail, setDetail] = useState<VulnerabilityDetailResponse | null>(null);
   const [apiKey, setApiKey] = useState<string>(() => {
     if (typeof window === "undefined") {
       return "";
@@ -280,6 +294,35 @@ export function TrivyIgnorePage() {
     }
   }
 
+  async function handleSelectCve(row: TrivyIgnoreRow) {
+    setDrawerOpen(true);
+    setDetailLoading(true);
+    setDetailError(null);
+    setDetail(null);
+    try {
+      const repository = row.repository_name || undefined;
+      const search = encodeURIComponent(row.cve_id);
+      const repo = repository ? `&repository=${encodeURIComponent(repository)}` : "";
+      const listResponse = await fetch(`/api/vulnerabilities?search=${search}${repo}&limit=1`);
+      if (!listResponse.ok) {
+        throw new Error("Failed to locate vulnerability detail");
+      }
+
+      const listPayload = (await listResponse.json()) as { data?: { items?: Array<{ id: number }> } };
+      const vulnId = listPayload.data?.items?.[0]?.id;
+      if (!vulnId) {
+        throw new Error("No vulnerability detail found for this CVE.");
+      }
+
+      const result = await fetchVulnerabilityDetail(vulnId);
+      setDetail(result);
+    } catch (err) {
+      setDetailError(err instanceof Error ? err.message : "Failed to load vulnerability detail");
+    } finally {
+      setDetailLoading(false);
+    }
+  }
+
   const generateExample = useMemo(() => {
     return buildTrivyIgnoreGenerateCommand(
       typeof window !== "undefined" ? window.location.origin : undefined,
@@ -320,9 +363,9 @@ export function TrivyIgnorePage() {
             onChange={(event) => setRepositoryId(event.target.value)}
           >
             <option value="">Global</option>
-            {repositories.map((repo) => (
+            {repositories.slice(0, 10).map((repo) => (
               <option key={repo.id} value={repo.id}>
-                {repo.name}
+                {formatRepositoryName(repo.name)}
               </option>
             ))}
           </select>
@@ -416,6 +459,15 @@ export function TrivyIgnorePage() {
         onRepoFilterChange={setRepoFilter}
         onRetry={() => void retry()}
         onDelete={handleDelete}
+        onSelectCve={handleSelectCve}
+      />
+
+      <CveDetailDrawer
+        open={drawerOpen}
+        loading={detailLoading}
+        error={detailError}
+        data={detail}
+        onClose={() => setDrawerOpen(false)}
       />
 
       <section className="rounded-lg border border-slate-700 bg-slate-900/90 p-4">
