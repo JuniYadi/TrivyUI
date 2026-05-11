@@ -96,7 +96,7 @@ export function FilterBar({ query, repositories, images, onChange, onClear }: Fi
             }
           >
             <option value="">All repositories</option>
-            {repositories.map((repo) => (
+            {repositories.slice(0, 10).map((repo) => (
               <option key={repo} value={repo}>
                 {repo}
               </option>
@@ -117,7 +117,7 @@ export function FilterBar({ query, repositories, images, onChange, onClear }: Fi
             }
           >
             <option value="">All images</option>
-            {images.map((image) => (
+            {images.slice(0, 10).map((image) => (
               <option key={image} value={image}>
                 {image}
               </option>
