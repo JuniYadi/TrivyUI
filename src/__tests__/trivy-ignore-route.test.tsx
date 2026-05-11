@@ -28,6 +28,7 @@ describe("trivy ignore route list panel", () => {
         onRepoFilterChange={() => {}}
         onRetry={() => {}}
         onDelete={() => {}}
+        onSelectCve={() => {}}
       />,
     );
 
@@ -46,6 +47,7 @@ describe("trivy ignore route list panel", () => {
         onRepoFilterChange={() => {}}
         onRetry={() => {}}
         onDelete={() => {}}
+        onSelectCve={() => {}}
       />,
     );
 
@@ -66,6 +68,7 @@ describe("trivy ignore route list panel", () => {
         onRepoFilterChange={() => {}}
         onRetry={() => {}}
         onDelete={() => {}}
+        onSelectCve={() => {}}
       />,
     );
 
@@ -85,6 +88,7 @@ describe("trivy ignore route list panel", () => {
         onRepoFilterChange={() => {}}
         onRetry={() => {}}
         onDelete={() => {}}
+        onSelectCve={() => {}}
       />,
     );
 
@@ -93,6 +97,36 @@ describe("trivy ignore route list panel", () => {
     expect(html).toContain("dev-*, release");
     expect(html).toContain("legacy");
     expect(html).toContain("Delete");
+    expect(html).toContain("button");
+    expect(html).toContain("View details for CVE-2026-1111");
+  });
+
+  test("shortens long repository names in table and limits repository filter options to 10", () => {
+    const repositories = Array.from({ length: 12 }).map((_, index) => ({
+      id: index + 1,
+      name: `registry.example.com/team/service-${index + 1}`,
+    }));
+
+    const html = renderToStaticMarkup(
+      <TrivyIgnoreListPanel
+        repoFilter=""
+        repositories={repositories}
+        loading={false}
+        error={null}
+        items={[{ ...SAMPLE_ROW, repository_id: 2, repository_name: "registry.example.com/verylongteam/really-long-service-name" }]}
+        deletingId={null}
+        onRepoFilterChange={() => {}}
+        onRetry={() => {}}
+        onDelete={() => {}}
+        onSelectCve={() => {}}
+      />,
+    );
+
+    expect(html).toContain("verylongteam/really-l...");
+    expect(html).toContain("title=\"registry.example.com/verylongteam/really-long-service-name\"");
+    expect(html).toContain("service-10");
+    expect(html).not.toContain("service-11");
+    expect(html).not.toContain("service-12");
   });
 
   test("builds generate command example with repo and tag context", () => {
