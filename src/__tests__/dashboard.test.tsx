@@ -42,6 +42,12 @@ const SAMPLE_STATS: DashboardStats = {
       scanned_at: "2026-04-26T12:00:00.000Z",
     },
   ],
+  daily_trends: Array.from({ length: 30 }).map((_, index) => ({
+    date: `2026-04-${String(index + 1).padStart(2, "0")}`,
+    vulnerabilities_detected: index % 3,
+    packages_scanned: index + 10,
+    packages_resolved: index % 2,
+  })),
 };
 
 describe("dashboard overview ui", () => {
@@ -52,6 +58,12 @@ describe("dashboard overview ui", () => {
     expect(html).toContain("Package Coverage");
     expect(html).toContain("Top Vulnerable Repositories");
     expect(html).toContain("Recent Scans");
+    expect(html).toContain("Daily Vulnerability &amp; Package Trend");
+    expect(html).toContain('aria-label=\"trend-window-filter\"');
+    expect(html).toContain(">7d<");
+    expect(html).toContain(">14d<");
+    expect(html).toContain(">30d<");
+    expect(html).toContain('aria-pressed=\"true\"');
     expect(html).toContain("ghcr.io/acme/api:latest");
   });
 

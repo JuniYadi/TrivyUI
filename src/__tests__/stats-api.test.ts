@@ -11,6 +11,17 @@ function createTestDb() {
   return db;
 }
 
+function isoDateDaysAgo(daysAgo: number, hour = 10): string {
+  const date = new Date();
+  date.setUTCDate(date.getUTCDate() - daysAgo);
+  date.setUTCHours(hour, 0, 0, 0);
+  return date.toISOString();
+}
+
+function utcDayFromIso(value: string): string {
+  return new Date(value).toISOString().slice(0, 10);
+}
+
 afterEach(() => {
   for (const db of dbs.splice(0)) {
     db.close();
@@ -62,6 +73,12 @@ describe("GET /api/stats", () => {
           vulnerable_package_count: number;
           clean_package_count: number;
         }>;
+        daily_trends: Array<{
+          date: string;
+          vulnerabilities_detected: number;
+          packages_scanned: number;
+          packages_resolved: number;
+        }>;
       };
     };
 
@@ -85,6 +102,7 @@ describe("GET /api/stats", () => {
     expect(body.data.recent_scans[0]?.package_count).toBe(3);
     expect(body.data.recent_scans[0]?.vulnerable_package_count).toBe(2);
     expect(body.data.recent_scans[0]?.clean_package_count).toBe(1);
+    expect(body.data.daily_trends).toHaveLength(30);
   });
 
   test("returns dashboard aggregate stats with top repositories and recent scans", async () => {
@@ -346,6 +364,107 @@ describe("GET /api/stats", () => {
     expect(body.data.total_vulnerable_packages).toBe(1);
     expect(body.data.total_clean_packages).toBe(1);
     expect(body.data.clean_package_rate).toBe(50);
+  });
+
+  test("returns 30-day daily trends with zero-filled days and expected metric semantics", async () => {
+    const db = createTestDb();
+    const dayTwoIso = isoDateDaysAgo(2, 10);
+    const dayOneIso = isoDateDaysAgo(1, 11);
+    const dayTwo = utcDayFromIso(dayTwoIso);
+    const dayOne = utcDayFromIso(dayOneIso);
+
+    importTrivyPayload(
+      db,
+      {
+        ArtifactName: "ghcr.io/acme/api:latest",
+        Metadata: { Source: "ci", CreatedAt: dayTwoIso },
+        Results: [
+          {
+            Packages: [
+              { Name: "openssl", Version: "3.0.0" },
+              { Name: "curl", Version: "8.8.0" },
+            ],
+            Vulnerabilities: [
+              { VulnerabilityID: "CVE-TREND-1", Severity: "HIGH", PkgName: "openssl", InstalledVersion: "3.0.0" },
+              { VulnerabilityID: "CVE-TREND-2", Severity: "MEDIUM", PkgName: "openssl", InstalledVersion: "3.0.0" },
+            ],
+          },
+        ],
+      },
+      "{}"
+    );
+
+    importTrivyPayload(
+      db,
+      {
+        ArtifactName: "ghcr.io/acme/api:latest",
+        Metadata: { Source: "ci", CreatedAt: dayOneIso },
+        Results: [
+          {
+            Packages: [
+              { Name: "openssl", Version: "3.0.0" },
+              { Name: "curl", Version: "8.8.0" },
+            ],
+          },
+        ],
+      },
+      "{}"
+    );
+
+    importTrivyPayload(
+      db,
+      {
+        ArtifactName: "ghcr.io/acme/worker:latest",
+        Metadata: { Source: "ci", CreatedAt: dayOneIso },
+        Results: [
+          {
+            Packages: [
+              { Name: "openssl", Version: "3.0.0" },
+              { Name: "curl", Version: "8.8.0" },
+              { Name: "bash", Version: "5.2.37" },
+            ],
+            Vulnerabilities: [
+              { VulnerabilityID: "CVE-TREND-3", Severity: "LOW", PkgName: "bash", InstalledVersion: "5.2.37" },
+            ],
+          },
+        ],
+      },
+      "{}"
+    );
+
+    const response = createStatsHandler(db)();
+    const body = (await response.json()) as {
+      success: boolean;
+      data: {
+        daily_trends: Array<{
+          date: string;
+          vulnerabilities_detected: number;
+          packages_scanned: number;
+          packages_resolved: number;
+        }>;
+      };
+    };
+
+    expect(response.status).toBe(200);
+    expect(body.success).toBe(true);
+    expect(body.data.daily_trends).toHaveLength(30);
+    expect(body.data.daily_trends[0]?.date).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+
+    const byDay = new Map(body.data.daily_trends.map((point) => [point.date, point]));
+    const dayTwoPoint = byDay.get(dayTwo);
+    const dayOnePoint = byDay.get(dayOne);
+
+    expect(dayTwoPoint).toBeDefined();
+    expect(dayOnePoint).toBeDefined();
+    expect(dayTwoPoint?.vulnerabilities_detected).toBe(2);
+    expect(dayTwoPoint?.packages_scanned).toBe(2);
+    expect(dayTwoPoint?.packages_resolved).toBe(1);
+
+    expect(dayOnePoint?.vulnerabilities_detected).toBe(1);
+    expect(dayOnePoint?.packages_scanned).toBe(3);
+    expect(dayOnePoint?.packages_resolved).toBe(0);
+
+    expect(body.data.daily_trends.some((point) => point.vulnerabilities_detected === 0)).toBe(true);
   });
 
   test("counts same CVE separately across dev and stg open-state groups", async () => {
