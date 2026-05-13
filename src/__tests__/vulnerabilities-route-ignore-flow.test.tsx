@@ -1,6 +1,6 @@
 import { describe, expect, mock, test } from "bun:test";
 import type { VulnerabilityWithRelations } from "../services/types";
-import { applyIgnoreSubmitResult, buildIgnorePayload, mapIgnoreErrorMessage, openIgnoreModalState, submitIgnoreFlow } from "../routes/vulnerabilities";
+import { applyIgnoreSubmitResult, buildIgnorePayload, mapIgnoreErrorMessage, openIgnoreModalState, submitIgnoreFlow } from "../utils/ignore-vulnerability-flow";
 
 function sampleVulnerability(): VulnerabilityWithRelations {
   return {
