@@ -280,7 +280,7 @@ export function createStatsHandler(db: Database) {
           `
           SELECT
             date(sr.scan_date) as day,
-            COUNT(DISTINCT sr.id) as count
+            COUNT(*) as count
           FROM scan_results sr
           JOIN vulnerabilities v ON v.scan_result_id = sr.id
           WHERE date(sr.scan_date) >= date('now', '-29 days')

@@ -458,11 +458,11 @@ describe("GET /api/stats", () => {
     expect(dayOnePoint).toBeDefined();
     expect(dayTwoPoint?.vulnerabilities_detected).toBe(2);
     expect(dayTwoPoint?.packages_scanned).toBe(2);
-    expect(dayTwoPoint?.packages_resolved).toBe(1);
+    expect(dayTwoPoint?.packages_resolved).toBe(0);
 
     expect(dayOnePoint?.vulnerabilities_detected).toBe(1);
-    expect(dayOnePoint?.packages_scanned).toBe(3);
-    expect(dayOnePoint?.packages_resolved).toBe(0);
+    expect(dayOnePoint?.packages_scanned).toBe(5);
+    expect(dayOnePoint?.packages_resolved).toBe(1);
 
     expect(body.data.daily_trends.some((point) => point.vulnerabilities_detected === 0)).toBe(true);
   });
