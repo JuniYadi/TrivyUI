@@ -98,11 +98,26 @@ export async function fetchTrivyIgnores(fetcher: typeof fetch = fetch, repoId?: 
 }
 
 export async function fetchRepositories(fetcher: typeof fetch = fetch, apiKey?: string): Promise<RepositoryItem[]> {
-  const response = await fetcher("/api/repositories?limit=250&sort=name&order=asc&page=1", {
-    headers: buildTrivyIgnoreAuthHeaders(apiKey),
-  });
-  const payload = await parseResponse<RepositoryList>(response, "Failed to load repositories");
-  return payload.items;
+  const headers = buildTrivyIgnoreAuthHeaders(apiKey);
+  const maxLimit = 100;
+  let page = 1;
+  let totalPages = 1;
+  const repositories = new Map<number, RepositoryItem>();
+
+  while (page <= totalPages) {
+    const response = await fetcher(`/api/repositories?limit=${maxLimit}&sort=name&order=asc&page=${page}`, { headers });
+    const payload = await parseResponse<RepositoryList>(response, "Failed to load repositories");
+
+    for (const item of payload.items) {
+      repositories.set(item.id, item);
+    }
+
+    const nextTotalPages = Number(payload.pagination.total_pages || 0);
+    totalPages = nextTotalPages > 0 ? nextTotalPages : 1;
+    page += 1;
+  }
+
+  return Array.from(repositories.values()).sort((lhs, rhs) => lhs.name.localeCompare(rhs.name));
 }
 
 export async function createTrivyIgnoreRecord(

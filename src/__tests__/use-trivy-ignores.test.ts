@@ -62,34 +62,49 @@ describe("trivy ignore API request helpers", () => {
   });
 
   test("fetchRepositories includes the API key header", async () => {
+    const seenUrls: string[] = [];
     let capturedInit: RequestInit | undefined;
-    const fetcher = ((_: string, init?: RequestInit) => {
+    const fetcher = ((url: string, init?: RequestInit) => {
       capturedInit = init;
-      return Promise.resolve(
-        new Response(
-          JSON.stringify({
-            success: true,
-            data: {
-              items: [],
-              pagination: {
-                page: 1,
-                limit: 1,
-                total_items: 0,
-                total_pages: 0,
-              },
-            },
-          }),
-        ),
-      );
+      seenUrls.push(url);
+
+      const page = Number(new URL(url, "http://localhost").searchParams.get("page") || "1");
+      const payload =
+        page === 1
+          ? {
+              items: [
+                { id: 2, name: "repo-b" },
+                { id: 1, name: "repo-a" },
+              ],
+              pagination: { page: 1, limit: 100, total_items: 3, total_pages: 2 },
+            }
+          : {
+              items: [
+                { id: 1, name: "repo-a" },
+                { id: 3, name: "repo-c" },
+              ],
+              pagination: { page: 2, limit: 100, total_items: 3, total_pages: 2 },
+            };
+
+      return Promise.resolve(new Response(JSON.stringify({ success: true, data: payload })));
     }) as typeof fetch;
 
-    await fetchRepositories(fetcher, "repo-key");
+    const repositories = await fetchRepositories(fetcher, "repo-key");
 
     expect(headersToLowercaseRecord(capturedInit?.headers)).toEqual(
       expect.objectContaining({
         "x-api-key": "repo-key",
       }),
     );
+    expect(seenUrls).toEqual([
+      "/api/repositories?limit=100&sort=name&order=asc&page=1",
+      "/api/repositories?limit=100&sort=name&order=asc&page=2",
+    ]);
+    expect(repositories).toEqual([
+      { id: 1, name: "repo-a" },
+      { id: 2, name: "repo-b" },
+      { id: 3, name: "repo-c" },
+    ]);
   });
 
   test("createTrivyIgnoreRecord includes API key and content-type", async () => {
