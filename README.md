@@ -79,12 +79,15 @@ Notes:
 ## Upload via UI
 
 1. Start the app and open `http://localhost:3000/upload`.
-2. Click `Choose Files` or drag/drop one or more `.json` files.
-3. Click `Upload File`.
+2. Choose one input method:
+   - File mode: click `Choose Files` or drag/drop one or more `.json` files.
+   - Paste mode: copy JSON from CI output/artifacts and paste it into `Paste JSON directly`.
+3. Click `Upload File` / `Upload Batch` (file mode) or `Upload Pasted JSON` (paste mode).
 
 Behavior:
 - 1 file -> UI calls `POST /api/upload`
 - multiple files -> UI calls `POST /api/upload/batch`
+- pasted JSON -> UI validates JSON syntax first, then calls `POST /api/upload`
 
 If upload fails with `INVALID_TRIVY_FORMAT`, the JSON is valid syntax but not a valid Trivy result structure.
 
