@@ -3,13 +3,16 @@ import { useNavigate, useParams } from "@tanstack/react-router";
 import { AppShell } from "../components/app-shell";
 import { CveDetailDrawer } from "../components/cve-detail-drawer";
 import { ErrorBanner } from "../components/error-banner";
+import { IgnoreVulnerabilityModal } from "../components/ignore-vulnerability-modal";
 import { Pagination } from "../components/pagination";
 import { SeverityChart } from "../components/severity-chart";
 import { StatCard } from "../components/stat-card";
 import { useRepoDetail } from "../hooks/use-repo-detail";
+import { createTrivyIgnoreRecord } from "../hooks/use-trivy-ignores";
 import { fetchVulnerabilityDetail } from "../hooks/use-vulnerabilities";
-import type { RepositoryDetailResponse, VulnerabilityDetailResponse } from "../services/types";
+import type { RepositoryDetailResponse, VulnerabilityDetailResponse, VulnerabilityWithRelations } from "../services/types";
 import { filterVulnerabilitiesByGroup } from "../utils/filter-vulnerabilities-by-group";
+import { applyIgnoreSubmitResult, openIgnoreModalState, submitIgnoreFlow } from "../utils/ignore-vulnerability-flow";
 import { paginateList } from "../utils/paginate-list";
 
 function parseRepositoryId(value: string | undefined): number | null {
@@ -117,6 +120,12 @@ export function RepositoryDetailContent({ data, loading, error, retry, state, on
   const [detailLoading, setDetailLoading] = useState(false);
   const [detailError, setDetailError] = useState<string | null>(null);
   const [detail, setDetail] = useState<VulnerabilityDetailResponse | null>(null);
+  const [ignoreTarget, setIgnoreTarget] = useState<VulnerabilityWithRelations | null>(null);
+  const [ignoreReason, setIgnoreReason] = useState("");
+  const [ignoreExpiresAt, setIgnoreExpiresAt] = useState("");
+  const [ignoreBusy, setIgnoreBusy] = useState(false);
+  const [ignoreError, setIgnoreError] = useState<string | null>(null);
+  const [ignoreNotice, setIgnoreNotice] = useState<string | null>(null);
   const [selectedGroup, setSelectedGroup] = useState<string | null>(null);
   const [vulnerabilityPage, setVulnerabilityPage] = useState(1);
   const [vulnerabilityLimit, setVulnerabilityLimit] = useState(10);
@@ -154,6 +163,62 @@ export function RepositoryDetailContent({ data, loading, error, retry, state, on
   useEffect(() => {
     setVulnerabilityPage(1);
   }, [selectedGroup]);
+
+  const onIgnoreRequest = useCallback((item: VulnerabilityWithRelations) => {
+    const next = openIgnoreModalState({ item, previousNotice: ignoreNotice });
+    setIgnoreTarget(next.target);
+    setIgnoreReason(next.reason);
+    setIgnoreExpiresAt(next.expiresAt);
+    setIgnoreError(next.error);
+    setIgnoreNotice(next.notice);
+  }, [ignoreNotice]);
+
+  const onCloseIgnoreModal = useCallback(() => {
+    if (ignoreBusy) {
+      return;
+    }
+
+    setIgnoreTarget(null);
+    setIgnoreError(null);
+  }, [ignoreBusy]);
+
+  const onConfirmIgnore = useCallback(async () => {
+    if (!ignoreTarget || ignoreBusy) {
+      return;
+    }
+
+    setIgnoreBusy(true);
+    setIgnoreError(null);
+
+    try {
+      const result = await submitIgnoreFlow({
+        target: ignoreTarget,
+        reason: ignoreReason,
+        expiresAt: ignoreExpiresAt,
+        createIgnore: (payload) => createTrivyIgnoreRecord(fetch, payload),
+      });
+
+      const next = applyIgnoreSubmitResult({
+        currentTarget: ignoreTarget,
+        currentReason: ignoreReason,
+        currentExpiresAt: ignoreExpiresAt,
+        result,
+      });
+      setIgnoreNotice(next.notice);
+      setIgnoreTarget(next.target);
+      setIgnoreReason(next.reason);
+      setIgnoreExpiresAt(next.expiresAt);
+      setIgnoreError(next.error);
+    } catch (error) {
+      setIgnoreError(error instanceof Error ? error.message : "Failed to create ignore rule");
+      setIgnoreNotice(null);
+      setIgnoreTarget(ignoreTarget);
+      setIgnoreReason(ignoreReason);
+      setIgnoreExpiresAt(ignoreExpiresAt);
+    } finally {
+      setIgnoreBusy(false);
+    }
+  }, [ignoreTarget, ignoreBusy, ignoreReason, ignoreExpiresAt]);
 
   return (
     <>
@@ -328,6 +393,7 @@ export function RepositoryDetailContent({ data, loading, error, retry, state, on
             <p className="mb-3 text-xs text-slate-400">
               Showing {paginatedVulnerabilities.pagination.total_items} vulnerabilities{selectedGroup ? ` in group ${selectedGroup}` : ""}.
             </p>
+            {ignoreNotice ? <p className="mb-3 rounded-lg border border-emerald-700/50 bg-emerald-950/40 px-3 py-2 text-sm text-emerald-200">{ignoreNotice}</p> : null}
             <table className="w-full table-fixed border-collapse text-sm">
               <thead>
                 <tr className="border-b border-slate-700 text-left">
@@ -339,6 +405,7 @@ export function RepositoryDetailContent({ data, loading, error, retry, state, on
                   <th className="hidden lg:table-cell pb-3 pr-4">State</th>
                   <th className="pb-3 pr-4">Installed</th>
                   <th className="hidden lg:table-cell pb-3 pr-4">Fixed</th>
+                  <th className="pb-3 pr-4">Actions</th>
                   <th className="pb-3">Score</th>
                 </tr>
               </thead>
@@ -376,6 +443,20 @@ export function RepositoryDetailContent({ data, loading, error, retry, state, on
                     </td>
                     <td className="py-3 pr-4">{item.installed_version || "-"}</td>
                     <td className="hidden lg:table-cell py-3 pr-4">{item.fixed_version || "-"}</td>
+                    <td className="py-3 pr-4">
+                      <button
+                        type="button"
+                        aria-label={`Ignore vulnerability ${item.cve_id} for ${item.repository.name}`}
+                        className="rounded border border-red-700 bg-red-950/50 px-2 py-1 text-xs font-semibold text-red-200 transition hover:bg-red-900/70"
+                        onClick={(event) => {
+                          event.preventDefault();
+                          event.stopPropagation();
+                          onIgnoreRequest(item);
+                        }}
+                      >
+                        Ignore
+                      </button>
+                    </td>
                     <td className="py-3">{formatScore(item.score)}</td>
                   </tr>
                 ))}
@@ -403,6 +484,20 @@ export function RepositoryDetailContent({ data, loading, error, retry, state, on
         error={detailError}
         data={detail}
         onClose={() => setDrawerOpen(false)}
+      />
+
+      <IgnoreVulnerabilityModal
+        open={Boolean(ignoreTarget)}
+        cveId={ignoreTarget?.cve_id || ""}
+        repositoryName={ignoreTarget?.image.repository_name || ignoreTarget?.repository.name || "Unknown repository"}
+        reason={ignoreReason}
+        expiresAt={ignoreExpiresAt}
+        busy={ignoreBusy}
+        error={ignoreError}
+        onReasonChange={setIgnoreReason}
+        onExpiresAtChange={setIgnoreExpiresAt}
+        onCancel={onCloseIgnoreModal}
+        onConfirm={onConfirmIgnore}
       />
     </>
   );
