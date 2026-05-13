@@ -332,6 +332,7 @@ export function RepositoryDetailContent({ data, loading, error, retry, state, on
 
   const refreshIgnores = useCallback(async (repositoryId: number | null | undefined) => {
     if (!repositoryId || repositoryId <= 0) {
+      ignoreLoadRequestId.current += 1;
       setIgnoreItems([]);
       setIgnoreLoadError(null);
       setIgnoreLoading(false);
