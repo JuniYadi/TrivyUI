@@ -1,4 +1,5 @@
 import { AppShell } from "../components/app-shell";
+import { DailyTrendChart } from "../components/daily-trend-chart";
 import { DashboardSkeleton } from "../components/dashboard-skeleton";
 import { EmptyState } from "../components/empty-state";
 import { ErrorBanner } from "../components/error-banner";
@@ -28,6 +29,8 @@ export function DashboardContent({ stats }: DashboardContentProps) {
           </div>
         </section>
       </section>
+
+      <DailyTrendChart trends={stats.daily_trends} />
 
       <section className="grid grid-cols-1 gap-4">
         <TopRepos repositories={stats.top_repositories} />
