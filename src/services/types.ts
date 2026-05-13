@@ -27,6 +27,13 @@ export interface DashboardRecentScan {
   scanned_at: string;
 }
 
+export interface DashboardDailyTrend {
+  date: string;
+  vulnerabilities_detected: number;
+  packages_scanned: number;
+  packages_resolved: number;
+}
+
 export interface DashboardStats {
   total_vulnerabilities: number;
   total_packages_scanned: number;
@@ -38,6 +45,7 @@ export interface DashboardStats {
   by_severity: SeverityBreakdown;
   top_repositories: DashboardTopRepository[];
   recent_scans: DashboardRecentScan[];
+  daily_trends: DashboardDailyTrend[];
 }
 
 export interface TrivyVulnerability {
