@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { AppShell } from "../components/app-shell";
 import { CveDetailDrawer } from "../components/cve-detail-drawer";
 import { EmptyState } from "../components/empty-state";
@@ -285,6 +285,7 @@ export function TrivyIgnorePage() {
   const [detailLoading, setDetailLoading] = useState(false);
   const [detailError, setDetailError] = useState<string | null>(null);
   const [detail, setDetail] = useState<VulnerabilityDetailResponse | null>(null);
+  const latestRequestId = useRef(0);
 
   const repoFilterId = useMemo(() => {
     const parsed = Number(repoFilter);
@@ -393,13 +394,22 @@ export function TrivyIgnorePage() {
     setDetailError(null);
     setDetail(null);
 
+    latestRequestId.current += 1;
+    const requestId = latestRequestId.current;
+
     try {
       const resolvedDetail = await fetchTrivyIgnoreCveDetail(row.cve_id, row.repository_name);
-      setDetail(resolvedDetail);
+      if (requestId === latestRequestId.current) {
+        setDetail(resolvedDetail);
+      }
     } catch (err) {
-      setDetailError(validateResponseErrorMessage(err, "Failed to load vulnerability detail"));
+      if (requestId === latestRequestId.current) {
+        setDetailError(validateResponseErrorMessage(err, "Failed to load vulnerability detail"));
+      }
     } finally {
-      setDetailLoading(false);
+      if (requestId === latestRequestId.current) {
+        setDetailLoading(false);
+      }
     }
   }
 
