@@ -49,18 +49,36 @@ const VULNERABILITY_STATE_CTE = `
     JOIN images i ON i.id = sr.image_id
   ),
   resolved_state AS (
+    WITH last_seen AS (
+      SELECT
+        vr.repository_id,
+        vr.tag_group,
+        vr.cve_id,
+        MAX(datetime(vr.scanned_at)) AS last_seen
+      FROM vulnerability_rows vr
+      GROUP BY vr.repository_id, vr.tag_group, vr.cve_id
+    )
     SELECT
-      vr.repository_id,
-      vr.tag_group,
-      vr.cve_id,
-      MAX(datetime(vr.scanned_at)) AS resolved_at
-    FROM vulnerability_rows vr
+      ls.repository_id,
+      ls.tag_group,
+      ls.cve_id,
+      MIN(datetime(sr.scan_date)) AS resolved_at
+    FROM last_seen ls
+    JOIN images i
+      ON i.repository_id = ls.repository_id
+     AND i.tag_group = ls.tag_group
+    JOIN scan_results sr ON sr.image_id = i.id
+    LEFT JOIN vulnerabilities v
+      ON v.scan_result_id = sr.id
+     AND v.cve_id = ls.cve_id
     LEFT JOIN latest_keys lk
-      ON lk.repository_id = vr.repository_id
-     AND lk.tag_group = vr.tag_group
-     AND lk.cve_id = vr.cve_id
-    WHERE lk.cve_id IS NULL
-    GROUP BY vr.repository_id, vr.tag_group, vr.cve_id
+      ON lk.repository_id = ls.repository_id
+     AND lk.tag_group = ls.tag_group
+     AND lk.cve_id = ls.cve_id
+    WHERE datetime(sr.scan_date) > ls.last_seen
+      AND v.cve_id IS NULL
+      AND lk.cve_id IS NULL
+    GROUP BY ls.repository_id, ls.tag_group, ls.cve_id
   ),
   vulnerability_states AS (
     SELECT
@@ -276,8 +294,9 @@ export function createStatsHandler(db: Database) {
           `
           SELECT
             date(sr.scan_date) as day,
-            COUNT(DISTINCT sp.package_name || ':' || COALESCE(sp.installed_version, '')) as count
+            COUNT(DISTINCT i.repository_id || ':' || sp.package_name || ':' || COALESCE(sp.installed_version, '')) as count
           FROM scan_results sr
+          JOIN images i ON i.id = sr.image_id
           JOIN scan_packages sp ON sp.scan_result_id = sr.id
           WHERE date(sr.scan_date) >= date('now', '-29 days')
           GROUP BY date(sr.scan_date)
