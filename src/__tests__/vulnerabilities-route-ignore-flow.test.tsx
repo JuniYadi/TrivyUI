@@ -1,6 +1,13 @@
 import { describe, expect, mock, test } from "bun:test";
 import type { VulnerabilityWithRelations } from "../services/types";
-import { applyIgnoreSubmitResult, buildIgnorePayload, mapIgnoreErrorMessage, openIgnoreModalState, submitIgnoreFlow } from "../utils/ignore-vulnerability-flow";
+import {
+  applyIgnoreSubmitResult,
+  buildIgnorePayload,
+  mapIgnoreErrorMessage,
+  openIgnoreModalState,
+  submitIgnoreFlow,
+  submitIgnoreFlowAndRefresh,
+} from "../utils/ignore-vulnerability-flow";
 
 function sampleVulnerability(): VulnerabilityWithRelations {
   return {
@@ -88,6 +95,50 @@ describe("vulnerabilities ignore flow", () => {
       ok: false,
       error: "backend exploded",
     });
+  });
+
+  test("refreshes repository ignore list after successful submit", async () => {
+    const target = sampleVulnerability();
+    const createIgnore = mock(async () => ({ id: 1 }));
+    const refreshRepositoryIgnores = mock(async (_repositoryId: number) => {});
+
+    const result = await submitIgnoreFlowAndRefresh({
+      target,
+      reason: "accepted risk",
+      expiresAt: "",
+      createIgnore,
+      refreshRepositoryIgnores,
+    });
+
+    expect(result).toEqual({
+      ok: true,
+      notice: 'Ignore rule created for CVE-2026-1111 on "ghcr.io/acme/api".',
+    });
+    expect(createIgnore).toHaveBeenCalledTimes(1);
+    expect(refreshRepositoryIgnores).toHaveBeenCalledTimes(1);
+    expect(refreshRepositoryIgnores).toHaveBeenCalledWith(2);
+  });
+
+  test("does not refresh repository ignore list when submit fails", async () => {
+    const target = sampleVulnerability();
+    const createIgnore = mock(async () => {
+      throw new Error("network issue");
+    });
+    const refreshRepositoryIgnores = mock(async (_repositoryId: number) => {});
+
+    const result = await submitIgnoreFlowAndRefresh({
+      target,
+      reason: "accepted risk",
+      expiresAt: "",
+      createIgnore,
+      refreshRepositoryIgnores,
+    });
+
+    expect(result).toEqual({
+      ok: false,
+      error: "network issue",
+    });
+    expect(refreshRepositoryIgnores).toHaveBeenCalledTimes(0);
   });
 
   test("maps duplicate-style backend errors to user-friendly text", () => {

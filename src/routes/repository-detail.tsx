@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useParams } from "@tanstack/react-router";
 import { AppShell } from "../components/app-shell";
 import { CveDetailDrawer } from "../components/cve-detail-drawer";
@@ -8,11 +8,12 @@ import { Pagination } from "../components/pagination";
 import { SeverityChart } from "../components/severity-chart";
 import { StatCard } from "../components/stat-card";
 import { useRepoDetail } from "../hooks/use-repo-detail";
-import { createTrivyIgnoreRecord } from "../hooks/use-trivy-ignores";
+import { createTrivyIgnoreRecord, fetchTrivyIgnores } from "../hooks/use-trivy-ignores";
 import { fetchVulnerabilityDetail } from "../hooks/use-vulnerabilities";
+import type { TrivyIgnoreRow } from "../services/trivy-ignore";
 import type { RepositoryDetailResponse, VulnerabilityDetailResponse, VulnerabilityWithRelations } from "../services/types";
 import { filterVulnerabilitiesByGroup } from "../utils/filter-vulnerabilities-by-group";
-import { applyIgnoreSubmitResult, openIgnoreModalState, submitIgnoreFlow } from "../utils/ignore-vulnerability-flow";
+import { applyIgnoreSubmitResult, openIgnoreModalState, submitIgnoreFlowAndRefresh } from "../utils/ignore-vulnerability-flow";
 import { paginateList } from "../utils/paginate-list";
 
 function parseRepositoryId(value: string | undefined): number | null {
@@ -114,6 +115,176 @@ function formatScore(score: number | null): string {
   return score === null ? "-" : score.toFixed(1);
 }
 
+export function formatIgnoreDate(raw: string | null): string {
+  if (!raw) {
+    return "-";
+  }
+
+  const parsed = new Date(raw);
+  if (Number.isNaN(parsed.getTime())) {
+    return raw;
+  }
+
+  return parsed.toLocaleString();
+}
+
+export function resolveIgnoreRuleStatus(expiresAt: string | null, nowMs: number = Date.now()): "Active" | "Expired" {
+  if (!expiresAt) {
+    return "Active";
+  }
+
+  const expiresMs = new Date(expiresAt).getTime();
+  if (!Number.isFinite(expiresMs)) {
+    return "Active";
+  }
+
+  return expiresMs < nowMs ? "Expired" : "Active";
+}
+
+export function formatIgnoreScopeAndTags(row: TrivyIgnoreRow): string {
+  if (row.scope === "selected_tags") {
+    const tags = row.tag_groups?.join(", ") || "";
+    return tags ? `Selected: ${tags}` : "Selected tags";
+  }
+
+  return "All tags";
+}
+
+export function buildRepositoryIgnoreSummary(rows: TrivyIgnoreRow[], nowMs: number = Date.now()): {
+  total: number;
+  global: number;
+  repository: number;
+  active: number;
+  expired: number;
+} {
+  let global = 0;
+  let repository = 0;
+  let active = 0;
+  let expired = 0;
+
+  for (const row of rows) {
+    if (row.repository_id === null) {
+      global += 1;
+    } else {
+      repository += 1;
+    }
+
+    const status = resolveIgnoreRuleStatus(row.expires_at, nowMs);
+    if (status === "Active") {
+      active += 1;
+    } else {
+      expired += 1;
+    }
+  }
+
+  return {
+    total: rows.length,
+    global,
+    repository,
+    active,
+    expired,
+  };
+}
+
+interface RepositoryIgnoreTrackingPanelProps {
+  items: TrivyIgnoreRow[];
+  loading: boolean;
+  error: string | null;
+  onRetry: () => void;
+}
+
+export function RepositoryIgnoreTrackingPanel({ items, loading, error, onRetry }: RepositoryIgnoreTrackingPanelProps) {
+  const summary = buildRepositoryIgnoreSummary(items);
+  const hasRows = items.length > 0;
+
+  return (
+    <section className="rounded-xl border border-slate-700 bg-slate-900/90 p-4 shadow-inner">
+      <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+        <h3 className="text-base font-semibold">Trivy Ignore Tracking</h3>
+        <a
+          className="rounded-lg bg-blue-600 px-3 py-1.5 text-sm font-semibold text-white transition hover:bg-blue-700"
+          href="/trivy-ignore"
+        >
+          Manage Full
+        </a>
+      </div>
+      <p className="mb-3 text-xs text-slate-400">Effective rules for this repo (Global + Repository).</p>
+
+      <div className="mb-3 flex flex-wrap gap-2 text-xs">
+        <span className="rounded-full border border-slate-600 bg-slate-950 px-2 py-1 text-slate-200">Total: {summary.total}</span>
+        <span className="rounded-full border border-slate-600 bg-slate-950 px-2 py-1 text-slate-200">Global: {summary.global}</span>
+        <span className="rounded-full border border-slate-600 bg-slate-950 px-2 py-1 text-slate-200">Repository: {summary.repository}</span>
+        <span className="rounded-full border border-emerald-700/60 bg-emerald-950/40 px-2 py-1 text-emerald-200">Active: {summary.active}</span>
+        <span className="rounded-full border border-amber-700/60 bg-amber-950/40 px-2 py-1 text-amber-200">Expired: {summary.expired}</span>
+      </div>
+
+      {loading && !error && <p className="py-2 text-sm text-slate-400">Loading ignore rules...</p>}
+      {error ? <ErrorBanner message={error} onRetry={onRetry} /> : null}
+      {!loading && !error && !hasRows && (
+        <p className="rounded-lg border border-slate-700 bg-slate-950/60 px-3 py-2 text-sm text-slate-300">
+          No ignore rules currently affect this repository.
+        </p>
+      )}
+
+      {!loading && !error && hasRows && (
+        <section className="overflow-x-auto rounded-lg border border-slate-700 bg-slate-950/60">
+          <table className="w-full table-fixed border-collapse text-sm">
+            <thead>
+              <tr className="border-b border-slate-700 text-left text-slate-300">
+                <th className="w-[180px] px-3 py-2">CVE</th>
+                <th className="w-[120px] px-3 py-2">Source</th>
+                <th className="w-[220px] px-3 py-2">Scope / Tags</th>
+                <th className="w-[170px] px-3 py-2">Reason</th>
+                <th className="w-[160px] px-3 py-2">Expires</th>
+                <th className="w-[160px] px-3 py-2">Created</th>
+                <th className="w-[100px] px-3 py-2">Status</th>
+              </tr>
+            </thead>
+            <tbody>
+              {items.map((row) => {
+                const status = resolveIgnoreRuleStatus(row.expires_at);
+                const expired = status === "Expired";
+
+                return (
+                  <tr key={row.id} className="border-b border-slate-800 last:border-0">
+                    <td className="px-3 py-2">
+                      <span className="block max-w-full truncate font-semibold" title={row.cve_id}>{row.cve_id}</span>
+                    </td>
+                    <td className="px-3 py-2">{row.repository_id === null ? "Global" : "Repository"}</td>
+                    <td className="px-3 py-2">
+                      <span className="block max-w-full truncate" title={formatIgnoreScopeAndTags(row)}>
+                        {formatIgnoreScopeAndTags(row)}
+                      </span>
+                    </td>
+                    <td className="px-3 py-2">
+                      <span className="block max-w-full truncate" title={row.reason || "-"}>
+                        {row.reason || "-"}
+                      </span>
+                    </td>
+                    <td className="px-3 py-2">{formatIgnoreDate(row.expires_at)}</td>
+                    <td className="px-3 py-2">{formatIgnoreDate(row.created_at)}</td>
+                    <td className="px-3 py-2">
+                      <span
+                        className={
+                          expired
+                            ? "rounded-full bg-amber-950 px-2 py-0.5 text-xs font-bold text-amber-200"
+                            : "rounded-full bg-emerald-950 px-2 py-0.5 text-xs font-bold text-emerald-200"
+                        }
+                      >
+                        {status}
+                      </span>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </section>
+      )}
+    </section>
+  );
+}
+
 export function RepositoryDetailContent({ data, loading, error, retry, state, onStateChange }: RepositoryDetailContentProps) {
   const navigate = useNavigate();
   const [drawerOpen, setDrawerOpen] = useState(false);
@@ -126,9 +297,13 @@ export function RepositoryDetailContent({ data, loading, error, retry, state, on
   const [ignoreBusy, setIgnoreBusy] = useState(false);
   const [ignoreError, setIgnoreError] = useState<string | null>(null);
   const [ignoreNotice, setIgnoreNotice] = useState<string | null>(null);
+  const [ignoreItems, setIgnoreItems] = useState<TrivyIgnoreRow[]>([]);
+  const [ignoreLoading, setIgnoreLoading] = useState(false);
+  const [ignoreLoadError, setIgnoreLoadError] = useState<string | null>(null);
   const [selectedGroup, setSelectedGroup] = useState<string | null>(null);
   const [vulnerabilityPage, setVulnerabilityPage] = useState(1);
   const [vulnerabilityLimit, setVulnerabilityLimit] = useState(10);
+  const ignoreLoadRequestId = useRef(0);
 
   const openDetail = useCallback(async (id: number) => {
     setDrawerOpen(true);
@@ -155,6 +330,36 @@ export function RepositoryDetailContent({ data, loading, error, retry, state, on
     return paginateList(filteredVulnerabilities, vulnerabilityPage, vulnerabilityLimit);
   }, [filteredVulnerabilities, vulnerabilityLimit, vulnerabilityPage]);
 
+  const refreshIgnores = useCallback(async (repositoryId: number | null | undefined) => {
+    if (!repositoryId || repositoryId <= 0) {
+      setIgnoreItems([]);
+      setIgnoreLoadError(null);
+      setIgnoreLoading(false);
+      return;
+    }
+
+    ignoreLoadRequestId.current += 1;
+    const requestId = ignoreLoadRequestId.current;
+    setIgnoreLoading(true);
+    setIgnoreLoadError(null);
+
+    try {
+      const rows = await fetchTrivyIgnores(fetch, repositoryId);
+      if (requestId === ignoreLoadRequestId.current) {
+        setIgnoreItems(rows);
+      }
+    } catch (err) {
+      if (requestId === ignoreLoadRequestId.current) {
+        setIgnoreItems([]);
+        setIgnoreLoadError(err instanceof Error ? err.message : "Failed to load repository ignores");
+      }
+    } finally {
+      if (requestId === ignoreLoadRequestId.current) {
+        setIgnoreLoading(false);
+      }
+    }
+  }, []);
+
   useEffect(() => {
     setVulnerabilityPage(1);
     setSelectedGroup(null);
@@ -163,6 +368,10 @@ export function RepositoryDetailContent({ data, loading, error, retry, state, on
   useEffect(() => {
     setVulnerabilityPage(1);
   }, [selectedGroup]);
+
+  useEffect(() => {
+    void refreshIgnores(data?.id);
+  }, [data?.id, refreshIgnores]);
 
   const onIgnoreRequest = useCallback((item: VulnerabilityWithRelations) => {
     const next = openIgnoreModalState({ item, previousNotice: ignoreNotice });
@@ -191,11 +400,14 @@ export function RepositoryDetailContent({ data, loading, error, retry, state, on
     setIgnoreError(null);
 
     try {
-      const result = await submitIgnoreFlow({
+      const result = await submitIgnoreFlowAndRefresh({
         target: ignoreTarget,
         reason: ignoreReason,
         expiresAt: ignoreExpiresAt,
         createIgnore: (payload) => createTrivyIgnoreRecord(fetch, payload),
+        refreshRepositoryIgnores: async (repositoryId) => {
+          await refreshIgnores(repositoryId);
+        },
       });
 
       const next = applyIgnoreSubmitResult({
@@ -218,7 +430,7 @@ export function RepositoryDetailContent({ data, loading, error, retry, state, on
     } finally {
       setIgnoreBusy(false);
     }
-  }, [ignoreTarget, ignoreBusy, ignoreReason, ignoreExpiresAt]);
+  }, [ignoreTarget, ignoreBusy, ignoreReason, ignoreExpiresAt, refreshIgnores]);
 
   return (
     <>
@@ -311,6 +523,15 @@ export function RepositoryDetailContent({ data, loading, error, retry, state, on
               </div>
             </section>
           )}
+
+          <RepositoryIgnoreTrackingPanel
+            items={ignoreItems}
+            loading={ignoreLoading}
+            error={ignoreLoadError}
+            onRetry={() => {
+              void refreshIgnores(data.id);
+            }}
+          />
 
           <section className="rounded-xl border border-slate-700 bg-slate-900/90 p-4 shadow-inner">
             <h3 className="mb-3 text-base font-semibold">Images in repository</h3>

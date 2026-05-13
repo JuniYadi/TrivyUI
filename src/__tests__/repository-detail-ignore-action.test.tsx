@@ -1,6 +1,12 @@
 import { describe, expect, mock, test } from "bun:test";
 import { renderToStaticMarkup } from "react-dom/server";
-import { RepositoryDetailContent } from "../routes/repository-detail";
+import {
+  buildRepositoryIgnoreSummary,
+  RepositoryDetailContent,
+  RepositoryIgnoreTrackingPanel,
+  resolveIgnoreRuleStatus,
+} from "../routes/repository-detail";
+import type { TrivyIgnoreRow } from "../services/trivy-ignore";
 import type { RepositoryDetailResponse, VulnerabilityWithRelations } from "../services/types";
 
 function sampleVulnerability(id: number, cveId: string): VulnerabilityWithRelations {
@@ -61,6 +67,33 @@ function sampleRepositoryDetailData(): RepositoryDetailResponse {
   };
 }
 
+function sampleIgnoreRows(): TrivyIgnoreRow[] {
+  return [
+    {
+      id: 1,
+      cve_id: "CVE-2026-1111",
+      repository_id: 1,
+      repository_name: "ghcr.io/acme/api",
+      scope: "all_tags",
+      reason: "accepted risk",
+      expires_at: null,
+      created_at: "2026-01-01T00:00:00.000Z",
+      tag_groups: [],
+    },
+    {
+      id: 2,
+      cve_id: "CVE-2026-2222",
+      repository_id: null,
+      repository_name: null,
+      scope: "selected_tags",
+      reason: null,
+      expires_at: "2026-01-01T00:00:00.000Z",
+      created_at: "2025-01-01T00:00:00.000Z",
+      tag_groups: ["dev-*", "stg-*"],
+    },
+  ];
+}
+
 describe("repository detail vulnerability ignore action", () => {
   test("renders Ignore action per vulnerability row", () => {
     const html = renderToStaticMarkup(
@@ -112,5 +145,60 @@ describe("repository detail vulnerability ignore action", () => {
 
     expect(retry).toHaveBeenCalledTimes(0);
     expect(onStateChange).toHaveBeenCalledTimes(0);
+  });
+
+  test("renders ignore tracking panel heading, link, and empty state", () => {
+    const html = renderToStaticMarkup(
+      <RepositoryDetailContent
+        data={sampleRepositoryDetailData()}
+        loading={false}
+        error={null}
+        retry={() => {}}
+        state="open"
+        onStateChange={() => {}}
+      />,
+    );
+
+    expect(html).toContain("Trivy Ignore Tracking");
+    expect(html).toContain('href="/trivy-ignore"');
+    expect(html).toContain("No ignore rules currently affect this repository.");
+  });
+});
+
+describe("repository ignore tracking helpers", () => {
+  test("computes summary counts from global and repository rows", () => {
+    const rows = sampleIgnoreRows();
+    const nowMs = new Date("2026-06-01T00:00:00.000Z").getTime();
+    const summary = buildRepositoryIgnoreSummary(rows, nowMs);
+
+    expect(summary).toEqual({
+      total: 2,
+      global: 1,
+      repository: 1,
+      active: 1,
+      expired: 1,
+    });
+  });
+
+  test("maps expires_at into active and expired status", () => {
+    const nowMs = new Date("2026-01-01T00:00:00.000Z").getTime();
+    expect(resolveIgnoreRuleStatus(null, nowMs)).toBe("Active");
+    expect(resolveIgnoreRuleStatus("2026-01-02T00:00:00.000Z", nowMs)).toBe("Active");
+    expect(resolveIgnoreRuleStatus("2025-12-31T23:59:59.000Z", nowMs)).toBe("Expired");
+  });
+});
+
+describe("repository ignore tracking panel rendering", () => {
+  test("renders source, scope/tags, and status values", () => {
+    const html = renderToStaticMarkup(
+      <RepositoryIgnoreTrackingPanel items={sampleIgnoreRows()} loading={false} error={null} onRetry={() => {}} />,
+    );
+
+    expect(html).toContain("Global");
+    expect(html).toContain("Repository");
+    expect(html).toContain("All tags");
+    expect(html).toContain("Selected: dev-*, stg-*");
+    expect(html).toContain("Active");
+    expect(html).toContain("Expired");
   });
 });
