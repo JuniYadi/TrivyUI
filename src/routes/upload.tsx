@@ -61,9 +61,23 @@ export function UploadPage() {
   const [isUploading, setIsUploading] = useState(false);
   const [progress, setProgress] = useState(0);
   const [files, setFiles] = useState<File[]>([]);
+  const [pastedJson, setPastedJson] = useState("");
   const [feedback, setFeedback] = useState<UploadFeedback | null>(null);
 
   const mode: UploadMode = files.length > 1 ? "batch" : "single";
+  const pastedJsonTrimmed = pastedJson.trim();
+  const isPastedJsonValid = useMemo(() => {
+    if (pastedJsonTrimmed.length === 0) {
+      return false;
+    }
+
+    try {
+      JSON.parse(pastedJsonTrimmed);
+      return true;
+    } catch {
+      return false;
+    }
+  }, [pastedJsonTrimmed]);
 
   const fileSummary = useMemo(() => {
     const totalBytes = files.reduce((sum, file) => sum + file.size, 0);
@@ -171,6 +185,69 @@ export function UploadPage() {
     }
   }
 
+  async function onUploadPastedJson() {
+    if (isUploading) {
+      return;
+    }
+
+    if (pastedJsonTrimmed.length === 0) {
+      setFeedback({
+        type: "error",
+        message: "Paste JSON content before uploading.",
+      });
+      return;
+    }
+
+    if (!isPastedJsonValid) {
+      setFeedback({
+        type: "error",
+        message: "Pasted content must be valid JSON.",
+      });
+      return;
+    }
+
+    const formData = new FormData();
+    const file = new File([pastedJsonTrimmed], "trivy-pasted.json", { type: "application/json" });
+    formData.set("file", file);
+
+    setIsUploading(true);
+    setFeedback(null);
+    setProgress(0);
+
+    try {
+      const response = await uploadWithProgress("/api/upload", formData, setProgress);
+      const payload = (await response.json()) as {
+        success: boolean;
+        data?: {
+          scan_result_id?: number;
+          vulnerability_count?: number;
+          package_count?: number;
+        };
+        error?: { code: string; message: string };
+      };
+
+      if (!response.ok || !payload.success) {
+        const code = payload.error?.code || "UPLOAD_FAILED";
+        const message = payload.error?.message || "Upload failed";
+        throw new Error(`${code}: ${message}`);
+      }
+
+      setFeedback({
+        type: "success",
+        message: `Pasted JSON uploaded (scan_result_id: ${payload.data?.scan_result_id ?? "n/a"}, vulnerabilities: ${payload.data?.vulnerability_count ?? 0}, packages: ${payload.data?.package_count ?? 0}).`,
+      });
+      setProgress(100);
+    } catch (error) {
+      setFeedback({
+        type: "error",
+        message: error instanceof Error ? error.message : "Unexpected upload error",
+      });
+    } finally {
+      setProgress(100);
+      setIsUploading(false);
+    }
+  }
+
   return (
       <AppShell
        activeRoute="/upload"
@@ -246,6 +323,50 @@ export function UploadPage() {
               {feedback.message}
             </div>
           )}
+
+          <div className="border-t border-slate-700 pt-4">
+            <h3 className="mb-0 text-base font-semibold">Paste JSON directly</h3>
+            <p className="mt-0 text-sm text-slate-400">
+              If your CI output cannot be downloaded as file, copy the JSON from CI logs/artifacts and paste it here. Only valid JSON is accepted.
+            </p>
+            <textarea
+              className="max-h-[7rem] min-h-[7rem] w-full overflow-y-auto rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 font-mono text-sm text-slate-200 outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-500/30"
+              placeholder='Paste full Trivy JSON here, e.g. {"SchemaVersion":2,"Results":[...]}'
+              value={pastedJson}
+              rows={4}
+              onChange={(event) => {
+                setPastedJson(event.target.value);
+                if (feedback?.type === "error") {
+                  setFeedback(null);
+                }
+              }}
+              spellCheck={false}
+            />
+            {pastedJsonTrimmed.length > 0 && !isPastedJsonValid && (
+              <p className="m-0 mt-2 text-sm font-semibold text-red-300">Invalid JSON format. Please paste valid JSON only.</p>
+            )}
+            {pastedJsonTrimmed.length > 0 && isPastedJsonValid && (
+              <p className="m-0 mt-2 text-sm font-semibold text-emerald-300">Valid JSON format detected.</p>
+            )}
+            <div className="mt-3 flex flex-wrap gap-2">
+              <button
+                type="button"
+                className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-blue-700 disabled:opacity-40"
+                onClick={onUploadPastedJson}
+                disabled={!isPastedJsonValid || isUploading}
+              >
+                {isUploading ? "Uploading..." : "Upload Pasted JSON"}
+              </button>
+              <button
+                type="button"
+                className="rounded-lg border border-slate-700 bg-slate-950 px-4 py-2 text-sm font-semibold text-slate-300 transition hover:border-slate-500 disabled:opacity-40"
+                onClick={() => setPastedJson("")}
+                disabled={isUploading || pastedJson.length === 0}
+              >
+                Clear
+              </button>
+            </div>
+          </div>
         </section>
 
         <section className="rounded-xl border border-slate-700 bg-slate-900/90 p-4 shadow-inner">
