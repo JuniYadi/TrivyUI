@@ -12,6 +12,7 @@ import { createApiKeysHandler } from "./routes/api/api-keys";
 import { createEmailTemplatesHandler } from "./routes/api/email-templates";
 import { createTrivyIgnoreGenerateHandler } from "./routes/api/trivy-ignore-generate";
 import { createTrivyIgnoreHandler } from "./routes/api/trivy-ignore";
+import { createVulnerabilityCatalogHandler } from "./routes/api/vulnerability-catalog";
 import { enforcePostApiKeyAuth } from "./services/api-key-auth";
 import { registerBunCronJobs } from "./services/scheduled-notifications";
 import homepage from "./index.html";
@@ -30,6 +31,7 @@ const apiKeysHandler = createApiKeysHandler(db);
 const emailTemplatesHandler = createEmailTemplatesHandler(db);
 const trivyIgnoreHandler = createTrivyIgnoreHandler(db);
 const trivyIgnoreGenerateHandler = createTrivyIgnoreGenerateHandler(db);
+const vulnerabilityCatalogHandler = createVulnerabilityCatalogHandler(db);
 const HTML_PATH = new URL("./index.html", import.meta.url);
 
 export const SPA_ROUTES = {
@@ -200,6 +202,16 @@ export async function handleRequest(request: Request): Promise<Response> {
     }
 
     return trivyIgnoreGenerateHandler(request);
+  }
+
+  if (
+    pathname.startsWith("/api/vulnerability-catalog/")
+  ) {
+    if (request.method !== "GET" && request.method !== "POST") {
+      return methodNotAllowed(request.method, "/api/vulnerability-catalog/:id");
+    }
+
+    return vulnerabilityCatalogHandler(request);
   }
 
   if (pathname.startsWith("/api/")) {

@@ -129,6 +129,27 @@ export function buildSchemaStatements(dialect: DatabaseDriver["dialect"]): strin
     )
   `);
 
+  statements.push(`
+    CREATE TABLE IF NOT EXISTS vulnerability_catalog (
+      vuln_id ${textColumn(dialect, 128)} PRIMARY KEY,
+      vuln_type ${textColumn(dialect, 16)} NOT NULL CHECK(vuln_type IN ('CVE', 'GHSA')),
+      verification_status ${textColumn(dialect, 16)} NOT NULL CHECK(verification_status IN ('verified', 'invalid', 'unverified')),
+      source ${textColumn(dialect, 32)},
+      aliases_json TEXT NOT NULL DEFAULT '[]',
+      severity ${textColumn(dialect, 16)},
+      cvss ${scoreType(dialect)},
+      summary TEXT,
+      description TEXT,
+      references_json TEXT NOT NULL DEFAULT '[]',
+      published_at ${ts},
+      modified_at ${ts},
+      fetched_at ${ts} NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      last_error TEXT,
+      created_at ${ts} DEFAULT CURRENT_TIMESTAMP,
+      updated_at ${ts} DEFAULT CURRENT_TIMESTAMP
+    )
+  `);
+
   const createIndex = (name: string, column: string): string => {
     if (dialect === "mysql") {
       return `CREATE INDEX ${name} ON vulnerabilities(${column})`;
@@ -167,6 +188,8 @@ export function buildSchemaStatements(dialect: DatabaseDriver["dialect"]): strin
   statements.push(createIndexIfMissing("idx_trivy_ignores_cve_id", "trivy_ignores", "cve_id"));
   statements.push(createIndexIfMissing("idx_trivy_ignores_repository_id", "trivy_ignores", "repository_id"));
   statements.push(createIndexIfMissing("idx_trivy_ignores_expires_at", "trivy_ignores", "expires_at"));
+  statements.push(createIndexIfMissing("idx_vulnerability_catalog_status", "vulnerability_catalog", "verification_status"));
+  statements.push(createIndexIfMissing("idx_vulnerability_catalog_fetched_at", "vulnerability_catalog", "fetched_at"));
 
   statements.push(`
     CREATE TABLE IF NOT EXISTS _health_check (

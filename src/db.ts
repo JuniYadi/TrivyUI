@@ -151,6 +151,28 @@ const FULL_SCHEMA_SQL = `
   CREATE INDEX IF NOT EXISTS idx_trivy_ignores_repository_id ON trivy_ignores(repository_id);
   CREATE INDEX IF NOT EXISTS idx_trivy_ignores_expires_at ON trivy_ignores(expires_at);
 
+  CREATE TABLE IF NOT EXISTS vulnerability_catalog (
+    vuln_id TEXT PRIMARY KEY,
+    vuln_type TEXT NOT NULL CHECK(vuln_type IN ('CVE', 'GHSA')),
+    verification_status TEXT NOT NULL CHECK(verification_status IN ('verified', 'invalid', 'unverified')),
+    source TEXT,
+    aliases_json TEXT NOT NULL DEFAULT '[]',
+    severity TEXT,
+    cvss REAL,
+    summary TEXT,
+    description TEXT,
+    references_json TEXT NOT NULL DEFAULT '[]',
+    published_at DATETIME,
+    modified_at DATETIME,
+    fetched_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    last_error TEXT,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_vulnerability_catalog_status ON vulnerability_catalog(verification_status);
+  CREATE INDEX IF NOT EXISTS idx_vulnerability_catalog_fetched_at ON vulnerability_catalog(fetched_at);
+
   CREATE TABLE IF NOT EXISTS _health_check (
     id INTEGER PRIMARY KEY,
     msg TEXT NOT NULL DEFAULT 'ok'
@@ -171,6 +193,7 @@ export function initFullSchema(db: TrivyUiDb): void {
   db.exec(FULL_SCHEMA_SQL);
   evolveImagesSchemaSqlite(db);
   evolveTrivyIgnoreSchemaSqlite(db);
+  evolveVulnerabilityCatalogSchemaSqlite(db);
   db.query(
     `
       INSERT INTO email_templates (template_key, name, subject, html_body, text_body, enabled)
@@ -326,6 +349,34 @@ function evolveImagesSchemaSqlite(db: TrivyUiDb): void {
   db.exec("UPDATE images SET repository_base = name WHERE repository_base IS NULL OR repository_base = '';");
   db.exec("UPDATE images SET tag_group = 'ungrouped' WHERE tag_group IS NULL OR tag_group = '';");
   db.exec("UPDATE images SET tag_group = tag WHERE tag_group = 'ungrouped' AND tag IS NOT NULL AND tag <> '';");
+}
+
+function evolveVulnerabilityCatalogSchemaSqlite(db: TrivyUiDb): void {
+  if (!tableExists(db, "vulnerability_catalog")) {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS vulnerability_catalog (
+        vuln_id TEXT PRIMARY KEY,
+        vuln_type TEXT NOT NULL CHECK(vuln_type IN ('CVE', 'GHSA')),
+        verification_status TEXT NOT NULL CHECK(verification_status IN ('verified', 'invalid', 'unverified')),
+        source TEXT,
+        aliases_json TEXT NOT NULL DEFAULT '[]',
+        severity TEXT,
+        cvss REAL,
+        summary TEXT,
+        description TEXT,
+        references_json TEXT NOT NULL DEFAULT '[]',
+        published_at DATETIME,
+        modified_at DATETIME,
+        fetched_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        last_error TEXT,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+  }
+
+  db.exec("CREATE INDEX IF NOT EXISTS idx_vulnerability_catalog_status ON vulnerability_catalog(verification_status);");
+  db.exec("CREATE INDEX IF NOT EXISTS idx_vulnerability_catalog_fetched_at ON vulnerability_catalog(fetched_at);");
 }
 
 function backfillImageTagGroups(db: TrivyUiDb): void {
