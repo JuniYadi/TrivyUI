@@ -16,6 +16,35 @@ function createTestDb() {
   return db;
 }
 
+function createUpstreamSuccessFetcher(): typeof fetch {
+  return (async (input: RequestInfo | URL) => {
+    const url = String(input);
+    if (url.includes("api.osv.dev")) {
+      const id = decodeURIComponent(url.split("/").pop() || "");
+      return new Response(
+        JSON.stringify({
+          id,
+          aliases: [],
+          summary: "mock advisory",
+          details: "mock details",
+          references: [],
+          database_specific: { severity: "HIGH" },
+          published: "2026-01-01T00:00:00.000Z",
+          modified: "2026-01-02T00:00:00.000Z",
+        }),
+      );
+    }
+
+    return new Response(JSON.stringify({ message: "not found" }), { status: 404 });
+  }) as typeof fetch;
+}
+
+function createUpstreamUnavailableFetcher(): typeof fetch {
+  return (async () => {
+    throw new Error("network down");
+  }) as typeof fetch;
+}
+
 afterEach(() => {
   for (const db of dbs.splice(0)) {
     db.close();
@@ -31,7 +60,7 @@ afterEach(() => {
 describe("trivy ignore management API", () => {
   test("POST creates an ignore row and GET lists it", async () => {
     const db = createTestDb();
-    const handler = createTrivyIgnoreHandler(db);
+    const handler = createTrivyIgnoreHandler(db, createUpstreamSuccessFetcher());
     const repoId = upsertRepository(db, "ghcr.io/acme/api");
 
     const response = await handler(
@@ -39,7 +68,7 @@ describe("trivy ignore management API", () => {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
-          cve_id: "CVE-2026-APP",
+          cve_id: "CVE-2026-1001",
           repository_id: repoId,
           scope: "all_tags",
           reason: "ui management",
@@ -51,14 +80,14 @@ describe("trivy ignore management API", () => {
     expect(response.status).toBe(201);
     expect(body.success).toBe(true);
     expect(body.data.id).toBeGreaterThan(0);
-    expect(body.data.cve_id).toBe("CVE-2026-APP");
+    expect(body.data.cve_id).toBe("CVE-2026-1001");
 
     const listResponse = await handler(new Request("http://localhost/api/trivy-ignores", { method: "GET" }));
     const listBody = (await listResponse.json()) as { success: boolean; data: Array<{ id: number; cve_id: string; repository_id: number | null }> };
 
     expect(listResponse.status).toBe(200);
     expect(listBody.success).toBe(true);
-    expect(listBody.data.some((row) => row.id === body.data.id && row.cve_id === "CVE-2026-APP" && row.repository_id === repoId)).toBe(true);
+    expect(listBody.data.some((row) => row.id === body.data.id && row.cve_id === "CVE-2026-1001" && row.repository_id === repoId)).toBe(true);
   });
 
   test("GET supports repository filter", async () => {
@@ -109,7 +138,7 @@ describe("trivy ignore management API", () => {
 
   test("POST rejects selected_tags without tag groups", async () => {
     const db = createTestDb();
-    const handler = createTrivyIgnoreHandler(db);
+    const handler = createTrivyIgnoreHandler(db, createUpstreamSuccessFetcher());
 
     const response = await handler(
       new Request("http://localhost/api/trivy-ignores", {
@@ -127,6 +156,28 @@ describe("trivy ignore management API", () => {
     expect(response.status).toBe(400);
     expect(body.success).toBe(false);
     expect(body.error.code).toBe("TAG_GROUP_REQUIRED");
+  });
+
+  test("POST allows create when upstream verification is unavailable", async () => {
+    const db = createTestDb();
+    const handler = createTrivyIgnoreHandler(db, createUpstreamUnavailableFetcher());
+
+    const response = await handler(
+      new Request("http://localhost/api/trivy-ignores", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          cve_id: "CVE-2026-5001",
+          repository_id: null,
+          scope: "all_tags",
+        }),
+      }),
+    );
+
+    const body = (await response.json()) as { success: boolean; data: { verification_status?: string } };
+    expect(response.status).toBe(201);
+    expect(body.success).toBe(true);
+    expect(body.data.verification_status).toBe("unverified");
   });
 
   test("DELETE removes ignores and returns not found for missing id", async () => {
