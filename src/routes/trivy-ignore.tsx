@@ -254,16 +254,16 @@ export function TrivyIgnoreListPanel({
       {!loading && !error && !hasRows && <EmptyState />}
       {!loading && !error && hasRows && (
         <section className="overflow-x-auto rounded-lg border border-slate-700 bg-slate-950/60">
-          <table className="w-full table-fixed border-collapse text-sm">
+          <table className="w-full min-w-[1360px] table-fixed border-collapse text-sm">
             <thead>
               <tr className="border-b border-slate-700 text-left text-slate-300">
                 <th className="w-[150px] px-3 py-2">Vulnerability ID</th>
                 <th className="w-[210px] px-3 py-2">Repository</th>
                 <th className="w-[220px] px-3 py-2">Scope / Tags</th>
                 <th className="w-[180px] px-3 py-2">Reason</th>
-                <th className="w-[110px] px-3 py-2">Detail</th>
-                <th className="w-[150px] px-3 py-2">Expires</th>
-                <th className="w-[150px] px-3 py-2">Created</th>
+                <th className="w-[120px] px-3 py-2 whitespace-nowrap">Detail</th>
+                <th className="w-[160px] px-3 py-2 whitespace-nowrap">Expires</th>
+                <th className="w-[170px] px-3 py-2 whitespace-nowrap">Created</th>
                 <th className="w-[170px] px-3 py-2">Action</th>
               </tr>
             </thead>
@@ -322,11 +322,11 @@ export function TrivyIgnoreListPanel({
                         {row.reason || "-"}
                       </span>
                     </td>
-                    <td className="px-3 py-2">
+                    <td className="px-3 py-2 whitespace-nowrap">
                       <span className={`inline-flex rounded-full border px-2 py-0.5 text-xs font-semibold uppercase ${statusClass}`}>{status}</span>
                     </td>
-                    <td className="px-3 py-2">{formatDate(row.expires_at)}</td>
-                    <td className="px-3 py-2">{formatDate(row.created_at)}</td>
+                    <td className="px-3 py-2 whitespace-nowrap">{formatDate(row.expires_at)}</td>
+                    <td className="px-3 py-2 whitespace-nowrap">{formatDate(row.created_at)}</td>
                     <td className="px-3 py-2">
                       <div className="flex flex-wrap gap-2">
                         <button
@@ -339,7 +339,7 @@ export function TrivyIgnoreListPanel({
                         </button>
                         <button
                           type="button"
-                          className="rounded border border-slate-700 px-2 py-1 text-xs hover:bg-slate-800 disabled:opacity-50"
+                          className="rounded border border-rose-700/70 bg-rose-950/30 px-2 py-1 text-xs text-rose-200 hover:bg-rose-900/40 disabled:opacity-50"
                           onClick={() => onDelete(row.id)}
                           disabled={deletingId === row.id}
                         >
