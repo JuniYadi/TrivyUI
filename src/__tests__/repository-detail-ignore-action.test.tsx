@@ -2,12 +2,14 @@ import { describe, expect, mock, test } from "bun:test";
 import { renderToStaticMarkup } from "react-dom/server";
 import {
   buildRepositoryIgnoreSummary,
+  fetchRepositoryIgnoreCveDetail,
+  pickRepositoryIgnoreCveCandidate,
   RepositoryDetailContent,
   RepositoryIgnoreTrackingPanel,
   resolveIgnoreRuleStatus,
 } from "../routes/repository-detail";
 import type { TrivyIgnoreRow } from "../services/trivy-ignore";
-import type { RepositoryDetailResponse, VulnerabilityWithRelations } from "../services/types";
+import type { RepositoryDetailResponse, VulnerabilityDetailResponse, VulnerabilityWithRelations } from "../services/types";
 
 function sampleVulnerability(id: number, cveId: string): VulnerabilityWithRelations {
   return {
@@ -191,7 +193,13 @@ describe("repository ignore tracking helpers", () => {
 describe("repository ignore tracking panel rendering", () => {
   test("renders source, scope/tags, and status values", () => {
     const html = renderToStaticMarkup(
-      <RepositoryIgnoreTrackingPanel items={sampleIgnoreRows()} loading={false} error={null} onRetry={() => {}} />,
+      <RepositoryIgnoreTrackingPanel
+        items={sampleIgnoreRows()}
+        loading={false}
+        error={null}
+        onRetry={() => {}}
+        onOpenCveDetail={() => {}}
+      />,
     );
 
     expect(html).toContain("Global");
@@ -200,5 +208,99 @@ describe("repository ignore tracking panel rendering", () => {
     expect(html).toContain("Selected: dev-*, stg-*");
     expect(html).toContain("Active");
     expect(html).toContain("Expired");
+  });
+
+  test("renders CVE values as actionable buttons", () => {
+    const html = renderToStaticMarkup(
+      <RepositoryIgnoreTrackingPanel
+        items={sampleIgnoreRows()}
+        loading={false}
+        error={null}
+        onRetry={() => {}}
+        onOpenCveDetail={() => {}}
+      />,
+    );
+
+    expect(html).toContain("aria-label=\"Open CVE detail CVE-2026-1111\"");
+    expect(html).toContain("text-blue-300");
+    expect(html).toContain("<button");
+  });
+});
+
+describe("repository ignore tracking CVE detail helpers", () => {
+  test("pickRepositoryIgnoreCveCandidate prefers repository match", () => {
+    const another = {
+      ...sampleVulnerability(100, "CVE-2026-3333"),
+      repository: { id: 8, name: "ghcr.io/acme/other" },
+      image: { ...sampleVulnerability(100, "CVE-2026-3333").image, repository_id: 8, repository_name: "ghcr.io/acme/other" },
+    };
+
+    const picked = pickRepositoryIgnoreCveCandidate([another, sampleVulnerability(1, "CVE-2026-1111")], "ghcr.io/acme/api");
+
+    expect(picked?.id).toBe(1);
+  });
+
+  test("fetchRepositoryIgnoreCveDetail falls back to cve-only search", async () => {
+    const requests: string[] = [];
+    const detailPayload: VulnerabilityDetailResponse = sampleVulnerability(1, "CVE-2026-1111");
+
+    const fetcher = (async (input: RequestInfo | URL) => {
+      const url = String(input);
+      requests.push(url);
+
+      if (url.includes("/api/vulnerabilities?") && url.includes("repository=")) {
+        return new Response(
+          JSON.stringify({
+            success: true,
+            data: {
+              items: [],
+              pagination: { page: 1, limit: 50, total_items: 0, total_pages: 0 },
+            },
+          }),
+        );
+      }
+
+      if (url.includes("/api/vulnerabilities?") && url.includes("cve_id=CVE-2026-1111")) {
+        return new Response(
+          JSON.stringify({
+            success: true,
+            data: {
+              items: [sampleVulnerability(1, "CVE-2026-1111")],
+              pagination: { page: 1, limit: 50, total_items: 1, total_pages: 1 },
+            },
+          }),
+        );
+      }
+
+      if (url.endsWith("/api/vulnerabilities/1")) {
+        return new Response(JSON.stringify({ success: true, data: detailPayload }));
+      }
+
+      return new Response(JSON.stringify({ success: false, error: { message: "not found" } }), { status: 404 });
+    }) as typeof fetch;
+
+    const detail = await fetchRepositoryIgnoreCveDetail("CVE-2026-1111", "ghcr.io/acme/missing", fetcher);
+
+    expect(detail.id).toBe(1);
+    expect(requests[0]).toContain("repository=ghcr.io%2Facme%2Fmissing");
+    expect(requests[1]).toContain("cve_id=CVE-2026-1111");
+    expect(requests[2]).toContain("/api/vulnerabilities/1");
+  });
+
+  test("fetchRepositoryIgnoreCveDetail throws if no candidate is found", async () => {
+    const fetcher = (async () =>
+      new Response(
+        JSON.stringify({
+          success: true,
+          data: {
+            items: [],
+            pagination: { page: 1, limit: 50, total_items: 0, total_pages: 0 },
+          },
+        }),
+      )) as typeof fetch;
+
+    await expect(fetchRepositoryIgnoreCveDetail("CVE-2026-9999", undefined, fetcher)).rejects.toThrow(
+      "No vulnerability detail found for this CVE.",
+    );
   });
 });
