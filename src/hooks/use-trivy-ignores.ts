@@ -65,6 +65,11 @@ export interface CreateTrivyIgnorePayload {
   expires_at?: string;
 }
 
+export interface TrivyIgnoreCreateResponse extends TrivyIgnoreRow {
+  verification_status?: "verified" | "invalid" | "unverified" | "missing";
+  verification_notice?: string;
+}
+
 function parseError(message: string): string {
   return message || "Request failed";
 }
@@ -124,14 +129,14 @@ export async function createTrivyIgnoreRecord(
   fetcher: typeof fetch,
   payload: CreateTrivyIgnorePayload,
   apiKey?: string,
-): Promise<TrivyIgnoreRow> {
+): Promise<TrivyIgnoreCreateResponse> {
   const response = await fetcher("/api/trivy-ignores", {
     method: "POST",
     headers: { "content-type": "application/json", ...buildTrivyIgnoreAuthHeaders(apiKey) },
     body: JSON.stringify(payload),
   });
 
-  return parseResponse<TrivyIgnoreRow>(response, "Failed to create trivy ignore");
+  return parseResponse<TrivyIgnoreCreateResponse>(response, "Failed to create trivy ignore");
 }
 
 export async function deleteTrivyIgnoreRecord(fetcher: typeof fetch = fetch, id: number, apiKey?: string): Promise<void> {
@@ -173,7 +178,7 @@ export function useTrivyIgnores(repoFilter?: number | null, apiKey?: string) {
     void load();
   }, [load]);
 
-  const create = useCallback(async (payload: CreateTrivyIgnorePayload): Promise<TrivyIgnoreRow> => {
+  const create = useCallback(async (payload: CreateTrivyIgnorePayload): Promise<TrivyIgnoreCreateResponse> => {
     const created = await createTrivyIgnoreRecord(fetch, payload, apiKey);
     await load();
     return created;

@@ -1,12 +1,18 @@
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { AppShell } from "../components/app-shell";
-import { CveDetailDrawer } from "../components/cve-detail-drawer";
+import { CveDetailDrawer, type CveDetailDrawerData } from "../components/cve-detail-drawer";
 import { EmptyState } from "../components/empty-state";
 import { ErrorBanner } from "../components/error-banner";
 import { useTrivyIgnores, validateResponseErrorMessage } from "../hooks/use-trivy-ignores";
+import {
+  fetchVulnerabilityCatalog,
+  fetchVulnerabilityCatalogFromUpstream,
+  type VulnerabilityCatalogResponse,
+  type VulnerabilityCatalogStatus,
+} from "../hooks/use-vulnerability-catalog";
 import { fetchVulnerabilityDetail } from "../hooks/use-vulnerabilities";
 import type { TrivyIgnoreRow } from "../services/trivy-ignore";
-import type { VulnerabilityDetailResponse, VulnerabilityListResponse, VulnerabilityWithRelations } from "../services/types";
+import type { VulnerabilityListResponse, VulnerabilityWithRelations } from "../services/types";
 import { formatRepositoryName } from "../utils/format-repository-name";
 
 interface ApiSuccess<T> {
@@ -72,6 +78,45 @@ export function pickTrivyIgnoreCveCandidate(items: VulnerabilityWithRelations[],
   return items[0] || null;
 }
 
+function toDrawerDataFromVulnerability(item: VulnerabilityWithRelations): CveDetailDrawerData {
+  return {
+    cve_id: item.cve_id,
+    severity: item.severity,
+    package_name: item.package_name,
+    installed_version: item.installed_version,
+    fixed_version: item.fixed_version,
+    score: item.score,
+    repository: item.repository,
+    image: item.image,
+    title: item.title,
+    description: item.description,
+    source_label: "scan",
+  };
+}
+
+function toDrawerDataFromCatalog(item: VulnerabilityCatalogResponse): CveDetailDrawerData {
+  const aliasesList = Array.isArray(item.aliases) ? item.aliases : [];
+  const referencesList = Array.isArray(item.references) ? item.references : [];
+  const aliases = aliasesList.length > 0 ? `Aliases: ${aliasesList.join(", ")}` : "";
+  const refs = referencesList.length > 0 ? referencesList.map((ref) => `- ${ref}`).join("\n") : "";
+  const fallbackDescription = [item.description, aliases, refs].filter((chunk) => Boolean(chunk)).join("\n\n");
+
+  return {
+    cve_id: item.vuln_id,
+    severity: item.severity,
+    package_name: null,
+    installed_version: null,
+    fixed_version: null,
+    score: item.cvss,
+    repository: null,
+    image: null,
+    title: item.summary,
+    description: fallbackDescription || item.last_error || "No description available",
+    source_label: item.source,
+    verification_status: item.verification_status,
+  };
+}
+
 async function fetchVulnerabilityMatches(
   cveId: string,
   repositoryName?: string | null,
@@ -110,25 +155,39 @@ export async function fetchTrivyIgnoreCveDetail(
   cveId: string,
   repositoryName?: string | null,
   fetcher: typeof fetch = fetch,
-): Promise<VulnerabilityDetailResponse> {
-  const normalizedCve = cveId.trim();
-  if (!normalizedCve) {
-    throw new Error("CVE ID is required");
+): Promise<CveDetailDrawerData> {
+  const normalizedVuln = cveId.trim();
+  if (!normalizedVuln) {
+    throw new Error("Vulnerability ID is required");
   }
 
-  const scopedItems = repositoryName?.trim() ? await fetchVulnerabilityMatches(normalizedCve, repositoryName, fetcher) : [];
+  const scopedItems = repositoryName?.trim() ? await fetchVulnerabilityMatches(normalizedVuln, repositoryName, fetcher) : [];
   let candidate = pickTrivyIgnoreCveCandidate(scopedItems, repositoryName);
 
   if (!candidate) {
-    const fallbackItems = await fetchVulnerabilityMatches(normalizedCve, undefined, fetcher);
+    const fallbackItems = await fetchVulnerabilityMatches(normalizedVuln, undefined, fetcher);
     candidate = pickTrivyIgnoreCveCandidate(fallbackItems);
   }
 
-  if (!candidate) {
-    throw new Error("No vulnerability detail found for this CVE.");
+  if (candidate) {
+    const detail = await fetchVulnerabilityDetail(candidate.id, fetcher);
+    return toDrawerDataFromVulnerability(detail);
   }
 
-  return fetchVulnerabilityDetail(candidate.id, fetcher);
+  try {
+    const catalogDetail = await fetchVulnerabilityCatalog(normalizedVuln, fetcher);
+    if (
+      catalogDetail.verification_status !== "verified" &&
+      catalogDetail.verification_status !== "invalid" &&
+      catalogDetail.verification_status !== "unverified"
+    ) {
+      throw new Error("No vulnerability detail found for this vulnerability ID.");
+    }
+
+    return toDrawerDataFromCatalog(catalogDetail);
+  } catch {
+    throw new Error("No vulnerability detail found for this vulnerability ID.");
+  }
 }
 
 interface TrivyIgnoreRepository {
@@ -142,10 +201,13 @@ interface TrivyIgnoreListPanelProps {
   loading: boolean;
   error: string | null;
   items: TrivyIgnoreRow[];
+  statusByVulnId: Record<string, VulnerabilityCatalogStatus>;
+  fetchingByVulnId: Record<string, boolean>;
   deletingId: number | null;
   onRepoFilterChange: (repoFilter: string) => void;
   onRetry: () => void;
   onDelete: (id: number) => void;
+  onFetchDetail: (row: TrivyIgnoreRow) => void;
   onOpenCveDetail: (row: TrivyIgnoreRow) => void;
 }
 
@@ -155,10 +217,13 @@ export function TrivyIgnoreListPanel({
   loading,
   error,
   items,
+  statusByVulnId,
+  fetchingByVulnId,
   deletingId,
   onRepoFilterChange,
   onRetry,
   onDelete,
+  onFetchDetail,
   onOpenCveDetail,
 }: TrivyIgnoreListPanelProps) {
   const hasRows = items.length > 0;
@@ -192,73 +257,99 @@ export function TrivyIgnoreListPanel({
           <table className="w-full table-fixed border-collapse text-sm">
             <thead>
               <tr className="border-b border-slate-700 text-left text-slate-300">
-                <th className="w-[150px] px-3 py-2">CVE ID</th>
+                <th className="w-[150px] px-3 py-2">Vulnerability ID</th>
                 <th className="w-[210px] px-3 py-2">Repository</th>
                 <th className="w-[220px] px-3 py-2">Scope / Tags</th>
                 <th className="w-[180px] px-3 py-2">Reason</th>
+                <th className="w-[110px] px-3 py-2">Detail</th>
                 <th className="w-[150px] px-3 py-2">Expires</th>
                 <th className="w-[150px] px-3 py-2">Created</th>
-                <th className="w-[90px] px-3 py-2">Action</th>
+                <th className="w-[170px] px-3 py-2">Action</th>
               </tr>
             </thead>
             <tbody>
-              {items.map((row) => (
-                <tr key={row.id} className="border-b border-slate-800 last:border-0">
-                  <td className="px-3 py-2">
-                    <button
-                      type="button"
-                      className="max-w-full truncate font-semibold text-blue-300 hover:text-blue-200 hover:underline"
-                      title={row.cve_id}
-                      onClick={() => onOpenCveDetail(row)}
-                    >
-                      {row.cve_id}
-                    </button>
-                  </td>
-                  <td className="px-3 py-2">
-                    {row.repository_id === null || !row.repository_name ? (
-                      <span className="block max-w-full truncate" title={repositoryLabel(row)}>
-                        {repositoryLabel(row)}
+              {items.map((row) => {
+                const status = statusByVulnId[row.cve_id] || "missing";
+                const statusClass =
+                  status === "verified"
+                    ? "border-emerald-600/50 bg-emerald-950/30 text-emerald-200"
+                    : status === "unverified"
+                      ? "border-amber-600/50 bg-amber-950/30 text-amber-200"
+                      : status === "invalid"
+                        ? "border-rose-600/50 bg-rose-950/30 text-rose-200"
+                        : "border-slate-600/50 bg-slate-900/70 text-slate-300";
+
+                return (
+                  <tr key={row.id} className="border-b border-slate-800 last:border-0">
+                    <td className="px-3 py-2">
+                      <button
+                        type="button"
+                        className="max-w-full truncate font-semibold text-blue-300 hover:text-blue-200 hover:underline"
+                        title={row.cve_id}
+                        onClick={() => onOpenCveDetail(row)}
+                      >
+                        {row.cve_id}
+                      </button>
+                    </td>
+                    <td className="px-3 py-2">
+                      {row.repository_id === null || !row.repository_name ? (
+                        <span className="block max-w-full truncate" title={repositoryLabel(row)}>
+                          {repositoryLabel(row)}
+                        </span>
+                      ) : (
+                        <a
+                          className="block max-w-full truncate text-blue-400 hover:text-blue-300 hover:underline"
+                          href={toRepositoryUrl(row.repository_name)}
+                          title={row.repository_name}
+                        >
+                          {formatRepositoryName(row.repository_name, 28)}
+                        </a>
+                      )}
+                    </td>
+                    <td className="px-3 py-2">
+                      <div className="truncate" title={ScopeLabel(row.scope)}>{ScopeLabel(row.scope)}</div>
+                      {row.scope === "selected_tags" && (
+                        <div
+                          className="mt-1 truncate text-xs text-slate-400"
+                          title={(row.tag_groups || []).join(", ") || "-"}
+                        >
+                          {(row.tag_groups || []).join(", ") || "-"}
+                        </div>
+                      )}
+                    </td>
+                    <td className="px-3 py-2">
+                      <span className="block truncate" title={row.reason || "-"}>
+                        {row.reason || "-"}
                       </span>
-                    ) : (
-                      <a
-                        className="block max-w-full truncate text-blue-400 hover:text-blue-300 hover:underline"
-                        href={toRepositoryUrl(row.repository_name)}
-                        title={row.repository_name}
-                      >
-                        {formatRepositoryName(row.repository_name, 28)}
-                      </a>
-                    )}
-                  </td>
-                  <td className="px-3 py-2">
-                    <div className="truncate" title={ScopeLabel(row.scope)}>{ScopeLabel(row.scope)}</div>
-                    {row.scope === "selected_tags" && (
-                      <div
-                        className="mt-1 truncate text-xs text-slate-400"
-                        title={(row.tag_groups || []).join(", ") || "-"}
-                      >
-                        {(row.tag_groups || []).join(", ") || "-"}
+                    </td>
+                    <td className="px-3 py-2">
+                      <span className={`inline-flex rounded-full border px-2 py-0.5 text-xs font-semibold uppercase ${statusClass}`}>{status}</span>
+                    </td>
+                    <td className="px-3 py-2">{formatDate(row.expires_at)}</td>
+                    <td className="px-3 py-2">{formatDate(row.created_at)}</td>
+                    <td className="px-3 py-2">
+                      <div className="flex flex-wrap gap-2">
+                        <button
+                          type="button"
+                          className="rounded border border-slate-700 px-2 py-1 text-xs hover:bg-slate-800 disabled:opacity-50"
+                          onClick={() => onFetchDetail(row)}
+                          disabled={fetchingByVulnId[row.cve_id] === true}
+                        >
+                          {fetchingByVulnId[row.cve_id] ? "Fetching..." : "Fetch detail"}
+                        </button>
+                        <button
+                          type="button"
+                          className="rounded border border-slate-700 px-2 py-1 text-xs hover:bg-slate-800 disabled:opacity-50"
+                          onClick={() => onDelete(row.id)}
+                          disabled={deletingId === row.id}
+                        >
+                          {deletingId === row.id ? "Deleting..." : "Delete"}
+                        </button>
                       </div>
-                    )}
-                  </td>
-                  <td className="px-3 py-2">
-                    <span className="block truncate" title={row.reason || "-"}>
-                      {row.reason || "-"}
-                    </span>
-                  </td>
-                  <td className="px-3 py-2">{formatDate(row.expires_at)}</td>
-                  <td className="px-3 py-2">{formatDate(row.created_at)}</td>
-                  <td className="px-3 py-2">
-                    <button
-                      type="button"
-                      className="rounded border border-slate-700 px-2 py-1 text-xs hover:bg-slate-800 disabled:opacity-50"
-                      onClick={() => onDelete(row.id)}
-                      disabled={deletingId === row.id}
-                    >
-                      {deletingId === row.id ? "Deleting..." : "Delete"}
-                    </button>
-                  </td>
-                </tr>
-              ))}
+                    </td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         </section>
@@ -284,7 +375,9 @@ export function TrivyIgnorePage() {
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [detailLoading, setDetailLoading] = useState(false);
   const [detailError, setDetailError] = useState<string | null>(null);
-  const [detail, setDetail] = useState<VulnerabilityDetailResponse | null>(null);
+  const [detail, setDetail] = useState<CveDetailDrawerData | null>(null);
+  const [statusByVulnId, setStatusByVulnId] = useState<Record<string, VulnerabilityCatalogStatus>>({});
+  const [fetchingByVulnId, setFetchingByVulnId] = useState<Record<string, boolean>>({});
   const latestRequestId = useRef(0);
 
   const repoFilterId = useMemo(() => {
@@ -293,6 +386,32 @@ export function TrivyIgnorePage() {
   }, [repoFilter]);
 
   const { items, repositories, loading, error, create, remove, retry } = useTrivyIgnores(repoFilterId);
+
+  useEffect(() => {
+    if (items.length === 0) {
+      setStatusByVulnId({});
+      return;
+    }
+
+    const uniqueIds = Array.from(new Set(items.map((row) => row.cve_id)));
+
+    void Promise.all(
+      uniqueIds.map(async (vulnId) => {
+        try {
+          const result = await fetchVulnerabilityCatalog(vulnId);
+          return { vulnId, status: result.verification_status };
+        } catch {
+          return { vulnId, status: "missing" as const };
+        }
+      }),
+    ).then((rows) => {
+      const next: Record<string, VulnerabilityCatalogStatus> = {};
+      for (const row of rows) {
+        next[row.vulnId] = row.status;
+      }
+      setStatusByVulnId(next);
+    });
+  }, [items]);
 
   const selectedRepoName = useMemo(() => {
     if (!repositoryId) {
@@ -336,7 +455,7 @@ export function TrivyIgnorePage() {
 
     const normalizedCve = cveId.trim();
     if (!normalizedCve) {
-      setSubmitError("CVE ID is required");
+      setSubmitError("Vulnerability ID is required");
       return;
     }
 
@@ -366,13 +485,37 @@ export function TrivyIgnorePage() {
     setBusyCreating(true);
 
     try {
-      await create(payload);
-      setFormMessage("Ignore rule created.");
+      const created = await create(payload);
+      if (created.verification_status === "unverified") {
+        setFormMessage(created.verification_notice || "Ignore rule created, but upstream verification failed. Detail is marked as unverified.");
+      } else {
+        setFormMessage("Ignore rule created.");
+      }
       resetForm();
     } catch (err) {
       setSubmitError(validateResponseErrorMessage(err, "Failed to create ignore rule"));
     } finally {
       setBusyCreating(false);
+    }
+  }
+
+  async function handleFetchDetail(row: TrivyIgnoreRow) {
+    setFetchingByVulnId((prev) => ({ ...prev, [row.cve_id]: true }));
+    try {
+      const result = await fetchVulnerabilityCatalogFromUpstream(row.cve_id);
+      setStatusByVulnId((prev) => ({ ...prev, [row.cve_id]: result.verification_status }));
+
+      if (result.verification_status === "verified") {
+        setFormMessage(`Fetched detail for ${row.cve_id}.`);
+      } else if (result.verification_status === "invalid") {
+        setFormMessage(`${row.cve_id} is invalid in upstream sources.`);
+      } else {
+        setFormMessage(result.last_error || `Unable to verify ${row.cve_id}. Marked as unverified.`);
+      }
+    } catch (err) {
+      setSubmitError(validateResponseErrorMessage(err, "Failed to fetch vulnerability detail"));
+    } finally {
+      setFetchingByVulnId((prev) => ({ ...prev, [row.cve_id]: false }));
     }
   }
 
@@ -421,20 +564,20 @@ export function TrivyIgnorePage() {
   }, [repoFilterId, selectedRepoName]);
 
   return (
-    <AppShell activeRoute="/trivy-ignore" title="Trivy Ignore" subtitle="Create and manage CVE ignore rules for scans.">
+    <AppShell activeRoute="/trivy-ignore" title="Trivy Ignore" subtitle="Create and manage CVE/GHSA ignore rules for scans.">
       <section className="grid w-full gap-4 rounded-xl border border-slate-700 bg-slate-900/90 p-4 shadow-inner md:grid-cols-2 xl:grid-cols-3">
         <header className="space-y-1 border-b border-slate-800/80 pb-3 md:col-span-2 xl:col-span-3">
           <h2 className="text-xl font-semibold text-slate-100">Create Ignore Rule</h2>
-          <p className="text-sm text-slate-400">Fast rule creation for CVE and repository scope.</p>
+          <p className="text-sm text-slate-400">Fast rule creation for CVE or GHSA and repository scope.</p>
         </header>
 
         <label className="grid gap-1">
-          <span className="text-xs font-semibold uppercase tracking-wide text-slate-400">CVE ID</span>
+          <span className="text-xs font-semibold uppercase tracking-wide text-slate-400">Vulnerability ID (CVE / GHSA)</span>
           <input
             className="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-slate-200 placeholder-slate-500 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/50"
             value={cveId}
             onChange={(event) => setCveId(event.target.value)}
-            placeholder="e.g. CVE-2026-0001"
+            placeholder="e.g. CVE-2026-0001 or GHSA-xxxx-yyyy-zzzz"
           />
         </label>
 
@@ -595,10 +738,13 @@ export function TrivyIgnorePage() {
         loading={loading}
         error={error}
         items={items}
+        statusByVulnId={statusByVulnId}
+        fetchingByVulnId={fetchingByVulnId}
         deletingId={deletingId}
         onRepoFilterChange={setRepoFilter}
         onRetry={() => void retry()}
         onDelete={handleDelete}
+        onFetchDetail={handleFetchDetail}
         onOpenCveDetail={handleOpenCveDetail}
       />
 
