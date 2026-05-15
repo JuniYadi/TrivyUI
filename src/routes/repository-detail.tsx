@@ -11,7 +11,7 @@ import { useRepoDetail } from "../hooks/use-repo-detail";
 import { createTrivyIgnoreRecord, fetchTrivyIgnores } from "../hooks/use-trivy-ignores";
 import { fetchVulnerabilityDetail } from "../hooks/use-vulnerabilities";
 import type { TrivyIgnoreRow } from "../services/trivy-ignore";
-import type { RepositoryDetailResponse, VulnerabilityDetailResponse, VulnerabilityWithRelations } from "../services/types";
+import type { RepositoryDetailResponse, VulnerabilityDetailResponse, VulnerabilityListResponse, VulnerabilityWithRelations } from "../services/types";
 import { filterVulnerabilitiesByGroup } from "../utils/filter-vulnerabilities-by-group";
 import { applyIgnoreSubmitResult, openIgnoreModalState, submitIgnoreFlowAndRefresh } from "../utils/ignore-vulnerability-flow";
 import { paginateList } from "../utils/paginate-list";
@@ -115,6 +115,92 @@ function formatScore(score: number | null): string {
   return score === null ? "-" : score.toFixed(1);
 }
 
+interface ApiSuccess<T> {
+  success: true;
+  data: T;
+}
+
+interface ApiFailure {
+  success: false;
+  error?: {
+    code?: string;
+    message?: string;
+  };
+}
+
+type ApiResponse<T> = ApiSuccess<T> | ApiFailure;
+
+export function pickRepositoryIgnoreCveCandidate(items: VulnerabilityWithRelations[], repositoryName?: string | null): VulnerabilityWithRelations | null {
+  const normalizedRepo = repositoryName?.trim().toLowerCase();
+  if (normalizedRepo) {
+    const exactMatch = items.find((item) => item.repository.name.trim().toLowerCase() === normalizedRepo);
+    if (exactMatch) {
+      return exactMatch;
+    }
+  }
+
+  return items[0] || null;
+}
+
+async function fetchVulnerabilityMatches(
+  cveId: string,
+  repositoryName?: string | null,
+  fetcher: typeof fetch = fetch,
+): Promise<VulnerabilityWithRelations[]> {
+  const params = new URLSearchParams({
+    cve_id: cveId,
+    state: "all",
+    page: "1",
+    limit: "50",
+    sort: "scanned_at",
+    order: "desc",
+  });
+
+  if (repositoryName?.trim()) {
+    params.set("repository", repositoryName.trim());
+  }
+
+  const response = await fetcher(`/api/vulnerabilities?${params.toString()}`);
+
+  let payload: ApiResponse<VulnerabilityListResponse> | null = null;
+  try {
+    payload = (await response.json()) as ApiResponse<VulnerabilityListResponse>;
+  } catch {
+    throw new Error("Failed to load vulnerability detail");
+  }
+
+  if (!response.ok || !payload || payload.success !== true) {
+    throw new Error(payload?.error?.message || "Failed to load vulnerability detail");
+  }
+
+  return payload.data.items;
+}
+
+export async function fetchRepositoryIgnoreCveDetail(
+  cveId: string,
+  repositoryName?: string | null,
+  fetcher: typeof fetch = fetch,
+): Promise<VulnerabilityDetailResponse> {
+  const normalizedCve = cveId.trim();
+  if (!normalizedCve) {
+    throw new Error("CVE ID is required");
+  }
+
+  const scopedItems = repositoryName?.trim() ? await fetchVulnerabilityMatches(normalizedCve, repositoryName, fetcher) : [];
+  let candidate = pickRepositoryIgnoreCveCandidate(scopedItems, repositoryName);
+
+  if (!candidate) {
+    const fallbackItems = await fetchVulnerabilityMatches(normalizedCve, undefined, fetcher);
+    candidate = pickRepositoryIgnoreCveCandidate(fallbackItems);
+  }
+
+  if (!candidate) {
+    throw new Error("No vulnerability detail found for this CVE.");
+  }
+
+  return fetchVulnerabilityDetail(candidate.id, fetcher);
+}
+
 export function formatIgnoreDate(raw: string | null): string {
   if (!raw) {
     return "-";
@@ -191,9 +277,10 @@ interface RepositoryIgnoreTrackingPanelProps {
   loading: boolean;
   error: string | null;
   onRetry: () => void;
+  onOpenCveDetail: (row: TrivyIgnoreRow) => void;
 }
 
-export function RepositoryIgnoreTrackingPanel({ items, loading, error, onRetry }: RepositoryIgnoreTrackingPanelProps) {
+export function RepositoryIgnoreTrackingPanel({ items, loading, error, onRetry, onOpenCveDetail }: RepositoryIgnoreTrackingPanelProps) {
   const summary = buildRepositoryIgnoreSummary(items);
   const hasRows = items.length > 0;
 
@@ -248,7 +335,15 @@ export function RepositoryIgnoreTrackingPanel({ items, loading, error, onRetry }
                 return (
                   <tr key={row.id} className="border-b border-slate-800 last:border-0">
                     <td className="px-3 py-2">
-                      <span className="block max-w-full truncate font-semibold" title={row.cve_id}>{row.cve_id}</span>
+                      <button
+                        type="button"
+                        className="block max-w-full truncate font-semibold text-blue-300 hover:text-blue-200 hover:underline"
+                        title={row.cve_id}
+                        aria-label={`Open CVE detail ${row.cve_id}`}
+                        onClick={() => onOpenCveDetail(row)}
+                      >
+                        {row.cve_id}
+                      </button>
                     </td>
                     <td className="px-3 py-2">{row.repository_id === null ? "Global" : "Repository"}</td>
                     <td className="px-3 py-2">
@@ -304,6 +399,7 @@ export function RepositoryDetailContent({ data, loading, error, retry, state, on
   const [vulnerabilityPage, setVulnerabilityPage] = useState(1);
   const [vulnerabilityLimit, setVulnerabilityLimit] = useState(10);
   const ignoreLoadRequestId = useRef(0);
+  const cveDetailRequestIdRef = useRef(0);
 
   const openDetail = useCallback(async (id: number) => {
     setDrawerOpen(true);
@@ -311,13 +407,22 @@ export function RepositoryDetailContent({ data, loading, error, retry, state, on
     setDetailError(null);
     setDetail(null);
 
+    cveDetailRequestIdRef.current += 1;
+    const requestId = cveDetailRequestIdRef.current;
+
     try {
       const result = await fetchVulnerabilityDetail(id);
-      setDetail(result);
+      if (requestId === cveDetailRequestIdRef.current) {
+        setDetail(result);
+      }
     } catch (err) {
-      setDetailError(err instanceof Error ? err.message : "Failed to load vulnerability detail");
+      if (requestId === cveDetailRequestIdRef.current) {
+        setDetailError(err instanceof Error ? err.message : "Failed to load vulnerability detail");
+      }
     } finally {
-      setDetailLoading(false);
+      if (requestId === cveDetailRequestIdRef.current) {
+        setDetailLoading(false);
+      }
     }
   }, []);
 
@@ -433,6 +538,32 @@ export function RepositoryDetailContent({ data, loading, error, retry, state, on
     }
   }, [ignoreTarget, ignoreBusy, ignoreReason, ignoreExpiresAt, refreshIgnores]);
 
+  const onOpenIgnoreCveDetail = useCallback(async (row: TrivyIgnoreRow) => {
+    setDrawerOpen(true);
+    setDetailLoading(true);
+    setDetailError(null);
+    setDetail(null);
+
+    cveDetailRequestIdRef.current += 1;
+    const requestId = cveDetailRequestIdRef.current;
+    const scopedRepositoryName = row.repository_name ?? data?.name ?? null;
+
+    try {
+      const result = await fetchRepositoryIgnoreCveDetail(row.cve_id, scopedRepositoryName);
+      if (requestId === cveDetailRequestIdRef.current) {
+        setDetail(result);
+      }
+    } catch (err) {
+      if (requestId === cveDetailRequestIdRef.current) {
+        setDetailError(err instanceof Error ? err.message : "Failed to load vulnerability detail");
+      }
+    } finally {
+      if (requestId === cveDetailRequestIdRef.current) {
+        setDetailLoading(false);
+      }
+    }
+  }, [data?.name]);
+
   return (
     <>
       {loading && (
@@ -531,6 +662,9 @@ export function RepositoryDetailContent({ data, loading, error, retry, state, on
             error={ignoreLoadError}
             onRetry={() => {
               void refreshIgnores(data.id);
+            }}
+            onOpenCveDetail={(row) => {
+              void onOpenIgnoreCveDetail(row);
             }}
           />
 
