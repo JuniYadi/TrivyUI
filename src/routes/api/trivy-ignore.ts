@@ -90,14 +90,9 @@ async function resolveCatalogForCreate(db: Database, vulnId: string, fetcher: ty
       return { status: "invalid" };
     }
 
-    if (cached.verification_status === "unverified") {
-      return {
-        status: "unverified",
-        notice: cached.last_error || "Unable to verify vulnerability due to upstream error. Rule was still created.",
-      };
+    if (cached.verification_status === "verified") {
+      return { status: "verified" };
     }
-
-    return { status: "verified" };
   }
 
   const resolved = await resolveVulnerabilityDetail(vulnId, fetcher);
@@ -110,7 +105,7 @@ async function resolveCatalogForCreate(db: Database, vulnId: string, fetcher: ty
   if (saved.verification_status === "unverified") {
     return {
       status: "unverified",
-      notice: saved.last_error || "Unable to verify vulnerability due to upstream error. Rule was still created.",
+      notice: cached?.last_error || saved.last_error || "Unable to verify vulnerability due to upstream error. Rule was still created.",
     };
   }
 

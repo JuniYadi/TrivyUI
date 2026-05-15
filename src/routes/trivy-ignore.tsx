@@ -261,7 +261,7 @@ export function TrivyIgnoreListPanel({
                 <th className="w-[210px] px-3 py-2">Repository</th>
                 <th className="w-[220px] px-3 py-2">Scope / Tags</th>
                 <th className="w-[180px] px-3 py-2">Reason</th>
-                <th className="w-[120px] px-3 py-2 whitespace-nowrap">Detail</th>
+                <th className="w-[120px] px-3 py-2 whitespace-nowrap">Verification</th>
                 <th className="w-[160px] px-3 py-2 whitespace-nowrap">Expires</th>
                 <th className="w-[170px] px-3 py-2 whitespace-nowrap">Created</th>
                 <th className="w-[170px] px-3 py-2">Action</th>
@@ -393,6 +393,8 @@ export function TrivyIgnorePage() {
       return;
     }
 
+    const requestId = ++latestRequestId.current;
+    let cancelled = false;
     const uniqueIds = Array.from(new Set(items.map((row) => row.cve_id)));
 
     void Promise.all(
@@ -404,13 +406,28 @@ export function TrivyIgnorePage() {
           return { vulnId, status: "missing" as const };
         }
       }),
-    ).then((rows) => {
-      const next: Record<string, VulnerabilityCatalogStatus> = {};
-      for (const row of rows) {
-        next[row.vulnId] = row.status;
-      }
-      setStatusByVulnId(next);
-    });
+    )
+      .then((rows) => {
+        if (cancelled || latestRequestId.current !== requestId) {
+          return;
+        }
+
+        const next: Record<string, VulnerabilityCatalogStatus> = {};
+        for (const row of rows) {
+          next[row.vulnId] = row.status;
+        }
+        setStatusByVulnId(next);
+      })
+      .catch(() => {
+        if (cancelled || latestRequestId.current !== requestId) {
+          return;
+        }
+        setStatusByVulnId({});
+      });
+
+    return () => {
+      cancelled = true;
+    };
   }, [items]);
 
   const selectedRepoName = useMemo(() => {

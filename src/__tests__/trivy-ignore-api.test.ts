@@ -225,7 +225,7 @@ describe("trivy ignore management API", () => {
     expect(body.error.code).toBe("INVALID_VULN_ID");
   });
 
-  test("POST uses cached unverified catalog result notice", async () => {
+  test("POST revalidates cached unverified catalog result and returns verified when upstream succeeds", async () => {
     const db = createTestDb();
     const handler = createTrivyIgnoreHandler(db, createUpstreamSuccessFetcher());
 
@@ -242,6 +242,36 @@ describe("trivy ignore management API", () => {
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
           cve_id: "CVE-2026-7001",
+          repository_id: null,
+          scope: "all_tags",
+        }),
+      }),
+    );
+
+    const body = (await response.json()) as { success: boolean; data: { verification_status: string; verification_notice?: string } };
+    expect(response.status).toBe(201);
+    expect(body.success).toBe(true);
+    expect(body.data.verification_status).toBe("verified");
+    expect(body.data.verification_notice).toBeUndefined();
+  });
+
+  test("POST keeps cached unverified notice when revalidation is still unavailable", async () => {
+    const db = createTestDb();
+    const handler = createTrivyIgnoreHandler(db, createUpstreamUnavailableFetcher());
+
+    upsertVulnerabilityCatalogRecord(db, {
+      vuln_id: "CVE-2026-7003",
+      vuln_type: "CVE",
+      verification_status: "unverified",
+      last_error: "upstream temporary failure",
+    });
+
+    const response = await handler(
+      new Request("http://localhost/api/trivy-ignores", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          cve_id: "CVE-2026-7003",
           repository_id: null,
           scope: "all_tags",
         }),
