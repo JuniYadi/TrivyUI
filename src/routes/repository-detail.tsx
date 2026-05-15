@@ -399,7 +399,7 @@ export function RepositoryDetailContent({ data, loading, error, retry, state, on
   const [vulnerabilityPage, setVulnerabilityPage] = useState(1);
   const [vulnerabilityLimit, setVulnerabilityLimit] = useState(10);
   const ignoreLoadRequestId = useRef(0);
-  const ignoreCveDetailRequestId = useRef(0);
+  const cveDetailRequestIdRef = useRef(0);
 
   const openDetail = useCallback(async (id: number) => {
     setDrawerOpen(true);
@@ -407,13 +407,22 @@ export function RepositoryDetailContent({ data, loading, error, retry, state, on
     setDetailError(null);
     setDetail(null);
 
+    cveDetailRequestIdRef.current += 1;
+    const requestId = cveDetailRequestIdRef.current;
+
     try {
       const result = await fetchVulnerabilityDetail(id);
-      setDetail(result);
+      if (requestId === cveDetailRequestIdRef.current) {
+        setDetail(result);
+      }
     } catch (err) {
-      setDetailError(err instanceof Error ? err.message : "Failed to load vulnerability detail");
+      if (requestId === cveDetailRequestIdRef.current) {
+        setDetailError(err instanceof Error ? err.message : "Failed to load vulnerability detail");
+      }
     } finally {
-      setDetailLoading(false);
+      if (requestId === cveDetailRequestIdRef.current) {
+        setDetailLoading(false);
+      }
     }
   }, []);
 
@@ -535,24 +544,25 @@ export function RepositoryDetailContent({ data, loading, error, retry, state, on
     setDetailError(null);
     setDetail(null);
 
-    ignoreCveDetailRequestId.current += 1;
-    const requestId = ignoreCveDetailRequestId.current;
+    cveDetailRequestIdRef.current += 1;
+    const requestId = cveDetailRequestIdRef.current;
+    const scopedRepositoryName = row.repository_name ?? data?.name ?? null;
 
     try {
-      const result = await fetchRepositoryIgnoreCveDetail(row.cve_id, row.repository_name);
-      if (requestId === ignoreCveDetailRequestId.current) {
+      const result = await fetchRepositoryIgnoreCveDetail(row.cve_id, scopedRepositoryName);
+      if (requestId === cveDetailRequestIdRef.current) {
         setDetail(result);
       }
     } catch (err) {
-      if (requestId === ignoreCveDetailRequestId.current) {
+      if (requestId === cveDetailRequestIdRef.current) {
         setDetailError(err instanceof Error ? err.message : "Failed to load vulnerability detail");
       }
     } finally {
-      if (requestId === ignoreCveDetailRequestId.current) {
+      if (requestId === cveDetailRequestIdRef.current) {
         setDetailLoading(false);
       }
     }
-  }, []);
+  }, [data?.name]);
 
   return (
     <>
