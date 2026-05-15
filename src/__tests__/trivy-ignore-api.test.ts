@@ -6,6 +6,7 @@ import { createTrivyIgnoreHandler } from "../routes/api/trivy-ignore";
 import { createTrivyIgnore } from "../services/trivy-ignore";
 import { enforcePostApiKeyAuth } from "../services/api-key-auth";
 import { upsertRepository } from "../services/db-service";
+import { upsertVulnerabilityCatalogRecord } from "../services/vulnerability-catalog";
 
 const dbs: ReturnType<typeof initDb>[] = [];
 const apiEnabledBackup = process.env.API_KEY_ENABLED;
@@ -158,6 +159,28 @@ describe("trivy ignore management API", () => {
     expect(body.error.code).toBe("TAG_GROUP_REQUIRED");
   });
 
+  test("POST rejects malformed vulnerability id format", async () => {
+    const db = createTestDb();
+    const handler = createTrivyIgnoreHandler(db, createUpstreamSuccessFetcher());
+
+    const response = await handler(
+      new Request("http://localhost/api/trivy-ignores", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          cve_id: "NOT-A-CVE",
+          repository_id: null,
+          scope: "all_tags",
+        }),
+      }),
+    );
+
+    const body = (await response.json()) as { success: boolean; error: { code: string } };
+    expect(response.status).toBe(400);
+    expect(body.success).toBe(false);
+    expect(body.error.code).toBe("INVALID_VULN_ID");
+  });
+
   test("POST allows create when upstream verification is unavailable", async () => {
     const db = createTestDb();
     const handler = createTrivyIgnoreHandler(db, createUpstreamUnavailableFetcher());
@@ -178,6 +201,87 @@ describe("trivy ignore management API", () => {
     expect(response.status).toBe(201);
     expect(body.success).toBe(true);
     expect(body.data.verification_status).toBe("unverified");
+  });
+
+  test("POST rejects when upstream resolves vulnerability as invalid", async () => {
+    const db = createTestDb();
+    const handler = createTrivyIgnoreHandler(db, (async () => new Response(JSON.stringify({ message: "not found" }), { status: 404 })) as typeof fetch);
+
+    const response = await handler(
+      new Request("http://localhost/api/trivy-ignores", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          cve_id: "CVE-2026-6001",
+          repository_id: null,
+          scope: "all_tags",
+        }),
+      }),
+    );
+
+    const body = (await response.json()) as { success: boolean; error: { code: string } };
+    expect(response.status).toBe(400);
+    expect(body.success).toBe(false);
+    expect(body.error.code).toBe("INVALID_VULN_ID");
+  });
+
+  test("POST uses cached unverified catalog result notice", async () => {
+    const db = createTestDb();
+    const handler = createTrivyIgnoreHandler(db, createUpstreamSuccessFetcher());
+
+    upsertVulnerabilityCatalogRecord(db, {
+      vuln_id: "CVE-2026-7001",
+      vuln_type: "CVE",
+      verification_status: "unverified",
+      last_error: "upstream temporary failure",
+    });
+
+    const response = await handler(
+      new Request("http://localhost/api/trivy-ignores", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          cve_id: "CVE-2026-7001",
+          repository_id: null,
+          scope: "all_tags",
+        }),
+      }),
+    );
+
+    const body = (await response.json()) as { success: boolean; data: { verification_status: string; verification_notice?: string } };
+    expect(response.status).toBe(201);
+    expect(body.success).toBe(true);
+    expect(body.data.verification_status).toBe("unverified");
+    expect(body.data.verification_notice).toContain("upstream temporary failure");
+  });
+
+  test("POST rejects when cached catalog result is invalid", async () => {
+    const db = createTestDb();
+    const handler = createTrivyIgnoreHandler(db, createUpstreamSuccessFetcher());
+
+    upsertVulnerabilityCatalogRecord(db, {
+      vuln_id: "CVE-2026-7002",
+      vuln_type: "CVE",
+      verification_status: "invalid",
+      last_error: "not found upstream",
+    });
+
+    const response = await handler(
+      new Request("http://localhost/api/trivy-ignores", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          cve_id: "CVE-2026-7002",
+          repository_id: null,
+          scope: "all_tags",
+        }),
+      }),
+    );
+
+    const body = (await response.json()) as { success: boolean; error: { code: string } };
+    expect(response.status).toBe(400);
+    expect(body.success).toBe(false);
+    expect(body.error.code).toBe("INVALID_VULN_ID");
   });
 
   test("DELETE removes ignores and returns not found for missing id", async () => {
