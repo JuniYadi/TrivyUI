@@ -66,10 +66,13 @@ describe("trivy ignore route list panel", () => {
         loading={true}
         error={null}
         items={[]}
+        statusByVulnId={{}}
+        fetchingByVulnId={{}}
         deletingId={null}
         onRepoFilterChange={() => {}}
         onRetry={() => {}}
         onDelete={() => {}}
+        onFetchDetail={() => {}}
         onOpenCveDetail={() => {}}
       />,
     );
@@ -85,10 +88,13 @@ describe("trivy ignore route list panel", () => {
         loading={false}
         error="request failed"
         items={[]}
+        statusByVulnId={{}}
+        fetchingByVulnId={{}}
         deletingId={null}
         onRepoFilterChange={() => {}}
         onRetry={() => {}}
         onDelete={() => {}}
+        onFetchDetail={() => {}}
         onOpenCveDetail={() => {}}
       />,
     );
@@ -106,10 +112,13 @@ describe("trivy ignore route list panel", () => {
         loading={false}
         error={null}
         items={[]}
+        statusByVulnId={{}}
+        fetchingByVulnId={{}}
         deletingId={null}
         onRepoFilterChange={() => {}}
         onRetry={() => {}}
         onDelete={() => {}}
+        onFetchDetail={() => {}}
         onOpenCveDetail={() => {}}
       />,
     );
@@ -126,10 +135,13 @@ describe("trivy ignore route list panel", () => {
         loading={false}
         error={null}
         items={[SAMPLE_ROW, SAMPLE_REPOSITORY_ROW]}
+        statusByVulnId={{ "CVE-2026-1111": "verified" }}
+        fetchingByVulnId={{}}
         deletingId={null}
         onRepoFilterChange={() => {}}
         onRetry={() => {}}
         onDelete={() => {}}
+        onFetchDetail={() => {}}
         onOpenCveDetail={() => {}}
       />,
     );
@@ -237,7 +249,7 @@ describe("trivy ignore CVE detail helpers", () => {
 
     const detail = await fetchTrivyIgnoreCveDetail("CVE-2026-1111", "ghcr.io/acme/missing", fetcher);
 
-    expect(detail.id).toBe(101);
+    expect(detail.cve_id).toBe("CVE-2026-1111");
     expect(requests[0]).toContain("repository=ghcr.io%2Facme%2Fmissing");
     expect(requests[1]).toContain("cve_id=CVE-2026-1111");
     expect(requests[2]).toContain("/api/vulnerabilities/101");
@@ -256,7 +268,7 @@ describe("trivy ignore CVE detail helpers", () => {
       )) as typeof fetch;
 
     await expect(fetchTrivyIgnoreCveDetail("CVE-2026-9999", undefined, fetcher)).rejects.toThrow(
-      "No vulnerability detail found for this CVE.",
+      "No vulnerability detail found for this vulnerability ID.",
     );
   });
 });

@@ -53,6 +53,7 @@ describe("server routing", () => {
     const apiKeys = await handleRequest(makeRequest("/api/api-keys"));
     const trivyIgnores = await handleRequest(makeRequest("/api/trivy-ignores"));
     const trivyIgnoreGenerate = await handleRequest(makeRequest("/api/trivy-ignore/generate"));
+    const vulnerabilityCatalog = await handleRequest(makeRequest("/api/vulnerability-catalog/CVE-2026-1111"));
 
     expect(health.status).toBe(200);
     expect(stats.status).toBe(200);
@@ -64,6 +65,7 @@ describe("server routing", () => {
     expect(apiKeys.status).toBe(200);
     expect(trivyIgnores.status).toBe(200);
     expect(trivyIgnoreGenerate.status).toBe(200);
+    expect(vulnerabilityCatalog.status).toBe(200);
   });
 
   test("serves SPA fallback for app routes", async () => {
@@ -97,6 +99,18 @@ describe("server routing", () => {
 
   test("returns 405 for unsupported method on trivy-ignore generate endpoint", async () => {
     const response = await handleRequest(makeRequest("/api/trivy-ignore/generate", "POST"));
+    const body = (await response.json()) as {
+      success: boolean;
+      error: { code: string; message: string };
+    };
+
+    expect(response.status).toBe(405);
+    expect(body.success).toBe(false);
+    expect(body.error.code).toBe("METHOD_NOT_ALLOWED");
+  });
+
+  test("returns 405 for unsupported method on vulnerability-catalog endpoint", async () => {
+    const response = await handleRequest(makeRequest("/api/vulnerability-catalog/CVE-2026-1111", "DELETE"));
     const body = (await response.json()) as {
       success: boolean;
       error: { code: string; message: string };
