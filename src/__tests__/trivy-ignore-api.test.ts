@@ -91,6 +91,32 @@ describe("trivy ignore management API", () => {
     expect(listBody.data.some((row) => row.id === body.data.id && row.cve_id === "CVE-2026-1001" && row.repository_id === repoId)).toBe(true);
   });
 
+  test("POST preserves GHSA casing in ignore row", async () => {
+    const db = createTestDb();
+    const handler = createTrivyIgnoreHandler(db, createUpstreamSuccessFetcher());
+    const ghsaId = "ghsa-abcd-1234-ef56";
+
+    const response = await handler(
+      new Request("http://localhost/api/trivy-ignores", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          cve_id: ghsaId,
+          repository_id: null,
+          scope: "all_tags",
+        }),
+      }),
+    );
+
+    const body = (await response.json()) as { success: boolean; data: { cve_id: string } };
+    expect(response.status).toBe(201);
+    expect(body.success).toBe(true);
+    expect(body.data.cve_id).toBe(ghsaId);
+
+    const stored = db.query<{ cve_id: string }>("SELECT cve_id FROM trivy_ignores ORDER BY id DESC LIMIT 1").get();
+    expect(stored?.cve_id).toBe(ghsaId);
+  });
+
   test("GET supports repository filter", async () => {
     const db = createTestDb();
     const handler = createTrivyIgnoreHandler(db);

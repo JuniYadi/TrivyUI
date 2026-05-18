@@ -129,7 +129,6 @@ export function createTrivyIgnoreHandler(db: Database, fetcher: typeof fetch = f
           throw new Error("TAG_GROUP_REQUIRED");
         }
         const normalizedVuln = normalizeVulnerabilityId(normalizedPayload.cve_id);
-        normalizedPayload.cve_id = normalizedVuln.vulnId;
 
         const catalogResult = await resolveCatalogForCreate(db, normalizedVuln.vulnId, fetcher);
         if (catalogResult.status === "invalid") {
