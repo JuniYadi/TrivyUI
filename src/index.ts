@@ -118,6 +118,18 @@ export async function handleRequest(request: Request): Promise<Response> {
     return sendError(404, "NOT_FOUND", "Endpoint not found");
   }
 
+  if (pathname === "/api-docs") {
+    return new Response(Bun.file(new URL("../public/api-docs.html", import.meta.url)), {
+      headers: { "content-type": "text/html; charset=utf-8" },
+    });
+  }
+
+  if (pathname === "/api-docs/openapi.json") {
+    return new Response(Bun.file(new URL("../public/openapi.json", import.meta.url)), {
+      headers: { "content-type": "application/json; charset=utf-8" },
+    });
+  }
+
   if (pathname !== "/" && pathname.includes(".")) {
     return serveAsset(pathname);
   }

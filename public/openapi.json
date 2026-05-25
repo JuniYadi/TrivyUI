@@ -1,0 +1,819 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "TrivyUI API",
+    "description": "API for TrivyUI — vulnerability scanning dashboard. Accepts Trivy JSON scan results, stores vulnerabilities, and provides aggregated reporting via REST endpoints.\n\n## Authentication\n\nSome endpoints (e.g. `/api/webhook`) accept an optional `x-api-key` header. Future API key management endpoints are planned (see TRIVY-015).\n\n## Rate Limiting\n\nUpload endpoints are limited to 10 MB per request.\n\n## Response Format\n\nAll API responses use a consistent envelope:\n\n```json\n{ \"success\": true, \"data\": { ... } }\n```\n\nError responses:\n\n```json\n{ \"success\": false, \"error\": { \"code\": \"ERROR_CODE\", \"message\": \"Human-readable message\" } }\n```",
+    "version": "0.1.0",
+    "contact": {
+      "name": "TrivyUI Support"
+    }
+  },
+  "servers": [
+    {
+      "url": "/",
+      "description": "Current server"
+    }
+  ],
+  "tags": [
+    {
+      "name": "health",
+      "description": "Service health"
+    },
+    {
+      "name": "upload",
+      "description": "Scan result upload"
+    },
+    {
+      "name": "dashboard",
+      "description": "Dashboard data"
+    },
+    {
+      "name": "vulnerabilities",
+      "description": "Vulnerability records"
+    },
+    {
+      "name": "repositories",
+      "description": "Container repositories"
+    },
+    {
+      "name": "images",
+      "description": "Container images"
+    },
+    {
+      "name": "settings",
+      "description": "Notification settings"
+    }
+  ],
+  "paths": {
+    "/api/health": {
+      "get": {
+        "tags": ["health"],
+        "summary": "Health check",
+        "description": "Returns the current health status of the service and database connectivity.",
+        "operationId": "getHealth",
+        "responses": {
+          "200": {
+            "description": "Service is healthy",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "status": { "type": "string", "example": "ok" },
+                    "database": { "type": "string", "example": "SQLite connected" }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/upload": {
+      "post": {
+        "tags": ["upload"],
+        "summary": "Upload single Trivy scan result",
+        "description": "Uploads a single Trivy JSON scan result file. The file must be a valid Trivy SARIF/result JSON. Repositories, images, and vulnerabilities are upserted on upload.",
+        "operationId": "uploadSingle",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "file": {
+                    "type": "string",
+                    "format": "binary",
+                    "description": "Trivy JSON result file (.json)"
+                  }
+                },
+                "required": ["file"]
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Scan result imported successfully",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/UploadSummary" }
+              }
+            }
+          },
+          "400": { "description": "Invalid JSON format or missing file", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } },
+          "413": { "description": "File exceeds 10 MB limit", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } },
+          "415": { "description": "Unsupported media type — must be multipart/form-data", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } },
+          "422": { "description": "Invalid Trivy format — no 'Results' array found", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } },
+          "500": { "description": "Internal server error", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } }
+        }
+      }
+    },
+    "/api/upload/batch": {
+      "post": {
+        "tags": ["upload"],
+        "summary": "Batch upload multiple Trivy scan results",
+        "description": "Accepts multiple Trivy JSON files in a single request. Each file is processed sequentially. Returns a list of summaries for all processed files.",
+        "operationId": "uploadBatch",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "files": {
+                    "type": "array",
+                    "items": { "type": "string", "format": "binary" },
+                    "description": "One or more Trivy JSON result files"
+                  }
+                },
+                "required": ["files"]
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "All scan results imported",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": { "type": "boolean", "example": true },
+                    "data": {
+                      "type": "array",
+                      "items": { "$ref": "#/components/schemas/UploadSummary" }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": { "description": "Invalid JSON format or missing files", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } },
+          "413": { "description": "One or more files exceed 10 MB limit", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } },
+          "415": { "description": "Unsupported media type", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } },
+          "422": { "description": "One or more files are not valid Trivy format", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } },
+          "500": { "description": "Internal server error", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } }
+        }
+      }
+    },
+    "/api/webhook": {
+      "post": {
+        "tags": ["upload"],
+        "summary": "Webhook endpoint for CI/CD integration",
+        "description": "Receives Trivy scan results from CI/CD pipelines. Accepts JSON body or multipart file upload. Optionally validates `x-api-key` header for authenticated webhooks.",
+        "operationId": "postWebhook",
+        "security": [{ "ApiKeyHeader": [] }],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "type": "object", "description": "Trivy JSON result object or raw JSON string" }
+            },
+            "multipart/form-data": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "file": { "type": "string", "format": "binary", "description": "Trivy JSON result file" }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Scan result imported via webhook",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/UploadSummary" }
+              }
+            }
+          },
+          "400": { "description": "Invalid JSON format", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } },
+          "413": { "description": "Payload exceeds 10 MB limit", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } },
+          "415": { "description": "Unsupported media type", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } },
+          "422": { "description": "Invalid Trivy format", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } },
+          "500": { "description": "Internal server error", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } }
+        }
+      }
+    },
+    "/api/stats": {
+      "get": {
+        "tags": ["dashboard"],
+        "summary": "Dashboard statistics",
+        "description": "Returns aggregate dashboard statistics including total counts, severity breakdown, top repositories, and recent scans.",
+        "operationId": "getStats",
+        "responses": {
+          "200": {
+            "description": "Dashboard stats",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": { "type": "boolean" },
+                    "data": { "$ref": "#/components/schemas/DashboardStats" }
+                  }
+                },
+                "example": {
+                  "success": true,
+                  "data": {
+                    "total_vulnerabilities": 42,
+                    "total_repositories": 5,
+                    "total_images": 12,
+                    "by_severity": { "CRITICAL": 3, "HIGH": 10, "MEDIUM": 20, "LOW": 8, "UNKNOWN": 1 },
+                    "top_repositories": [{ "id": 1, "name": "ghcr.io/acme/api", "vulnerability_count": 20, "critical_count": 2 }],
+                    "recent_scans": [{ "id": 1, "repository": "ghcr.io/acme/api", "image": "ghcr.io/acme/api:latest", "vulnerability_count": 10, "critical_count": 1, "scanned_at": "2026-04-26T10:00:00Z" }]
+                  }
+                }
+              }
+            }
+          },
+          "500": { "description": "Internal server error", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } }
+        }
+      }
+    },
+    "/api/vulnerabilities": {
+      "get": {
+        "tags": ["vulnerabilities"],
+        "summary": "List vulnerabilities",
+        "description": "Returns a paginated list of vulnerabilities with optional filtering by severity, repository, image, package, CVE ID, or full-text search.",
+        "operationId": "listVulnerabilities",
+        "parameters": [
+          { "name": "page", "in": "query", "schema": { "type": "integer", "default": 1, "minimum": 1 }, "description": "Page number (1-indexed)" },
+          { "name": "limit", "in": "query", "schema": { "type": "integer", "default": 25, "minimum": 1, "maximum": 100 }, "description": "Items per page (1-100)" },
+          { "name": "sort", "in": "query", "schema": { "type": "string", "enum": ["cve_id", "severity", "package_name", "score", "scanned_at"], "default": "severity" }, "description": "Sort field" },
+          { "name": "order", "in": "query", "schema": { "type": "string", "enum": ["asc", "desc"], "default": "desc" }, "description": "Sort direction" },
+          { "name": "severity", "in": "query", "schema": { "type": "string", "enum": ["CRITICAL", "HIGH", "MEDIUM", "LOW", "UNKNOWN"] }, "description": "Filter by severity" },
+          { "name": "repository", "in": "query", "schema": { "type": "string" }, "description": "Filter by repository name" },
+          { "name": "repo", "in": "query", "schema": { "type": "string" }, "description": "Alias for repository filter" },
+          { "name": "image", "in": "query", "schema": { "type": "string" }, "description": "Filter by image name" },
+          { "name": "package", "in": "query", "schema": { "type": "string" }, "description": "Filter by package name (partial match)" },
+          { "name": "cve_id", "in": "query", "schema": { "type": "string" }, "description": "Filter by exact CVE ID" },
+          { "name": "search", "in": "query", "schema": { "type": "string" }, "description": "Full-text search across CVE ID, package name, and description" }
+        ],
+        "responses": {
+          "200": {
+            "description": "Paginated vulnerability list",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": { "type": "boolean" },
+                    "data": { "$ref": "#/components/schemas/VulnerabilityListResponse" }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid query parameter",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } }
+          },
+          "500": { "description": "Internal server error", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } }
+        }
+      }
+    },
+    "/api/vulnerabilities/{id}": {
+      "get": {
+        "tags": ["vulnerabilities"],
+        "summary": "Get vulnerability detail",
+        "description": "Returns full details for a specific vulnerability including package version info and remediation.",
+        "operationId": "getVulnerabilityById",
+        "parameters": [
+          { "name": "id", "in": "path", "required": true, "schema": { "type": "integer" }, "description": "Vulnerability record ID" }
+        ],
+        "responses": {
+          "200": {
+            "description": "Vulnerability detail",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": { "type": "boolean" },
+                    "data": { "$ref": "#/components/schemas/VulnerabilityDetail" }
+                  }
+                }
+              }
+            }
+          },
+          "404": { "description": "Vulnerability not found", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } },
+          "500": { "description": "Internal server error", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } }
+        }
+      }
+    },
+    "/api/repositories": {
+      "get": {
+        "tags": ["repositories"],
+        "summary": "List repositories",
+        "description": "Returns a paginated list of container repositories with vulnerability counts and last-scan timestamps.",
+        "operationId": "listRepositories",
+        "parameters": [
+          { "name": "page", "in": "query", "schema": { "type": "integer", "default": 1, "minimum": 1 } },
+          { "name": "limit", "in": "query", "schema": { "type": "integer", "default": 25, "minimum": 1, "maximum": 100 } },
+          { "name": "sort", "in": "query", "schema": { "type": "string", "enum": ["name", "vulnerability_count", "critical_count", "last_scanned_at"], "default": "vulnerability_count" }, "description": "Sort field" },
+          { "name": "order", "in": "query", "schema": { "type": "string", "enum": ["asc", "desc"], "default": "desc" } }
+        ],
+        "responses": {
+          "200": {
+            "description": "Paginated repository list",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": { "type": "boolean" },
+                    "data": { "$ref": "#/components/schemas/RepositoryListResponse" }
+                  }
+                }
+              }
+            }
+          },
+          "400": { "description": "Invalid query parameter", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } },
+          "500": { "description": "Internal server error", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } }
+        }
+      }
+    },
+    "/api/repositories/{id}": {
+      "get": {
+        "tags": ["repositories"],
+        "summary": "Get repository detail",
+        "description": "Returns full repository details including severity breakdown, image list, and recent vulnerabilities.",
+        "operationId": "getRepositoryById",
+        "parameters": [
+          { "name": "id", "in": "path", "required": true, "schema": { "type": "integer" }, "description": "Repository ID" }
+        ],
+        "responses": {
+          "200": {
+            "description": "Repository detail",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": { "type": "boolean" },
+                    "data": { "$ref": "#/components/schemas/RepositoryDetail" }
+                  }
+                }
+              }
+            }
+          },
+          "404": { "description": "Repository not found", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } },
+          "500": { "description": "Internal server error", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } }
+        }
+      }
+    },
+    "/api/repositories/by-name/{name}": {
+      "get": {
+        "tags": ["repositories"],
+        "summary": "Get repository by name",
+        "description": "Returns full repository details looked up by repository name (e.g. `ghcr.io/acme/api`).",
+        "operationId": "getRepositoryByName",
+        "parameters": [
+          { "name": "name", "in": "path", "required": true, "schema": { "type": "string" }, "description": "Repository name (URL-encoded if necessary)" }
+        ],
+        "responses": {
+          "200": {
+            "description": "Repository detail",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": { "type": "boolean" },
+                    "data": { "$ref": "#/components/schemas/RepositoryDetail" }
+                  }
+                }
+              }
+            }
+          },
+          "404": { "description": "Repository not found", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } },
+          "500": { "description": "Internal server error", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } }
+        }
+      }
+    },
+    "/api/images": {
+      "get": {
+        "tags": ["images"],
+        "summary": "List images",
+        "description": "Returns a paginated list of container images with vulnerability counts and scan timestamps.",
+        "operationId": "listImages",
+        "parameters": [
+          { "name": "page", "in": "query", "schema": { "type": "integer", "default": 1, "minimum": 1 } },
+          { "name": "limit", "in": "query", "schema": { "type": "integer", "default": 25, "minimum": 1, "maximum": 100 } },
+          { "name": "sort", "in": "query", "schema": { "type": "string", "enum": ["name", "repository", "vulnerability_count", "critical_count", "last_scanned_at"], "default": "vulnerability_count" } },
+          { "name": "order", "in": "query", "schema": { "type": "string", "enum": ["asc", "desc"], "default": "desc" } }
+        ],
+        "responses": {
+          "200": {
+            "description": "Paginated image list",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": { "type": "boolean" },
+                    "data": { "$ref": "#/components/schemas/ImageListResponse" }
+                  }
+                }
+              }
+            }
+          },
+          "400": { "description": "Invalid query parameter", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } },
+          "500": { "description": "Internal server error", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } }
+        }
+      }
+    },
+    "/api/images/{id}": {
+      "get": {
+        "tags": ["images"],
+        "summary": "Get image detail",
+        "description": "Returns full image details including severity breakdown and recent vulnerabilities.",
+        "operationId": "getImageById",
+        "parameters": [
+          { "name": "id", "in": "path", "required": true, "schema": { "type": "integer" }, "description": "Image ID" }
+        ],
+        "responses": {
+          "200": {
+            "description": "Image detail",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": { "type": "boolean" },
+                    "data": { "$ref": "#/components/schemas/ImageDetail" }
+                  }
+                }
+              }
+            }
+          },
+          "404": { "description": "Image not found", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } },
+          "500": { "description": "Internal server error", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } }
+        }
+      }
+    },
+    "/api/settings/notifications": {
+      "get": {
+        "tags": ["settings"],
+        "summary": "Get notification settings",
+        "description": "Returns the current email notification settings for scan result alerts.",
+        "operationId": "getNotificationSettings",
+        "responses": {
+          "200": {
+            "description": "Current notification settings",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": { "type": "boolean" },
+                    "data": { "$ref": "#/components/schemas/NotificationSettings" }
+                  }
+                },
+                "example": {
+                  "success": true,
+                  "data": { "enabled": true, "min_severity": "HIGH" }
+                }
+              }
+            }
+          },
+          "500": { "description": "Internal server error", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } }
+        }
+      },
+      "put": {
+        "tags": ["settings"],
+        "summary": "Update notification settings",
+        "description": "Updates the email notification settings for scan result alerts.",
+        "operationId": "updateNotificationSettings",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "enabled": { "type": "boolean", "description": "Enable or disable email notifications" },
+                  "min_severity": { "type": "string", "enum": ["CRITICAL", "HIGH", "MEDIUM", "LOW"], "description": "Minimum severity level to trigger a notification" }
+                },
+                "required": ["enabled", "min_severity"]
+              },
+              "example": { "enabled": true, "min_severity": "HIGH" }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Updated notification settings",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": { "type": "boolean" },
+                    "data": { "$ref": "#/components/schemas/NotificationSettings" }
+                  }
+                }
+              }
+            }
+          },
+          "400": { "description": "Invalid request body", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } },
+          "500": { "description": "Internal server error", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } }
+        }
+      }
+    },
+    "/api-docs": {
+      "get": {
+        "tags": ["documentation"],
+        "summary": "Swagger UI",
+        "description": "Interactive API documentation and playground powered by Swagger UI. Use the 'Try it out' button on any endpoint to test it directly from your browser.",
+        "operationId": "getSwaggerUI",
+        "responses": {
+          "200": {
+            "description": "Swagger UI HTML page",
+            "content": {
+              "text/html": {
+                "schema": { "type": "string" }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api-docs/openapi.json": {
+      "get": {
+        "tags": ["documentation"],
+        "summary": "OpenAPI 3.0 specification",
+        "description": "Returns the OpenAPI 3.0 specification document for this API in JSON format.",
+        "operationId": "getOpenApiSpec",
+        "responses": {
+          "200": {
+            "description": "OpenAPI 3.0 JSON specification",
+            "content": {
+              "application/json": {
+                "schema": { "type": "object" }
+              }
+            }
+          },
+          "404": { "description": "OpenAPI spec not found" }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "Error": {
+        "type": "object",
+        "description": "Standard API error response",
+        "properties": {
+          "success": { "type": "boolean", "example": false },
+          "error": {
+            "type": "object",
+            "properties": {
+              "code": { "type": "string", "example": "INVALID_SEVERITY", "description": "Machine-readable error code" },
+              "message": { "type": "string", "example": "Invalid severity value", "description": "Human-readable error description" }
+            }
+          }
+        }
+      },
+      "UploadSummary": {
+        "type": "object",
+        "properties": {
+          "success": { "type": "boolean", "example": true },
+          "data": {
+            "type": "object",
+            "properties": {
+              "scan_result_id": { "type": "integer", "example": 42 },
+              "repository": { "type": "string", "example": "ghcr.io/acme/api" },
+              "image": { "type": "string", "example": "ghcr.io/acme/api:latest" },
+              "vulnerability_count": { "type": "integer", "example": 15 },
+              "severity_breakdown": {
+                "type": "object",
+                "properties": {
+                  "CRITICAL": { "type": "integer", "example": 2 },
+                  "HIGH": { "type": "integer", "example": 5 },
+                  "MEDIUM": { "type": "integer", "example": 6 },
+                  "LOW": { "type": "integer", "example": 2 },
+                  "UNKNOWN": { "type": "integer", "example": 0 }
+                }
+              },
+              "parsed_at": { "type": "string", "format": "date-time", "example": "2026-04-26T10:00:00.000Z" }
+            }
+          }
+        }
+      },
+      "DashboardStats": {
+        "type": "object",
+        "properties": {
+          "total_vulnerabilities": { "type": "integer" },
+          "total_repositories": { "type": "integer" },
+          "total_images": { "type": "integer" },
+          "by_severity": {
+            "type": "object",
+            "properties": {
+              "CRITICAL": { "type": "integer" },
+              "HIGH": { "type": "integer" },
+              "MEDIUM": { "type": "integer" },
+              "LOW": { "type": "integer" },
+              "UNKNOWN": { "type": "integer" }
+            }
+          },
+          "top_repositories": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": { "type": "integer" },
+                "name": { "type": "string" },
+                "vulnerability_count": { "type": "integer" },
+                "critical_count": { "type": "integer" }
+              }
+            }
+          },
+          "recent_scans": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": { "type": "integer" },
+                "repository": { "type": "string" },
+                "image": { "type": "string" },
+                "vulnerability_count": { "type": "integer" },
+                "critical_count": { "type": "integer" },
+                "scanned_at": { "type": "string", "format": "date-time" }
+              }
+            }
+          }
+        }
+      },
+      "Pagination": {
+        "type": "object",
+        "properties": {
+          "page": { "type": "integer", "example": 1 },
+          "limit": { "type": "integer", "example": 25 },
+          "total_items": { "type": "integer", "example": 100 },
+          "total_pages": { "type": "integer", "example": 4 }
+        }
+      },
+      "VulnerabilityListResponse": {
+        "type": "object",
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": { "$ref": "#/components/schemas/VulnerabilityDetail" }
+          },
+          "pagination": { "$ref": "#/components/schemas/Pagination" }
+        }
+      },
+      "VulnerabilityDetail": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "integer" },
+          "scan_result_id": { "type": "integer" },
+          "cve_id": { "type": "string", "example": "CVE-2024-1234" },
+          "severity": { "type": "string", "enum": ["CRITICAL", "HIGH", "MEDIUM", "LOW", "UNKNOWN"] },
+          "package_name": { "type": "string", "example": "openssl" },
+          "installed_version": { "type": "string", "nullable": true, "example": "1.1.1k" },
+          "fixed_version": { "type": "string", "nullable": true, "example": "1.1.1w" },
+          "title": { "type": "string", "nullable": true },
+          "description": { "type": "string", "nullable": true },
+          "score": { "type": "number", "nullable": true, "example": 9.8 },
+          "created_at": { "type": "string", "format": "date-time" },
+          "repository": {
+            "type": "object",
+            "properties": { "id": { "type": "integer" }, "name": { "type": "string" } }
+          },
+          "image": {
+            "type": "object",
+            "properties": { "id": { "type": "integer" }, "name": { "type": "string" } }
+          },
+          "scanned_at": { "type": "string", "format": "date-time" }
+        }
+      },
+      "RepositoryListResponse": {
+        "type": "object",
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": { "type": "integer" },
+                "name": { "type": "string" },
+                "vulnerability_count": { "type": "integer" },
+                "critical_count": { "type": "integer" },
+                "last_scanned_at": { "type": "string", "format": "date-time", "nullable": true }
+              }
+            }
+          },
+          "pagination": { "$ref": "#/components/schemas/Pagination" }
+        }
+      },
+      "RepositoryDetail": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "integer" },
+          "name": { "type": "string" },
+          "created_at": { "type": "string", "format": "date-time" },
+          "by_severity": {
+            "type": "object",
+            "properties": {
+              "CRITICAL": { "type": "integer" },
+              "HIGH": { "type": "integer" },
+              "MEDIUM": { "type": "integer" },
+              "LOW": { "type": "integer" },
+              "UNKNOWN": { "type": "integer" }
+            }
+          },
+          "images": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": { "type": "integer" },
+                "name": { "type": "string" },
+                "last_scanned_at": { "type": "string", "format": "date-time", "nullable": true },
+                "vulnerability_count": { "type": "integer" },
+                "critical_count": { "type": "integer" }
+              }
+            }
+          },
+          "vulnerabilities": {
+            "type": "array",
+            "items": { "$ref": "#/components/schemas/VulnerabilityDetail" }
+          }
+        }
+      },
+      "ImageListResponse": {
+        "type": "object",
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": { "type": "integer" },
+                "name": { "type": "string" },
+                "repository": {
+                  "type": "object",
+                  "properties": { "id": { "type": "integer" }, "name": { "type": "string" } }
+                },
+                "vulnerability_count": { "type": "integer" },
+                "critical_count": { "type": "integer" },
+                "last_scanned_at": { "type": "string", "format": "date-time", "nullable": true }
+              }
+            }
+          },
+          "pagination": { "$ref": "#/components/schemas/Pagination" }
+        }
+      },
+      "ImageDetail": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "integer" },
+          "name": { "type": "string" },
+          "repository": {
+            "type": "object",
+            "properties": { "id": { "type": "integer" }, "name": { "type": "string" } }
+          },
+          "created_at": { "type": "string", "format": "date-time" },
+          "last_scanned_at": { "type": "string", "format": "date-time", "nullable": true },
+          "by_severity": {
+            "type": "object",
+            "properties": {
+              "CRITICAL": { "type": "integer" },
+              "HIGH": { "type": "integer" },
+              "MEDIUM": { "type": "integer" },
+              "LOW": { "type": "integer" },
+              "UNKNOWN": { "type": "integer" }
+            }
+          },
+          "vulnerabilities": {
+            "type": "array",
+            "items": { "$ref": "#/components/schemas/VulnerabilityDetail" }
+          }
+        }
+      },
+      "NotificationSettings": {
+        "type": "object",
+        "properties": {
+          "enabled": { "type": "boolean", "example": true },
+          "min_severity": { "type": "string", "enum": ["CRITICAL", "HIGH", "MEDIUM", "LOW"], "example": "HIGH" }
+        }
+      }
+    },
+    "securitySchemes": {
+      "ApiKeyHeader": {
+        "type": "apiKey",
+        "in": "header",
+        "name": "x-api-key",
+        "description": "Optional API key for authenticated endpoints (e.g. webhooks). Planned for full API key management (TRIVY-015)."
+      }
+    }
+  }
+}
