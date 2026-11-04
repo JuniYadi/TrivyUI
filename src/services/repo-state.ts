@@ -332,6 +332,8 @@ export interface RepoGroupHealth {
   previous_tag: string | null;
   status: TagGroupStatus;
   last_scanned_at: string | null;
+  /** Top packages in this group's latest scan. */
+  top_packages: TopPackage[];
 }
 
 export interface TopPackage {
@@ -481,6 +483,7 @@ export function loadRepositoryDetail(db: Database, repo: { id: number; name: str
       previous_tag: tagLabel(ordered[1]),
       status: computeTagGroupStatus({ open: latestCounts.open, critical: latestCounts.by_severity.CRITICAL, openChange: change, criticalChange }),
       last_scanned_at: group.latestScan?.scan_date ?? null,
+      top_packages: group.latestScan ? loadTopPackages(db, group.latestScan.id) : [],
     });
 
     fixable += latestCounts.fixable;
