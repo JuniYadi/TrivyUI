@@ -1,4 +1,4 @@
-import { insertSuppressedFindings } from "../../services/suppressed-findings";
+import { insertSuppressedFindings, markScanSuppressionAware } from "../../services/suppressed-findings";
 import type { Database } from "bun:sqlite";
 import { insertScanPackages, insertVulnerabilities, upsertImage, upsertRepository, upsertScanResult } from "../../services/db-service";
 import { parseImageTagGrouping } from "../../services/image-tag-grouping";
@@ -90,6 +90,7 @@ export function importTrivyPayload(db: Database, parsedJson: unknown, rawJson: s
     const scanResultId = upsertScanResult(db, imageId, rawJson, parsed.source, parsed.scan_date);
     insertScanPackages(db, scanResultId, parsed.packages);
     insertVulnerabilities(db, scanResultId, parsed.vulnerabilities);
+    markScanSuppressionAware(db, scanResultId, parsed.suppression_aware);
     insertSuppressedFindings(db, scanResultId, parsed.suppressed);
     retentionTarget = {
       repository: parsed.repo_name,
