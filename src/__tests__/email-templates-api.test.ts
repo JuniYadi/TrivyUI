@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { initDb } from "../db";
 import { createEmailTemplatesHandler } from "../routes/api/email-templates";
+import { updateEmailTemplate } from "../services/email-templates";
 
 describe("email templates api", () => {
   test("GET list returns seeded repo_vuln_alert template", async () => {
@@ -132,6 +133,27 @@ describe("email templates api validation", () => {
     const db = initDb(":memory:");
     const response = await createEmailTemplatesHandler(db)(new Request("http://localhost/api/email-templates", { method: "DELETE" }));
     expect(response.status).toBe(405);
+    db.close();
+  });
+});
+
+describe("email templates service validation", () => {
+  const base = { subject: "s", html_body: "<p>h</p>", enabled: true };
+  test.each([
+    ["blank subject", { ...base, subject: "  " }, "'subject' is required"],
+    ["blank html_body", { ...base, html_body: "" }, "'html_body' is required"],
+    ["long subject", { ...base, subject: "x".repeat(256) }, "<= 255"],
+    ["huge html_body", { ...base, html_body: "x".repeat(100001) }, "too large"],
+    ["huge text_body", { ...base, text_body: "x".repeat(100001) }, "'text_body' is too large"],
+  ])("rejects %s", (_name, input, message) => {
+    const db = initDb(":memory:");
+    expect(() => updateEmailTemplate(db, "repo_vuln_alert", input)).toThrow(message);
+    db.close();
+  });
+
+  test("throws not found for unknown template key", () => {
+    const db = initDb(":memory:");
+    expect(() => updateEmailTemplate(db, "missing", base)).toThrow("not found");
     db.close();
   });
 });
