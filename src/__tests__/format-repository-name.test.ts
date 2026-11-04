@@ -13,4 +13,9 @@ describe("formatRepositoryName", () => {
   test("keeps short names unchanged", () => {
     expect(formatRepositoryName("acme/api")).toBe("acme/api");
   });
+
+  test("returns a dash for empty or whitespace-only names", () => {
+    expect(formatRepositoryName("")).toBe("-");
+    expect(formatRepositoryName("   ")).toBe("-");
+  });
 });
