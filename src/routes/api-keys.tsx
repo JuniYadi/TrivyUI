@@ -1,5 +1,8 @@
 import { useEffect, useState } from "react";
 import { AppShell } from "../components/app-shell";
+import { Button } from "../components/ui/button";
+import { Card } from "../components/ui/card";
+import { Mono } from "../components/ui/mono";
 
 interface ApiResponse<T> {
   success: boolean;
@@ -24,6 +27,14 @@ interface CreatedKey {
   created_at: string;
 }
 
+function formatDate(value: string | null): string {
+  if (!value) {
+    return "—";
+  }
+  const date = new Date(value.includes("T") ? value : `${value.replace(" ", "T")}Z`);
+  return Number.isNaN(date.getTime()) ? value : date.toLocaleString();
+}
+
 export function ApiKeysPage() {
   const [loading, setLoading] = useState(true);
   const [items, setItems] = useState<ApiKeyItem[]>([]);
@@ -31,6 +42,8 @@ export function ApiKeysPage() {
   const [createError, setCreateError] = useState("");
   const [createBusy, setCreateBusy] = useState(false);
   const [latestPlaintext, setLatestPlaintext] = useState<string | null>(null);
+  const [copied, setCopied] = useState(false);
+  const [confirmId, setConfirmId] = useState<number | null>(null);
 
   async function loadKeys() {
     const response = await fetch("/api/api-keys");
@@ -69,6 +82,7 @@ export function ApiKeysPage() {
     setCreateBusy(true);
     setCreateError("");
     setLatestPlaintext(null);
+    setCopied(false);
 
     try {
       const response = await fetch("/api/api-keys", {
@@ -93,66 +107,142 @@ export function ApiKeysPage() {
   }
 
   async function onRevoke(id: number) {
+    setConfirmId(null);
     const response = await fetch(`/api/api-keys/${id}`, { method: "DELETE" });
     if (!response.ok) {
+      setCreateError("Failed to revoke API key");
       return;
     }
     await loadKeys();
   }
 
+  async function onCopy() {
+    if (!latestPlaintext) {
+      return;
+    }
+    try {
+      await navigator.clipboard.writeText(latestPlaintext);
+      setCopied(true);
+    } catch {
+      setCopied(false);
+    }
+  }
+
   return (
-      <AppShell
-       activeRoute="/api-keys"
-       title="API Keys"
-       subtitle="Generate one-time view keys for protected POST endpoints."
-     >
-      <section className="rounded-xl border border-slate-700 bg-slate-900/90 p-5 shadow-inner grid gap-4">
-        <h2 className="mb-0 text-base font-semibold">Generate API Key</h2>
-        <p className="mt-0 text-sm text-slate-400">The plaintext key is shown only once. Save it securely before leaving this page.</p>
+    <AppShell activeRoute="/api-keys" title="API keys" meta="Keys authorise protected POST endpoints such as scan upload.">
+      <div className="grid gap-4">
+        <Card className="grid gap-3">
+          <div>
+            <h2 className="text-base font-semibold">Create key</h2>
+            <p className="text-sm text-fg2">The plaintext key is shown only once. Store it securely before leaving this page.</p>
+          </div>
+          <form
+            className="flex flex-wrap items-end gap-2"
+            onSubmit={(event) => {
+              event.preventDefault();
+              void onCreate();
+            }}
+          >
+            <label className="grid min-w-0 flex-1 basis-56 gap-1" htmlFor="api-key-label">
+              <span className="text-xs font-semibold uppercase tracking-wide text-muted">Label</span>
+              <input
+                id="api-key-label"
+                className="h-11 w-full rounded-lg border border-line bg-bg px-3 text-sm text-fg placeholder:text-muted focus-visible:outline-2 focus-visible:outline-accent disabled:opacity-50"
+                value={label}
+                disabled={loading || createBusy}
+                onChange={(event) => setLabel(event.target.value)}
+                placeholder="e.g. CI uploader"
+              />
+            </label>
+            <Button type="submit" variant="primary" className="min-h-11 px-5" disabled={loading || createBusy}>
+              {createBusy ? "Creating..." : "Create key"}
+            </Button>
+          </form>
 
-        <label className="grid gap-1" htmlFor="api-key-label">
-          <span className="text-xs font-semibold uppercase tracking-wide text-slate-400">Label</span>
-          <input
-            id="api-key-label"
-            className="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-slate-200 placeholder-slate-500 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/50 disabled:opacity-50"
-            value={label}
-            disabled={loading || createBusy}
-            onChange={(event) => setLabel(event.target.value)}
-            placeholder="e.g. CI uploader"
-          />
-        </label>
-
-        <div className="flex flex-wrap gap-2">
-          <button type="button" className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-blue-700 disabled:opacity-40" onClick={onCreate} disabled={loading || createBusy}>
-            {createBusy ? "Generating..." : "Generate Key"}
-          </button>
-        </div>
-
-        {latestPlaintext && <div className="rounded-lg border border-green-800 bg-green-950/30 px-3 py-2 text-sm font-semibold text-green-200">One-time key: {latestPlaintext}</div>}
-        {createError && <div className="rounded-lg border border-red-900 bg-red-950/40 px-3 py-2 text-sm font-semibold text-red-200">{createError}</div>}
-      </section>
-
-      <section className="mt-4 rounded-xl border border-slate-700 bg-slate-900/90 p-5 shadow-inner">
-        <h2 className="mb-4 text-base font-semibold">Existing Keys</h2>
-        <ul className="m-0 list-none space-y-3 p-0">
-          {items.map((item) => (
-            <li key={item.id} className="flex items-center justify-between rounded-lg border border-slate-700/80 bg-slate-950/60 p-3">
+          {latestPlaintext && (
+            <div role="status" className="grid gap-2 rounded-lg border border-success bg-bg p-3">
+              <p className="text-sm font-medium text-success">Copy your new key now. It will not be shown again.</p>
               <div className="flex flex-wrap items-center gap-2">
-                <span className="font-semibold">{item.label}</span>
-                <span className="text-sm text-slate-400">{item.masked_key}</span>
-                <span className={`rounded-full px-2 py-0.5 text-xs font-bold ${item.is_active ? "bg-green-950 text-green-200" : "bg-gray-800 text-gray-400"}`}>
-                  {item.is_active ? "active" : "revoked"}
-                </span>
+                <code className="min-w-0 flex-1 basis-56 break-all rounded-md border border-line bg-card px-2 py-2 font-mono text-sm text-fg">
+                  {latestPlaintext}
+                </code>
+                <Button className="min-h-11" onClick={() => void onCopy()}>
+                  {copied ? "Copied" : "Copy"}
+                </Button>
               </div>
-              {item.is_active && (
-                <button type="button" className="rounded-lg border border-slate-700 bg-slate-950 px-3 py-1.5 text-sm font-semibold text-slate-300 transition hover:border-slate-500" onClick={() => void onRevoke(item.id)}>
-                  Revoke
-                </button>
-              )}
-            </li>
-          ))}
-        </ul>
-      </section>
+            </div>
+          )}
+          {createError && (
+            <div role="alert" className="rounded-lg border border-red-400 px-3 py-2 text-sm font-medium text-red-300">
+              {createError}
+            </div>
+          )}
+        </Card>
+
+        <Card className="p-0">
+          <div className="overflow-x-auto">
+            <table className="w-full min-w-[640px] border-collapse text-sm">
+              <thead>
+                <tr className="border-b border-line text-left text-xs uppercase tracking-wide text-muted">
+                  <th className="px-4 py-3 font-semibold">Name</th>
+                  <th className="px-4 py-3 font-semibold">Key</th>
+                  <th className="px-4 py-3 font-semibold">Created</th>
+                  <th className="px-4 py-3 font-semibold">Last used</th>
+                  <th className="px-4 py-3 font-semibold">Status</th>
+                  <th className="px-4 py-3 text-right font-semibold">
+                    <span className="sr-only">Actions</span>
+                  </th>
+                </tr>
+              </thead>
+              <tbody>
+                {items.map((item) => (
+                  <tr key={item.id} className="border-b border-rowline last:border-0">
+                    <td className="px-4 py-2 font-medium">{item.label}</td>
+                    <td className="px-4 py-2">
+                      <Mono className="text-fg2">{item.masked_key}</Mono>
+                    </td>
+                    <td className="px-4 py-2 text-fg2">{formatDate(item.created_at)}</td>
+                    <td className="px-4 py-2 text-fg2">{formatDate(item.last_used_at)}</td>
+                    <td className="px-4 py-2">
+                      <span
+                        className={`rounded-full border px-2 py-0.5 text-xs font-semibold ${
+                          item.is_active ? "border-success text-success" : "border-line text-muted"
+                        }`}
+                      >
+                        {item.is_active ? "Active" : "Revoked"}
+                      </span>
+                    </td>
+                    <td className="px-4 py-2 text-right">
+                      {item.is_active &&
+                        (confirmId === item.id ? (
+                          <span className="inline-flex items-center gap-1">
+                            <Button variant="quiet" className="min-h-11" onClick={() => setConfirmId(null)}>
+                              Cancel
+                            </Button>
+                            <Button className="min-h-11 border-red-400 text-red-300" onClick={() => void onRevoke(item.id)}>
+                              Confirm revoke
+                            </Button>
+                          </span>
+                        ) : (
+                          <Button variant="quiet" className="min-h-11" onClick={() => setConfirmId(item.id)}>
+                            Revoke
+                          </Button>
+                        ))}
+                    </td>
+                  </tr>
+                ))}
+                {!loading && items.length === 0 && (
+                  <tr>
+                    <td colSpan={6} className="px-4 py-6 text-center text-muted">
+                      No API keys yet.
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+        </Card>
+      </div>
     </AppShell>
   );
 }
