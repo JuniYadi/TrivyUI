@@ -335,7 +335,7 @@ function VulnerabilityList({
                     <span className="flex items-center gap-2">
                       <SeverityChip severity={item.severity} />
                       <a
-                        href={`/vulnerabilities?search=${encodeURIComponent(item.cve_id)}&repository=${encodeURIComponent(repositoryName)}`}
+                        href={`/vulnerabilities/${encodeURIComponent(item.cve_id)}`}
                         className={`inline-flex min-h-11 items-center font-mono text-link hover:underline sm:min-h-9 ${FOCUS}`}
                       >
                         {item.cve_id}
