@@ -74,7 +74,11 @@ const REPO_STATUS_LABEL: Record<string, string> = {
   still_present: "Still present",
   fixed: "Fixed: gone from latest scan",
   no_scan: "No scan since rule was created",
+  unknown: "Scan without --show-suppressed",
 };
+
+const UNKNOWN_STATUS_TIP =
+  "Trivy hides ignored findings unless the scan runs with --show-suppressed, so a missing CVE does not prove it is fixed. Add --show-suppressed to your CI trivy command (see Generate file example below).";
 
 function tagOf(imageName: string): string {
   const slash = imageName.lastIndexOf("/");
@@ -178,7 +182,10 @@ function RuleRepos({
               </a>
               <Mono className="text-xs text-muted">{group ? tagOf(group.image_name) : "-"}</Mono>
               <Mono className={`text-xs ${repo.status === "fixed" ? "text-success" : ""}`}>{version ?? "-"}</Mono>
-              <span className={`text-sm ${repo.status === "fixed" ? "text-success" : repo.status === "still_present" ? "text-warning" : "text-fg2"}`}>
+              <span
+                title={repo.status === "unknown" ? UNKNOWN_STATUS_TIP : undefined}
+                className={`text-sm ${repo.status === "unknown" ? "text-muted" : repo.status === "fixed" ? "text-success" : repo.status === "still_present" ? "text-warning" : "text-fg2"}`}
+              >
                 {repo.status === "fixed" && repo.last_seen_version ? `Fixed (was ${repo.last_seen_version})` : REPO_STATUS_LABEL[repo.status ?? "no_scan"]}
                 {repo.status === "still_present" && repo.suppressed ? " (suppressed)" : ""}
               </span>
@@ -470,6 +477,11 @@ export function TrivyIgnoreListPanel({
                             <span className="rounded bg-warning/15 px-2 py-0.5 text-warning">{summary.still_present} still present</span>
                             <span className="rounded bg-success/15 px-2 py-0.5 text-success">{summary.fixed} fixed</span>
                             {summary.no_scan > 0 && <span className="rounded bg-line px-2 py-0.5 text-fg2">{summary.no_scan} no scan</span>}
+                            {summary.unknown > 0 && (
+                              <span className="rounded bg-line px-2 py-0.5 text-muted" title={UNKNOWN_STATUS_TIP}>
+                                {summary.unknown} unknown
+                              </span>
+                            )}
                           </div>
                           {row.hint && <p className={`m-0 mt-1 text-xs ${row.safe_to_remove ? "text-success" : "text-fg2"}`}>{row.hint}</p>}
                         </>
