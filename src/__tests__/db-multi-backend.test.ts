@@ -359,3 +359,85 @@ describe("multi-db unhappy path", () => {
     });
   });
 });
+
+describe("multi-db dialect branches (sqlite-backed)", () => {
+  function withDialect(base: DatabaseDriver, dialect: "postgres" | "mysql", log: string[] = []): DatabaseDriver {
+    const wrap = (inner: DatabaseDriver): DatabaseDriver => ({
+      dialect,
+      execute: (sql, params) => {
+        log.push(sql);
+        return inner.execute(sql, params);
+      },
+      queryOne: (sql, params) => inner.queryOne(sql, params),
+      queryAll: (sql, params) => inner.queryAll(sql, params),
+      transaction: (fn) => inner.transaction((tx) => fn(wrap(tx))),
+      close: () => inner.close(),
+    });
+    return wrap(base);
+  }
+
+  const stub = (overrides: Partial<DatabaseDriver>): DatabaseDriver => ({
+    dialect: "sqlite",
+    execute: async () => ({ rowCount: 0, lastInsertId: null }),
+    queryOne: async () => null,
+    queryAll: async () => [],
+    transaction: async (fn) => fn(stub(overrides)),
+    close: async () => {},
+    ...overrides,
+  });
+
+  test("postgres dialect uses ON CONFLICT DO NOTHING and RETURNING for scan results", async () => {
+    await withBackend("sqlite", async (sqlite) => {
+      const log: string[] = [];
+      const db = withDialect(sqlite, "postgres", log);
+      const repoId = await upsertRepositoryMultiDb(db, "ghcr.io/acme/pg");
+      const imageId = await upsertImageMultiDb(db, repoId, "ghcr.io/acme/pg:1");
+      const scanId = await upsertScanResultMultiDb(db, imageId, "{}", " ", "2026-01-01T00:00:00Z");
+
+      expect(scanId).toBeGreaterThan(0);
+      expect(log.some((sql) => sql.includes("ON CONFLICT DO NOTHING"))).toBe(true);
+    });
+  });
+
+  test("mysql dialect uses INSERT IGNORE", async () => {
+    const sql: string[] = [];
+    const db = stub({
+      dialect: "mysql",
+      execute: async (statement) => {
+        sql.push(statement);
+        return { rowCount: 1, lastInsertId: 1 };
+      },
+      queryOne: async () => ({ id: 7 }) as never,
+    });
+
+    expect(await upsertRepositoryMultiDb(db, "repo")).toBe(7);
+    expect(sql[0]).toStartWith("INSERT IGNORE INTO repositories");
+  });
+
+  test("scan result falls back to a lookup when lastInsertId is missing", async () => {
+    const db = stub({ queryOne: async () => ({ id: 42 }) as never });
+    expect(await upsertScanResultMultiDb(db, 1, "{}", "manual")).toBe(42);
+  });
+
+  test("throws when inserts cannot be read back", async () => {
+    await expect(upsertRepositoryMultiDb(stub({}), "repo")).rejects.toThrow("FAILED_UPSERT_REPOSITORY");
+    await expect(upsertImageMultiDb(stub({}), 1, "img")).rejects.toThrow("FAILED_UPSERT_IMAGE");
+    await expect(upsertScanResultMultiDb(stub({}), 1, "{}", "manual")).rejects.toThrow("FAILED_INSERT_SCAN_RESULT");
+    await expect(upsertScanResultMultiDb(stub({ dialect: "postgres" }), 1, "{}", "manual")).rejects.toThrow(
+      "FAILED_INSERT_SCAN_RESULT",
+    );
+  });
+
+  test("empty vulnerability and package lists are no-ops", async () => {
+    const db = stub({
+      execute: async () => {
+        throw new Error("should not execute");
+      },
+      transaction: async () => {
+        throw new Error("should not open a transaction");
+      },
+    });
+    await insertVulnerabilitiesMultiDb(db, 1, []);
+    await insertScanPackagesMultiDb(db, 1, []);
+  });
+});
