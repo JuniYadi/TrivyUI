@@ -1,6 +1,7 @@
+import type React from "react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { DragEvent } from "react";
-import { Link } from "@tanstack/react-router";
+import { navigate } from "../lib/navigation";
 import { AppShell } from "../components/app-shell";
 import { Button } from "../components/ui/button";
 import { Card } from "../components/ui/card";
@@ -33,6 +34,21 @@ function formatFileSize(size: number): string {
   }
 
   return `${(size / (1024 * 1024)).toFixed(2)} MB`;
+}
+
+function NavLink({ to, className, children }: { to: string; className?: string; children: React.ReactNode }) {
+  return (
+    <a
+      href={to}
+      className={className}
+      onClick={(event) => {
+        event.preventDefault();
+        navigate(to);
+      }}
+    >
+      {children}
+    </a>
+  );
 }
 
 export function formatRelativeTime(value: string, now: number = Date.now()): string {
@@ -108,9 +124,9 @@ function RecentUploads({ items, loaded }: { items: RecentUpload[]; loaded: boole
     <Card className="p-0">
       <div className="flex items-center justify-between border-b border-rowline px-4 py-3">
         <h2 className="m-0 text-sm font-semibold">Recent uploads</h2>
-        <Link to="/images" className="inline-flex min-h-11 items-center text-sm text-link">
+        <NavLink to="/images" className="inline-flex min-h-11 items-center text-sm text-link">
           View all
-        </Link>
+        </NavLink>
       </div>
       {items.length === 0 ? (
         <p className="m-0 px-4 py-4 text-sm text-muted">{loaded ? "No uploads yet." : "Loading..."}</p>
@@ -143,16 +159,16 @@ export function CiSnippetCard({ origin }: { origin: string }) {
         <summary className="flex min-h-11 cursor-pointer items-center text-sm font-semibold">Upload via API / CI</summary>
         <p className="mt-1 text-sm text-fg2">
           Send reports from your pipeline. Create a key under{" "}
-          <Link to="/api-keys" className="text-link">
+          <NavLink to="/api-keys" className="text-link">
             API keys
-          </Link>
+          </NavLink>
           ; use <Mono>/api/upload</Mono> for one file, <Mono>/api/upload/batch</Mono> for several.
         </p>
         <p className="rounded-lg border border-accent/40 bg-accent/10 px-3 py-2 text-sm">
           Keep <Mono>--show-suppressed</Mono> in the scan step. Ignored CVEs stay visible (marked suppressed), so{" "}
-          <Link to="/trivy-ignore" className="text-link">
+          <NavLink to="/trivy-ignore" className="text-link">
             Ignore rules
-          </Link>{" "}
+          </NavLink>{" "}
           can show which repositories have already fixed them. Needs Trivy v0.50.0 or newer.
         </p>
         <pre className="overflow-x-auto rounded-lg border border-line bg-bg p-3 font-mono text-xs leading-relaxed">{snippet}</pre>
