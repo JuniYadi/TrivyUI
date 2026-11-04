@@ -10,10 +10,10 @@ import {
   PageSkeleton,
   SearchBox,
   SeverityCountChips,
-  displayRepoName,
   formatDateTime,
   repoHref,
 } from "../components/repo-ui";
+import { ImageName } from "../components/image-name";
 import { Card } from "../components/ui/card";
 import { Mono } from "../components/ui/mono";
 import { useImages, type ImageQueryParams } from "../hooks/use-images";
@@ -85,11 +85,11 @@ export function ImagesView({ data, query, onSearch, onSort, onPage, onLimit }: I
                 <Fragment key={group.repository.id}>
                   <tr className="border-b border-rowline bg-bg/40">
                     <th scope="colgroup" colSpan={3} className="px-4 py-2 text-left font-normal">
-                      <AppLink href={repoHref(group.repository.name)} className="inline-flex min-h-11 items-center gap-2 font-semibold text-link hover:underline sm:min-h-9">
-                        {displayRepoName(group.repository.name, group.repository.registry)}
+                      <AppLink href={repoHref(group.repository.name)} className="inline-flex min-h-11 max-w-full items-center hover:underline sm:min-h-9">
+                        <ImageName imageRef={group.repository.name} variant="inline" />
                       </AppLink>
                       <span className="ml-2 text-xs text-muted">
-                        {group.repository.registry ?? "docker.io"} {"·"} {group.tag_count} {group.tag_count === 1 ? "tag" : "tags"}
+                        {group.tag_count} {group.tag_count === 1 ? "tag" : "tags"}
                         {group.tag_count > group.images.length && ` (showing ${group.images.length})`}
                       </span>
                     </th>
