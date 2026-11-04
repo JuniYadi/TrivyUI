@@ -161,3 +161,63 @@ describe("server routing", () => {
     }
   });
 });
+
+describe("server method guards and dispatch", () => {
+  const cases: Array<[string, string]> = [
+    ["POST", "/api/health"],
+    ["GET", "/api/upload"],
+    ["GET", "/api/upload/batch"],
+    ["GET", "/api/webhook"],
+    ["POST", "/api/stats"],
+    ["POST", "/api/vulnerabilities"],
+    ["POST", "/api/repositories"],
+    ["POST", "/api/images"],
+    ["POST", "/api/settings/notifications"],
+    ["PUT", "/api/api-keys"],
+    ["POST", "/api/email-templates"],
+    ["PUT", "/api/trivy-ignores"],
+    ["POST", "/api/trivy-ignore/generate"],
+    ["PUT", "/api/vulnerability-catalog/CVE-2026-0001"],
+  ];
+
+  test.each(cases)("%s %s returns 405", async (method, pathname) => {
+    const response = await handleRequest(makeRequest(pathname, method));
+    const body = (await response.json()) as { error: { code: string } };
+
+    expect(response.status).toBe(405);
+    expect(body.error.code).toBe("METHOD_NOT_ALLOWED");
+  });
+
+  test("dispatches POST upload, batch and webhook to their handlers", async () => {
+    for (const pathname of ["/api/upload", "/api/upload/batch", "/api/webhook"]) {
+      const response = await handleRequest(
+        new Request(`http://localhost:3000${pathname}`, { method: "POST", headers: { "content-type": "text/plain" }, body: "x" }),
+      );
+      expect(response.status).toBe(415);
+    }
+  });
+
+  test("dispatches settings, api-keys, email-templates, trivy-ignores and generate", async () => {
+    for (const pathname of [
+      "/api/settings/notifications",
+      "/api/api-keys",
+      "/api/email-templates",
+      "/api/trivy-ignores",
+      "/api/trivy-ignore/generate",
+    ]) {
+      const response = await handleRequest(makeRequest(pathname));
+      expect(response.status).toBe(200);
+    }
+  });
+
+  test("dispatches vulnerability catalog lookups without 405", async () => {
+    const response = await handleRequest(makeRequest("/api/vulnerability-catalog/not-a-valid-id"));
+    expect(response.status).not.toBe(405);
+    expect(response.status).not.toBe(404);
+  });
+
+  test("serves an existing static asset", async () => {
+    const response = await handleRequest(makeRequest("/index.html"));
+    expect(response.status).toBe(200);
+  });
+});
