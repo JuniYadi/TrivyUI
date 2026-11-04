@@ -79,7 +79,7 @@ function globMatch(value: string, pattern: string): boolean {
   return new RegExp(`^${escaped.replace(/\*/g, ".*")}$`).test(value);
 }
 
-function loadLatestScans(db: Database): LatestScan[] {
+function loadLatestScans(db: Database, repositoryId?: number): LatestScan[] {
   return db
     .query<LatestScan>(
       `
@@ -88,10 +88,11 @@ function loadLatestScans(db: Database): LatestScan[] {
                sr.id AS scan_id, sr.scan_date AS scan_date, sr.suppression_aware AS suppression_aware,
                ROW_NUMBER() OVER (PARTITION BY i.repository_id, i.tag_group ORDER BY sr.scan_date DESC, sr.id DESC) AS rn
         FROM scan_results sr JOIN images i ON i.id = sr.image_id
+        ${repositoryId === undefined ? "" : "WHERE i.repository_id = ?1"}
       ) WHERE rn = 1
     `,
     )
-    .all();
+    .all(...(repositoryId === undefined ? [] : [repositoryId]));
 }
 
 function loadPresence(db: Database, scanIds: number[]): Map<string, Presence> {
@@ -129,15 +130,16 @@ function loadPresence(db: Database, scanIds: number[]): Map<string, Presence> {
 }
 
 /** repository_id -> latest scan time (ms) of any scan that has suppressed_findings rows. */
-function loadSuppressedScanTimes(db: Database): Map<number, number> {
+function loadSuppressedScanTimes(db: Database, repositoryId?: number): Map<number, number> {
   const map = new Map<number, number>();
   const rows = db
     .query<{ repository_id: number; scan_date: string }>(
       `SELECT i.repository_id AS repository_id, MAX(sr.scan_date) AS scan_date
        FROM suppressed_findings sf JOIN scan_results sr ON sr.id = sf.scan_result_id JOIN images i ON i.id = sr.image_id
+       ${repositoryId === undefined ? "" : "WHERE i.repository_id = ?1"}
        GROUP BY i.repository_id`,
     )
-    .all();
+    .all(...(repositoryId === undefined ? [] : [repositoryId]));
   for (const r of rows) map.set(r.repository_id, toMs(r.scan_date));
   return map;
 }
@@ -169,6 +171,8 @@ function computeRuleRepos(
   presence: Map<string, Presence>,
   excludedRepoIds: Set<number>,
   suppressedScanMs: Map<number, number>,
+  lastSeenFn: (repositoryId: number, tagGroup: string, cveId: string) => string | null = (repositoryId, tagGroup, cveId) =>
+    lastSeenVersion(db, repositoryId, tagGroup, cveId),
 ): RuleRepoStatus[] {
   const scoped = rule.repository_id === null ? repos : repos.filter((r) => r.id === rule.repository_id);
   const createdMs = toMs(rule.created_at);
@@ -212,7 +216,7 @@ function computeRuleRepos(
         status = "unknown";
       } else {
         status = "fixed";
-        lastSeen = lastSeenVersion(db, repo.id, s.tag_group, rule.cve_id);
+        lastSeen = lastSeenFn(repo.id, s.tag_group, rule.cve_id);
       }
       return {
         tag_group: s.tag_group,
@@ -323,4 +327,137 @@ export function listRulesOverview(db: Database): RuleOverview[] {
       hint: buildHint(summary, safe_to_remove, partly_fixed, rule, expiring),
     };
   });
+}
+
+// ---------------------------------------------------------------------------
+// Rules that apply to ONE repository, with that repository's status only (issue #62)
+// ---------------------------------------------------------------------------
+
+export type RepoRuleStatus = RuleStatus | "not_found";
+export type RepoRuleScopeFilter = "all" | "global" | "repo";
+
+export interface RepoRuleRow extends TrivyIgnoreRow {
+  package_name: string | null;
+  status: RepoRuleStatus;
+  /** still present but suppressed by the ignore file */
+  suppressed: boolean;
+  /** "fixed": tag of the latest scan the finding is gone from */
+  fixed_from_tag: string | null;
+  expired: boolean;
+}
+
+export interface RepoRulesSummary {
+  total: number;
+  global: number;
+  repo: number;
+  still_present: number;
+  fixed: number;
+  unknown: number;
+  not_found: number;
+  no_scan: number;
+}
+
+export interface RepoRulesResult {
+  items: RepoRuleRow[];
+  summary: RepoRulesSummary;
+  pagination: { page: number; limit: number; total_items: number; total_pages: number };
+}
+
+function tagFromImageName(imageName: string): string {
+  const slash = imageName.lastIndexOf("/");
+  const colon = imageName.lastIndexOf(":");
+  return colon > slash ? imageName.slice(colon + 1) : "latest";
+}
+
+/** Package + last seen version of the given CVEs in THIS repository's scan history (one query per table). */
+function loadRepoHistory(db: Database, repositoryId: number, cveIds: string[]) {
+  const packages = new Map<string, string>();
+  const lastSeen = new Map<string, string | null>();
+  if (cveIds.length === 0) return { packages, lastSeen };
+
+  const marks = cveIds.map(() => "?").join(",");
+  type Row = { cve_id: string; package_name: string; installed_version: string | null; tag_group: string; scan_date: string; id: number };
+  const rows: Row[] = [];
+  for (const table of ["vulnerabilities", "suppressed_findings"]) {
+    rows.push(
+      ...db
+        .query<Row>(
+          `SELECT t.cve_id, t.package_name, t.installed_version, i.tag_group, sr.scan_date, sr.id
+           FROM ${table} t JOIN scan_results sr ON sr.id = t.scan_result_id JOIN images i ON i.id = sr.image_id
+           WHERE i.repository_id = ? AND t.cve_id IN (${marks})`,
+        )
+        .all(repositoryId, ...cveIds),
+    );
+  }
+  rows.sort((a, b) => (a.scan_date < b.scan_date ? 1 : a.scan_date > b.scan_date ? -1 : b.id - a.id));
+  for (const row of rows) {
+    const cve = row.cve_id.toLowerCase();
+    if (!packages.has(cve)) packages.set(cve, row.package_name);
+    const key = `${row.tag_group}|${cve}`;
+    if (!lastSeen.has(key)) lastSeen.set(key, row.installed_version);
+  }
+  return { packages, lastSeen };
+}
+
+export function listRepositoryRules(
+  db: Database,
+  repositoryId: number,
+  options: { scope: RepoRuleScopeFilter; page: number; limit: number },
+): RepoRulesResult | null {
+  ensureTrivyIgnoreSchema(db);
+  const repo = db.query<{ id: number; name: string }>("SELECT id, name FROM repositories WHERE id = ?1").get(repositoryId);
+  if (!repo) return null;
+
+  const excluded = new Set(
+    db
+      .query<{ ignore_id: number }>("SELECT ignore_id FROM trivy_ignore_exclusions WHERE repository_id = ?1")
+      .all(repositoryId)
+      .map((row) => row.ignore_id),
+  );
+  const rules = listTrivyIgnores(db, repositoryId).filter((rule) => rule.repository_id !== null || !excluded.has(rule.id));
+
+  const latestScans = loadLatestScans(db, repo.id);
+  const latestByRepo = new Map<number, LatestScan[]>([[repo.id, latestScans]]);
+  const presence = loadPresence(
+    db,
+    latestScans.map((scan) => scan.scan_id),
+  );
+  const suppressedScanMs = loadSuppressedScanTimes(db, repo.id);
+  const history = loadRepoHistory(db, repo.id, [...new Set(rules.map((rule) => rule.cve_id))]);
+  const lastSeen = (_repo: number, tagGroup: string, cveId: string) => history.lastSeen.get(`${tagGroup}|${cveId.toLowerCase()}`) ?? null;
+
+  const now = Date.now();
+  const summary: RepoRulesSummary = { total: 0, global: 0, repo: 0, still_present: 0, fixed: 0, unknown: 0, not_found: 0, no_scan: 0 };
+  const rows: RepoRuleRow[] = rules.map((rule) => {
+    const [result] = computeRuleRepos(db, rule, [repo], latestByRepo, presence, new Set(), suppressedScanMs, lastSeen);
+    // Fixed here = a tag group that had the CVE and no longer reports it; groups that never had it prove nothing.
+    const fixedGroup = result?.tag_groups.find((group) => group.status === "fixed" && group.last_seen_version !== null);
+    let status: RepoRuleStatus = result?.status ?? "no_scan";
+    if (status === "fixed" && !fixedGroup) status = "not_found";
+    const expiresMs = toMs(rule.expires_at);
+    summary.total += 1;
+    summary[rule.repository_id === null ? "global" : "repo"] += 1;
+    summary[status] += 1;
+    return {
+      ...rule,
+      package_name: history.packages.get(rule.cve_id.toLowerCase()) ?? null,
+      status,
+      suppressed: result?.suppressed ?? false,
+      fixed_from_tag: status === "fixed" && fixedGroup ? tagFromImageName(fixedGroup.image_name) : null,
+      expired: Number.isFinite(expiresMs) && expiresMs < now,
+    };
+  });
+
+  const filtered = rows.filter((row) => options.scope === "all" || (options.scope === "global") === (row.repository_id === null));
+  const offset = (options.page - 1) * options.limit;
+  return {
+    items: filtered.slice(offset, offset + options.limit),
+    summary,
+    pagination: {
+      page: options.page,
+      limit: options.limit,
+      total_items: filtered.length,
+      total_pages: filtered.length === 0 ? 0 : Math.ceil(filtered.length / options.limit),
+    },
+  };
 }

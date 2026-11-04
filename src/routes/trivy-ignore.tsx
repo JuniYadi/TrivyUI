@@ -630,6 +630,17 @@ export function TrivyIgnorePage() {
   const { items, repositories, loading, error, create, remove, removeMany, stopIgnoring, importText, loadRepos, loadPreview, retry } =
     useTrivyIgnores(repoFilterId);
 
+  // `/trivy-ignore?repository=<name>` (linked from repository detail) preselects the repository filter once.
+  const urlRepository = useRef(typeof window === "undefined" ? null : new URLSearchParams(window.location.search).get("repository"));
+  useEffect(() => {
+    if (!urlRepository.current) return;
+    const match = repositories.find((repo) => repo.name === urlRepository.current);
+    if (match) {
+      urlRepository.current = null;
+      setRepoFilter(String(match.id));
+    }
+  }, [repositories]);
+
   useEffect(() => {
     if (items.length === 0) {
       setStatusByVulnId({});

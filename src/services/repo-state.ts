@@ -417,16 +417,50 @@ export function loadTopPackages(db: Database, scanId: number, limit = 5): TopPac
     .slice(0, limit);
 }
 
+export const TAGS_PER_GROUP = 3;
+
+function buildTagRows(
+  ordered: TimelineImage[],
+  groupName: string,
+  from: number,
+  to: number,
+  countsOf: (scan: TimelineScan | null | undefined) => ScanCounts | undefined,
+): RepoTagRow[] {
+  const rows: RepoTagRow[] = [];
+  for (let index = from; index < Math.min(to, ordered.length); index += 1) {
+    const image = ordered[index]!;
+    const own = countsOf(image.scans[0]) ?? emptyScanCounts();
+    const prevImage = ordered[index + 1];
+    const prevCounts = countsOf(prevImage?.scans[0]);
+    rows.push({
+      image_id: image.id,
+      name: image.name,
+      tag: image.tag,
+      tag_group: groupName,
+      is_latest: index === 0,
+      by_severity: own.by_severity,
+      open: own.open,
+      critical: own.by_severity.CRITICAL,
+      fixable: own.fixable,
+      change: delta(own.open, prevCounts?.open),
+      previous_tag: tagLabel(prevImage),
+      last_scanned_at: image.scans[0]?.scan_date ?? image.last_scanned_at,
+    });
+  }
+  return rows;
+}
+
 export function loadRepositoryDetail(db: Database, repo: { id: number; name: string; created_at: string }): RepositoryDetail {
   const timeline = loadTimelines(db, [repo.id]).get(repo.id)!;
 
+  // Only the shown tags (latest N per group) and the tag after the last one (for its change) need counts.
   const scanIds: number[] = [];
-  for (const image of timeline.images) {
-    if (image.scans[0]) {
-      scanIds.push(image.scans[0].id);
-    }
-  }
   for (const group of timeline.groups) {
+    for (const image of group.images.slice(0, TAGS_PER_GROUP + 1)) {
+      if (image.scans[0]) {
+        scanIds.push(image.scans[0].id);
+      }
+    }
     if (group.previousScan) {
       scanIds.push(group.previousScan.id);
     }
@@ -444,25 +478,7 @@ export function loadRepositoryDetail(db: Database, repo: { id: number; name: str
 
   for (const group of timeline.groups) {
     const ordered = group.images;
-    ordered.forEach((image, index) => {
-      const own = countsOf(image.scans[0]) ?? emptyScanCounts();
-      const prevImage = ordered[index + 1];
-      const prevCounts = countsOf(prevImage?.scans[0]);
-      tags.push({
-        image_id: image.id,
-        name: image.name,
-        tag: image.tag,
-        tag_group: group.name,
-        is_latest: index === 0,
-        by_severity: own.by_severity,
-        open: own.open,
-        critical: own.by_severity.CRITICAL,
-        fixable: own.fixable,
-        change: delta(own.open, prevCounts?.open),
-        previous_tag: tagLabel(prevImage),
-        last_scanned_at: image.scans[0]?.scan_date ?? image.last_scanned_at,
-      });
-    });
+    tags.push(...buildTagRows(ordered, group.name, 0, TAGS_PER_GROUP, countsOf));
 
     const latestImage = ordered[0];
     const latestCounts = countsOf(group.latestScan) ?? emptyScanCounts();
@@ -528,6 +544,43 @@ export function loadRepositoryDetail(db: Database, repo: { id: number; name: str
 }
 
 // ---------------------------------------------------------------------------
+// Paginated tag list for a repository (newest first, optionally one group)
+// ---------------------------------------------------------------------------
+
+export function listRepositoryTags(db: Database, repositoryId: number, options: { group?: string | null; page: number; limit: number }) {
+  const timeline = loadTimelines(db, [repositoryId]).get(repositoryId)!;
+  const entries: Array<{ group: TimelineGroup; index: number }> = [];
+  for (const group of timeline.groups) {
+    if (options.group && group.name !== options.group) {
+      continue;
+    }
+    group.images.forEach((_, index) => entries.push({ group, index }));
+  }
+  entries.sort((a, b) => byScanDesc(a.group.images[a.index]!.scans[0]!, b.group.images[b.index]!.scans[0]!));
+
+  const totalItems = entries.length;
+  const offset = (options.page - 1) * options.limit;
+  const pageEntries = entries.slice(offset, offset + options.limit);
+
+  const scanIds: number[] = [];
+  for (const { group, index } of pageEntries) {
+    for (const image of [group.images[index], group.images[index + 1]]) {
+      if (image?.scans[0]) {
+        scanIds.push(image.scans[0].id);
+      }
+    }
+  }
+  const counts = loadScanCounts(db, scanIds);
+  const countsOf = (scan: TimelineScan | null | undefined): ScanCounts | undefined => (scan ? counts.get(scan.id) : undefined);
+
+  return {
+    group: options.group ?? null,
+    items: pageEntries.flatMap(({ group, index }) => buildTagRows(group.images, group.name, index, index + 1, countsOf)),
+    pagination: { page: options.page, limit: options.limit, total_items: totalItems, total_pages: totalItems === 0 ? 0 : Math.ceil(totalItems / options.limit) },
+  };
+}
+
+// ---------------------------------------------------------------------------
 // Paginated open-vulnerability list for a repository (no description)
 // ---------------------------------------------------------------------------
 
@@ -549,7 +602,7 @@ const SEVERITY_ORDER_SQL = "CASE severity WHEN 'CRITICAL' THEN 0 WHEN 'HIGH' THE
 export function listRepositoryVulnerabilities(
   db: Database,
   repositoryId: number,
-  options: { group?: string | null; page: number; limit: number },
+  options: { group?: string | null; page: number; limit: number; criticalHigh?: boolean; fixable?: boolean },
 ) {
   const timeline = loadTimelines(db, [repositoryId]).get(repositoryId)!;
   const groups = timeline.groups.filter((group) => group.latestScan && (!options.group || group.name === options.group));
@@ -568,7 +621,13 @@ export function listRepositoryVulnerabilities(
   }
 
   const placeholders = ids.map(() => "?").join(",");
-  const totalRow = db.query(`SELECT COUNT(*) AS total FROM vulnerabilities WHERE scan_result_id IN (${placeholders})`).get(...ids) as { total: number };
+  const filters = [
+    options.criticalHigh ? "AND severity IN ('CRITICAL', 'HIGH')" : "",
+    options.fixable ? "AND fixed_version IS NOT NULL AND fixed_version <> ''" : "",
+  ].join(" ");
+  const totalRow = db
+    .query(`SELECT COUNT(*) AS total FROM vulnerabilities WHERE scan_result_id IN (${placeholders}) ${filters}`)
+    .get(...ids) as { total: number };
   const totalItems = Number(totalRow.total);
   const totalPages = totalItems === 0 ? 0 : Math.ceil(totalItems / options.limit);
   const offset = (options.page - 1) * options.limit;
@@ -576,8 +635,8 @@ export function listRepositoryVulnerabilities(
   const rows = db
     .query(
       `SELECT id, scan_result_id, cve_id, severity, package_name, installed_version, fixed_version, score
-       FROM vulnerabilities WHERE scan_result_id IN (${placeholders})
-       ORDER BY ${SEVERITY_ORDER_SQL}, cve_id, id
+       FROM vulnerabilities WHERE scan_result_id IN (${placeholders}) ${filters}
+       ORDER BY score IS NULL, score DESC, ${SEVERITY_ORDER_SQL}, cve_id, id
        LIMIT ? OFFSET ?`,
     )
     .all(...ids, options.limit, offset) as Array<{

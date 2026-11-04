@@ -1,5 +1,6 @@
 import type { Database } from "bun:sqlite";
 import {
+  listRepositoryTags,
   listRepositoryVulnerabilities,
   loadRepositoryDetail,
   loadRepositoryStats,
@@ -95,7 +96,24 @@ function handleRepositoryVulnerabilities(db: Database, id: number, url: URL): Re
     return sendError(404, "REPOSITORY_NOT_FOUND", "Repository not found");
   }
   const { page, limit } = parsePageAndLimit(url, 25);
-  return buildSuccessResponse(listRepositoryVulnerabilities(db, id, { group: url.searchParams.get("group"), page, limit }));
+  return buildSuccessResponse(
+    listRepositoryVulnerabilities(db, id, {
+      group: url.searchParams.get("group"),
+      page,
+      limit,
+      criticalHigh: url.searchParams.get("severity") === "critical_high",
+      fixable: url.searchParams.get("fixable") === "1" || url.searchParams.get("fixable") === "true",
+    }),
+  );
+}
+
+function handleRepositoryTags(db: Database, id: number, url: URL): Response {
+  const repository = db.query("SELECT id FROM repositories WHERE id = ? LIMIT 1").get(id);
+  if (!repository) {
+    return sendError(404, "REPOSITORY_NOT_FOUND", "Repository not found");
+  }
+  const { page, limit } = parsePageAndLimit(url, 10);
+  return buildSuccessResponse(listRepositoryTags(db, id, { group: url.searchParams.get("group"), page, limit }));
 }
 
 export function createRepositoriesHandler(db: Database) {
@@ -112,6 +130,11 @@ export function createRepositoriesHandler(db: Database) {
       const vulnMatch = url.pathname.match(/^\/api\/repositories\/(\d+)\/vulnerabilities$/);
       if (vulnMatch) {
         return handleRepositoryVulnerabilities(db, Number(vulnMatch[1]), url);
+      }
+
+      const tagsMatch = url.pathname.match(/^\/api\/repositories\/(\d+)\/tags$/);
+      if (tagsMatch) {
+        return handleRepositoryTags(db, Number(tagsMatch[1]), url);
       }
 
       if (url.pathname.startsWith("/api/repositories/by-name/")) {
