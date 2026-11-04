@@ -9,12 +9,12 @@ import {
   PageSkeleton,
   SearchBox,
   SeverityLetters,
-  displayRepoName,
   formatDateTime,
   repoHref,
   timeAgo,
   toBarCounts,
 } from "../components/repo-ui";
+import { ImageName } from "../components/image-name";
 import { Card } from "../components/ui/card";
 import { SeverityBar } from "../components/ui/severity-bar";
 import { SEVERITY } from "../components/ui/severity";
@@ -76,9 +76,8 @@ export function RepositoriesView({ data, query, onSearch, onSort, onPage, onLimi
               {data.items.map((item) => (
                 <tr key={item.id} className="border-b border-rowline last:border-0 hover:bg-bg/40">
                   <td className="px-4 py-3">
-                    <AppLink href={repoHref(item.name)} className="inline-flex min-h-11 flex-col justify-center font-semibold text-link hover:underline">
-                      {displayRepoName(item.name, item.registry)}
-                      <span className="text-xs font-normal text-muted">{item.registry ?? "docker.io"}</span>
+                    <AppLink href={repoHref(item.name)} className="flex min-h-11 max-w-[360px] min-w-0 items-center hover:underline">
+                      <ImageName imageRef={item.name} />
                     </AppLink>
                   </td>
                   <td className="w-[240px] px-4 py-3">
