@@ -291,3 +291,23 @@ function markNotificationFailed(db: Database, notificationId: number, message: s
     WHERE id = ?1
   `).run(notificationId, message.slice(0, 1000));
 }
+
+/** Non-secret SMTP status for the settings UI (never exposes user/pass). */
+export function getSmtpStatus(): {
+  configured: boolean;
+  host: string;
+  port: number;
+  secure: boolean;
+  from: string;
+  recipient_count: number;
+} {
+  const smtp = getSmtpConfig();
+  return {
+    configured: Boolean(smtp.host && smtp.port && smtp.from && smtp.recipients.length > 0),
+    host: smtp.host,
+    port: smtp.port,
+    secure: smtp.secure,
+    from: smtp.from,
+    recipient_count: smtp.recipients.length,
+  };
+}
