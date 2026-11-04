@@ -1,6 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { AppShell } from "../components/app-shell";
-import { CveDetailDrawer, type CveDetailDrawerData } from "../components/cve-detail-drawer";
 import { ErrorBanner } from "../components/error-banner";
 import { Button } from "../components/ui/button";
 import { Card } from "../components/ui/card";
@@ -10,28 +9,10 @@ import { useTrivyIgnores, validateResponseErrorMessage, type RuleOverview, type 
 import {
   fetchVulnerabilityCatalog,
   fetchVulnerabilityCatalogFromUpstream,
-  type VulnerabilityCatalogResponse,
   type VulnerabilityCatalogStatus,
 } from "../hooks/use-vulnerability-catalog";
-import { fetchVulnerabilityDetail } from "../hooks/use-vulnerabilities";
 import type { TrivyIgnoreRow } from "../services/trivy-ignore";
-import type { VulnerabilityListResponse, VulnerabilityWithRelations } from "../services/types";
 import { formatRepositoryName } from "../utils/format-repository-name";
-
-interface ApiSuccess<T> {
-  success: true;
-  data: T;
-}
-
-interface ApiFailure {
-  success: false;
-  error?: {
-    code?: string;
-    message?: string;
-  };
-}
-
-type ApiResponse<T> = ApiSuccess<T> | ApiFailure;
 
 function ScopeLabel(scope: TrivyIgnoreRow["scope"]): string {
   return scope === "selected_tags" ? "Selected tags" : "All tags";
@@ -67,131 +48,6 @@ function repositoryLabel(row: TrivyIgnoreRow): string {
 
 function toRepositoryUrl(repositoryName: string): string {
   return `/repositories/by-name/${encodeURIComponent(repositoryName)}`;
-}
-
-export function pickTrivyIgnoreCveCandidate(items: VulnerabilityWithRelations[], repositoryName?: string | null): VulnerabilityWithRelations | null {
-  const normalizedRepo = repositoryName?.trim().toLowerCase();
-  if (normalizedRepo) {
-    const exactMatch = items.find((item) => item.repository.name.trim().toLowerCase() === normalizedRepo);
-    if (exactMatch) {
-      return exactMatch;
-    }
-  }
-
-  return items[0] || null;
-}
-
-function toDrawerDataFromVulnerability(item: VulnerabilityWithRelations): CveDetailDrawerData {
-  return {
-    cve_id: item.cve_id,
-    severity: item.severity,
-    package_name: item.package_name,
-    installed_version: item.installed_version,
-    fixed_version: item.fixed_version,
-    score: item.score,
-    repository: item.repository,
-    image: item.image,
-    title: item.title,
-    description: item.description,
-    source_label: "scan",
-  };
-}
-
-function toDrawerDataFromCatalog(item: VulnerabilityCatalogResponse): CveDetailDrawerData {
-  const aliasesList = Array.isArray(item.aliases) ? item.aliases : [];
-  const referencesList = Array.isArray(item.references) ? item.references : [];
-  const aliases = aliasesList.length > 0 ? `Aliases: ${aliasesList.join(", ")}` : "";
-  const refs = referencesList.length > 0 ? referencesList.map((ref) => `- ${ref}`).join("\n") : "";
-  const fallbackDescription = [item.description, aliases, refs].filter((chunk) => Boolean(chunk)).join("\n\n");
-
-  return {
-    cve_id: item.vuln_id,
-    severity: item.severity,
-    package_name: null,
-    installed_version: null,
-    fixed_version: null,
-    score: item.cvss,
-    repository: null,
-    image: null,
-    title: item.summary,
-    description: fallbackDescription || item.last_error || "No description available",
-    source_label: item.source,
-    verification_status: item.verification_status,
-  };
-}
-
-async function fetchVulnerabilityMatches(
-  cveId: string,
-  repositoryName?: string | null,
-  fetcher: typeof fetch = fetch,
-): Promise<VulnerabilityWithRelations[]> {
-  const params = new URLSearchParams({
-    group: "finding",
-    cve_id: cveId,
-    state: "all",
-    page: "1",
-    limit: "50",
-    sort: "scanned_at",
-    order: "desc",
-  });
-
-  if (repositoryName?.trim()) {
-    params.set("repository", repositoryName.trim());
-  }
-
-  const response = await fetcher(`/api/vulnerabilities?${params.toString()}`);
-
-  let payload: ApiResponse<VulnerabilityListResponse> | null = null;
-  try {
-    payload = (await response.json()) as ApiResponse<VulnerabilityListResponse>;
-  } catch {
-    throw new Error("Failed to load vulnerability detail");
-  }
-
-  if (!response.ok || !payload || payload.success !== true) {
-    throw new Error(payload?.error?.message || "Failed to load vulnerability detail");
-  }
-
-  return payload.data.items;
-}
-
-export async function fetchTrivyIgnoreCveDetail(
-  cveId: string,
-  repositoryName?: string | null,
-  fetcher: typeof fetch = fetch,
-): Promise<CveDetailDrawerData> {
-  const normalizedVuln = cveId.trim();
-  if (!normalizedVuln) {
-    throw new Error("Vulnerability ID is required");
-  }
-
-  const scopedItems = repositoryName?.trim() ? await fetchVulnerabilityMatches(normalizedVuln, repositoryName, fetcher) : [];
-  let candidate = pickTrivyIgnoreCveCandidate(scopedItems, repositoryName);
-
-  if (!candidate) {
-    const fallbackItems = await fetchVulnerabilityMatches(normalizedVuln, undefined, fetcher);
-    candidate = pickTrivyIgnoreCveCandidate(fallbackItems);
-  }
-
-  if (candidate) {
-    const detail = await fetchVulnerabilityDetail(candidate.id, fetcher);
-    return toDrawerDataFromVulnerability(detail);
-  }
-
-  try {
-    const catalogDetail = await fetchVulnerabilityCatalog(normalizedVuln, fetcher);
-    if (
-      catalogDetail.verification_status !== "verified" &&
-      catalogDetail.verification_status !== "invalid" &&
-      catalogDetail.verification_status !== "unverified"
-    ) {
-      throw new Error("No vulnerability detail found for this vulnerability ID.");
-    }
-
-    return toDrawerDataFromCatalog(catalogDetail);
-  } catch {
-    throw new Error("No vulnerability detail found for this vulnerability ID.");
-  }
 }
 
 interface TrivyIgnoreRepository {
@@ -239,7 +95,6 @@ interface TrivyIgnoreListPanelProps {
   onRetry: () => void;
   onDelete: (id: number) => void;
   onFetchDetail: (row: TrivyIgnoreRow) => void;
-  onOpenCveDetail: (row: TrivyIgnoreRow) => void;
   onBulkDelete?: (ids: number[]) => Promise<void> | void;
   onStopIgnoring?: (ruleIds: number[], repositoryIds: number[]) => Promise<void> | void;
   loadRepos?: (ruleId: number) => Promise<RuleRepoStatus[]>;
@@ -367,7 +222,6 @@ export function TrivyIgnoreListPanel({
   onRetry,
   onDelete,
   onFetchDetail,
-  onOpenCveDetail,
   onBulkDelete,
   onStopIgnoring,
   loadRepos,
@@ -574,14 +428,13 @@ export function TrivyIgnoreListPanel({
                         >
                           {open ? "▾" : "▸"}
                         </button>
-                        <button
-                          type="button"
+                        <a
+                          href={`/vulnerabilities/${encodeURIComponent(row.cve_id)}`}
                           className="max-w-full truncate font-mono font-semibold text-link hover:underline"
                           title={row.cve_id}
-                          onClick={() => onOpenCveDetail(row)}
                         >
                           {row.cve_id}
-                        </button>
+                        </a>
                         <span className="rounded border border-line px-1.5 text-[11px] uppercase text-muted">{status}</span>
                       </div>
                       {row.package_name && <p className="m-0 pl-11 text-sm font-semibold">{row.package_name}</p>}
@@ -748,10 +601,6 @@ export function TrivyIgnorePage() {
   const [submitError, setSubmitError] = useState("");
   const [formMessage, setFormMessage] = useState("");
   const [deletingId, setDeletingId] = useState<number | null>(null);
-  const [drawerOpen, setDrawerOpen] = useState(false);
-  const [detailLoading, setDetailLoading] = useState(false);
-  const [detailError, setDetailError] = useState<string | null>(null);
-  const [detail, setDetail] = useState<CveDetailDrawerData | null>(null);
   const [statusByVulnId, setStatusByVulnId] = useState<Record<string, VulnerabilityCatalogStatus>>({});
   const [fetchingByVulnId, setFetchingByVulnId] = useState<Record<string, boolean>>({});
   const latestRequestId = useRef(0);
@@ -922,31 +771,6 @@ export function TrivyIgnorePage() {
       setSubmitError(validateResponseErrorMessage(err, "Failed to delete ignore rule"));
     } finally {
       setDeletingId(null);
-    }
-  }
-
-  async function handleOpenCveDetail(row: TrivyIgnoreRow) {
-    setDrawerOpen(true);
-    setDetailLoading(true);
-    setDetailError(null);
-    setDetail(null);
-
-    latestRequestId.current += 1;
-    const requestId = latestRequestId.current;
-
-    try {
-      const resolvedDetail = await fetchTrivyIgnoreCveDetail(row.cve_id, row.repository_name);
-      if (requestId === latestRequestId.current) {
-        setDetail(resolvedDetail);
-      }
-    } catch (err) {
-      if (requestId === latestRequestId.current) {
-        setDetailError(validateResponseErrorMessage(err, "Failed to load vulnerability detail"));
-      }
-    } finally {
-      if (requestId === latestRequestId.current) {
-        setDetailLoading(false);
-      }
     }
   }
 
@@ -1183,7 +1007,6 @@ export function TrivyIgnorePage() {
           onRetry={() => void retry()}
           onDelete={handleDelete}
           onFetchDetail={handleFetchDetail}
-          onOpenCveDetail={handleOpenCveDetail}
           onBulkDelete={handleBulkDelete}
           onStopIgnoring={handleStopIgnoring}
           loadRepos={loadRepos}
@@ -1200,19 +1023,6 @@ export function TrivyIgnorePage() {
           </details>
         </div>
       </div>
-
-      <CveDetailDrawer
-        open={drawerOpen}
-        loading={detailLoading}
-        error={detailError}
-        data={detail}
-        onClose={() => {
-          setDrawerOpen(false);
-          setDetail(null);
-          setDetailError(null);
-          setDetailLoading(false);
-        }}
-      />
     </AppShell>
   );
 }
