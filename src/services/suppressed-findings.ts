@@ -2,6 +2,11 @@ import type { Database } from "bun:sqlite";
 import { ensureTrivyIgnoreSchema } from "./trivy-ignore-schema";
 import type { NormalizedSuppressedFinding } from "./types";
 
+export function markScanSuppressionAware(db: Database, scanResultId: number, aware: boolean | undefined): void {
+  ensureTrivyIgnoreSchema(db);
+  db.query("UPDATE scan_results SET suppression_aware = ?1 WHERE id = ?2").run(aware ? 1 : 0, scanResultId);
+}
+
 export function insertSuppressedFindings(
   db: Database,
   scanResultId: number,
