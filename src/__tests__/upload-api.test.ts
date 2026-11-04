@@ -498,3 +498,31 @@ describe("upload/import API endpoints", () => {
     expect(body.error.code).toBe("INVALID_TRIVY_FORMAT");
   });
 });
+
+describe("webhook handler input modes", () => {
+  test("accepts multipart/form-data file and logs x-api-key length", async () => {
+    const db = createTestDb();
+    const webhookHandler = createWebhookHandler(db);
+    const form = new FormData();
+    form.append("file", new File([JSON.stringify(buildValidTrivyPayload())], "scan.json", { type: "application/json" }));
+
+    const response = await webhookHandler(
+      new Request("http://localhost/api/webhook", { method: "POST", headers: { "x-api-key": "secret" }, body: form })
+    );
+
+    expect(response.status).toBe(201);
+  });
+
+  test("returns 415 for unsupported content type", async () => {
+    const db = createTestDb();
+    const webhookHandler = createWebhookHandler(db);
+
+    const response = await webhookHandler(
+      new Request("http://localhost/api/webhook", { method: "POST", headers: { "content-type": "text/plain" }, body: "x" })
+    );
+    const body = (await response.json()) as { error: { code: string } };
+
+    expect(response.status).toBe(415);
+    expect(body.error.code).toBe("UNSUPPORTED_MEDIA_TYPE");
+  });
+});
