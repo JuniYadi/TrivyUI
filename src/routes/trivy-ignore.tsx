@@ -392,7 +392,7 @@ export function TrivyIgnoreListPanel({
           )}
 
           <div className="overflow-x-auto">
-          <div className="min-w-[960px]">
+          <div className="min-w-[1120px]">
           <div className="flex items-center gap-3 border-b border-line px-3 text-xs font-semibold uppercase tracking-wide text-muted">
             <label className="flex min-h-11 min-w-11 cursor-pointer items-center justify-center">
               <input
@@ -402,7 +402,7 @@ export function TrivyIgnoreListPanel({
                 onChange={(e) => setSelected(e.target.checked ? visible.map((r) => r.id) : [])}
               />
             </label>
-            <span className="min-w-0 flex-[1.3] basis-64">Rule</span>
+            <span className="min-w-0 flex-[1.3] basis-80">Rule</span>
             <span className="min-w-0 flex-1 basis-44">Applies to</span>
             <span className="min-w-0 flex-[1.3] basis-52">Status in latest scans</span>
             <span className="w-24 shrink-0">Expires</span>
@@ -427,7 +427,7 @@ export function TrivyIgnoreListPanel({
                         onChange={(e) => setSelected((prev) => (e.target.checked ? [...prev, row.id] : prev.filter((id) => id !== row.id)))}
                       />
                     </label>
-                    <div className="min-w-0 flex-[1.3] basis-64">
+                    <div className="min-w-0 flex-[1.3] basis-80">
                       <div className="flex items-center gap-1">
                         <button
                           type="button"
