@@ -1,26 +1,8 @@
 import { useCallback, useEffect, useState } from "react";
-import type { RepositoryDetailResponse } from "../services/types";
+import type { RepoVulnerabilityPage, RepositoryDetail } from "../services/repo-page-types";
+import { fetchApi } from "./api-fetch";
 
-interface ApiSuccess<T> {
-  success: true;
-  data: T;
-}
-
-interface ApiFailure {
-  success: false;
-  error?: {
-    code?: string;
-    message?: string;
-  };
-}
-
-type ApiResponse<T> = ApiSuccess<T> | ApiFailure;
-
-type RepositoryDetailIdentifier =
-  | { type: "id"; value: number }
-  | { type: "name"; value: string };
-
-type VulnerabilityStateFilter = "open" | "done" | "all";
+type RepositoryDetailIdentifier = { type: "id"; value: number } | { type: "name"; value: string };
 
 export function getRepoDetailIdentifierKey(identifier: RepositoryDetailIdentifier | null): string {
   if (!identifier) {
@@ -30,45 +12,28 @@ export function getRepoDetailIdentifierKey(identifier: RepositoryDetailIdentifie
   return `${identifier.type}:${identifier.value}`;
 }
 
-function withState(path: string, state: VulnerabilityStateFilter): string {
-  return `${path}?state=${state}`;
+export function fetchRepositoryDetail(id: number, fetcher: typeof fetch = fetch): Promise<RepositoryDetail> {
+  return fetchApi<RepositoryDetail>(`/api/repositories/${id}`, "Failed to load repository detail", fetcher);
 }
 
-async function fetchRepositoryDetailRequest(path: string, fetcher: typeof fetch = fetch): Promise<RepositoryDetailResponse> {
-  const response = await fetcher(path);
-
-  let payload: ApiResponse<RepositoryDetailResponse> | null = null;
-  try {
-    payload = (await response.json()) as ApiResponse<RepositoryDetailResponse>;
-  } catch {
-    throw new Error("Failed to load repository detail");
-  }
-
-  if (!response.ok || !payload || payload.success !== true) {
-    throw new Error(payload?.error?.message || "Failed to load repository detail");
-  }
-
-  return payload.data;
+export function fetchRepositoryDetailByName(name: string, fetcher: typeof fetch = fetch): Promise<RepositoryDetail> {
+  return fetchApi<RepositoryDetail>(`/api/repositories/by-name/${encodeURIComponent(name)}`, "Failed to load repository detail", fetcher);
 }
 
-export async function fetchRepositoryDetail(
+export function fetchRepositoryVulnerabilities(
   id: number,
-  state: VulnerabilityStateFilter = "open",
+  options: { group: string | null; page: number; limit: number },
   fetcher: typeof fetch = fetch,
-): Promise<RepositoryDetailResponse> {
-  return fetchRepositoryDetailRequest(withState(`/api/repositories/${id}`, state), fetcher);
+): Promise<RepoVulnerabilityPage> {
+  const params = new URLSearchParams({ page: String(options.page), limit: String(options.limit) });
+  if (options.group) {
+    params.set("group", options.group);
+  }
+  return fetchApi<RepoVulnerabilityPage>(`/api/repositories/${id}/vulnerabilities?${params}`, "Failed to load vulnerabilities", fetcher);
 }
 
-export async function fetchRepositoryDetailByName(
-  name: string,
-  state: VulnerabilityStateFilter = "open",
-  fetcher: typeof fetch = fetch,
-): Promise<RepositoryDetailResponse> {
-  return fetchRepositoryDetailRequest(withState(`/api/repositories/by-name/${encodeURIComponent(name)}`, state), fetcher);
-}
-
-export function useRepoDetail(identifier: RepositoryDetailIdentifier | null, state: VulnerabilityStateFilter = "open") {
-  const [data, setData] = useState<RepositoryDetailResponse | null>(null);
+export function useRepoDetail(identifier: RepositoryDetailIdentifier | null) {
+  const [data, setData] = useState<RepositoryDetail | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const identifierKey = getRepoDetailIdentifierKey(identifier);
@@ -85,22 +50,42 @@ export function useRepoDetail(identifier: RepositoryDetailIdentifier | null, sta
     setError(null);
 
     try {
-      const result =
-        identifier.type === "id"
-          ? await fetchRepositoryDetail(identifier.value, state)
-          : await fetchRepositoryDetailByName(identifier.value, state);
-      setData(result);
+      setData(identifier.type === "id" ? await fetchRepositoryDetail(identifier.value) : await fetchRepositoryDetailByName(identifier.value));
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to load repository detail");
       setData(null);
     } finally {
       setLoading(false);
     }
-  }, [identifierKey, state]);
+  }, [identifierKey]);
 
   useEffect(() => {
     void load();
   }, [load]);
 
   return { data, loading, error, retry: load };
+}
+
+export function useRepoVulnerabilities(repositoryId: number | null, group: string | null, page: number, limit: number) {
+  const [data, setData] = useState<RepoVulnerabilityPage | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (repositoryId === null) {
+      return;
+    }
+    let cancelled = false;
+    setLoading(true);
+    setError(null);
+    fetchRepositoryVulnerabilities(repositoryId, { group, page, limit })
+      .then((result) => !cancelled && setData(result))
+      .catch((err) => !cancelled && setError(err instanceof Error ? err.message : "Failed to load vulnerabilities"))
+      .finally(() => !cancelled && setLoading(false));
+    return () => {
+      cancelled = true;
+    };
+  }, [repositoryId, group, page, limit]);
+
+  return { data, loading, error };
 }

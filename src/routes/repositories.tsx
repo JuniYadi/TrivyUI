@@ -1,172 +1,165 @@
-import { useCallback, useEffect, useRef, useState } from "react";
-import { useNavigate } from "@tanstack/react-router";
+import { useCallback } from "react";
 import { AppShell } from "../components/app-shell";
-import { EmptyState } from "../components/empty-state";
-import { ErrorBanner } from "../components/error-banner";
 import { Pagination } from "../components/pagination";
-import { useRepositories } from "../hooks/use-repositories";
+import {
+  AppLink,
+  ChipButton,
+  LinkButton,
+  PageError,
+  PageSkeleton,
+  SearchBox,
+  SeverityLetters,
+  displayRepoName,
+  formatDateTime,
+  repoHref,
+  timeAgo,
+  toBarCounts,
+} from "../components/repo-ui";
+import { Card } from "../components/ui/card";
+import { SeverityBar } from "../components/ui/severity-bar";
+import { SEVERITY } from "../components/ui/severity";
+import { useRepositories, type RepositoryQueryParams } from "../hooks/use-repositories";
+import type { RepoListResponse } from "../services/repo-page-types";
 import type { RepositorySortField } from "../services/types";
 
-function sortLabel(currentSort: RepositorySortField, currentOrder: "asc" | "desc", sort: RepositorySortField): string {
-  if (currentSort !== sort) {
-    return "";
-  }
-  return currentOrder === "asc" ? "↑" : "↓";
+const SORTS: Array<{ key: RepositorySortField; label: string }> = [
+  { key: "vulnerability_count", label: "Open vulns" },
+  { key: "critical_count", label: "Critical" },
+  { key: "last_scanned_at", label: "Last scanned" },
+  { key: "name", label: "Name" },
+];
+
+interface RepositoriesViewProps {
+  data: RepoListResponse;
+  query: RepositoryQueryParams;
+  onSearch: (value: string) => void;
+  onSort: (sort: RepositorySortField) => void;
+  onPage: (page: number) => void;
+  onLimit: (limit: number) => void;
 }
 
-function RepositorySkeleton() {
+export function RepositoriesView({ data, query, onSearch, onSort, onPage, onLimit }: RepositoriesViewProps) {
   return (
-    <section className="grid gap-4">
-      <div className="h-16 rounded-xl border border-slate-700 bg-gradient-to-r from-slate-900 via-slate-800 to-slate-900 bg-[length:200%_100%] animate-pulse" />
-      <div className="h-64 rounded-xl border border-slate-700 bg-gradient-to-r from-slate-900 via-slate-800 to-slate-900 bg-[length:200%_100%] animate-pulse" />
-    </section>
+    <div className="grid grid-cols-[minmax(0,1fr)] [&>*]:min-w-0 gap-4">
+      <div className="flex flex-wrap items-center gap-2">
+        <SearchBox label="repositories" value={query.search ?? ""} onSearch={onSearch} placeholder="Search repository" />
+        <div className="flex flex-wrap items-center gap-2" role="group" aria-label="Sort repositories">
+          <span className="text-xs text-muted">Sort</span>
+          {SORTS.map((sort) => (
+            <ChipButton key={sort.key} active={query.sort === sort.key} onClick={() => onSort(sort.key)}>
+              {sort.label}
+              {query.sort === sort.key && <span aria-hidden="true">{query.order === "asc" ? "↑" : "↓"}</span>}
+            </ChipButton>
+          ))}
+        </div>
+      </div>
+
+      {data.items.length === 0 ? (
+        <Card className="text-center text-sm text-fg2">
+          {query.search ? "No repositories match this search. Clear the search to see all repositories." : "No scan results yet. Upload a Trivy scan to see repositories."}
+        </Card>
+      ) : (
+        <Card className="overflow-x-auto !p-0">
+          <table className="w-full min-w-[760px] border-collapse text-sm">
+            <thead>
+              <tr className="border-b border-line text-left text-xs font-medium text-muted">
+                <th scope="col" className="px-4 py-3">Repository</th>
+                <th scope="col" className="px-4 py-3">Severity mix</th>
+                <th scope="col" className="px-4 py-3 text-right">Open</th>
+                <th scope="col" className="px-4 py-3 text-right">Critical</th>
+                <th scope="col" className="px-4 py-3 text-right">Fixable</th>
+                <th scope="col" className="px-4 py-3 text-right">Tags</th>
+                <th scope="col" className="px-4 py-3 text-right">Last scanned</th>
+              </tr>
+            </thead>
+            <tbody>
+              {data.items.map((item) => (
+                <tr key={item.id} className="border-b border-rowline last:border-0 hover:bg-bg/40">
+                  <td className="px-4 py-3">
+                    <AppLink href={repoHref(item.name)} className="inline-flex min-h-11 flex-col justify-center font-semibold text-link hover:underline">
+                      {displayRepoName(item.name, item.registry)}
+                      <span className="text-xs font-normal text-muted">{item.registry ?? "docker.io"}</span>
+                    </AppLink>
+                  </td>
+                  <td className="w-[240px] px-4 py-3">
+                    <SeverityBar counts={toBarCounts(item.by_severity)} />
+                    <div className="mt-1">
+                      <SeverityLetters counts={item.by_severity} />
+                    </div>
+                  </td>
+                  <td className="px-4 py-3 text-right font-semibold tabular-nums">{item.vulnerability_count}</td>
+                  <td className="px-4 py-3 text-right tabular-nums">
+                    {item.critical_count > 0 ? (
+                      <span className="inline-block min-w-6 rounded px-1.5 py-0.5 text-center text-xs font-bold" style={{ background: SEVERITY.critical.bg, color: SEVERITY.critical.fg }}>
+                        {item.critical_count}
+                      </span>
+                    ) : (
+                      <span className="text-muted">0</span>
+                    )}
+                  </td>
+                  <td className="px-4 py-3 text-right tabular-nums text-success">{item.fixable_count}</td>
+                  <td className="px-4 py-3 text-right">
+                    <AppLink href={repoHref(item.name)} className="inline-flex min-h-11 items-center text-link hover:underline">
+                      {item.tag_count} {item.tag_count === 1 ? "tag" : "tags"}
+                    </AppLink>
+                  </td>
+                  <td className="px-4 py-3 text-right text-xs text-fg2">
+                    <div>{formatDateTime(item.last_scanned_at)}</div>
+                    <div className="text-muted">{timeAgo(item.last_scanned_at)}</div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </Card>
+      )}
+
+      <Pagination
+        page={data.pagination.page}
+        totalPages={data.pagination.total_pages}
+        totalItems={data.pagination.total_items}
+        limit={data.pagination.limit}
+        onPageChange={onPage}
+        onLimitChange={onLimit}
+      />
+    </div>
   );
 }
 
 export function RepositoriesPage() {
   const { query, data, loading, error, retry, setFilters } = useRepositories();
-  const navigate = useNavigate();
-  const [searchInput, setSearchInput] = useState(query.search || "");
-  const [isSearching, setIsSearching] = useState(false);
-  const searchStartedAtRef = useRef(0);
 
-  useEffect(() => {
-    setSearchInput(query.search || "");
-  }, [query.search]);
-
-  useEffect(() => {
-    const timer = window.setTimeout(() => {
-      setFilters((prev) => {
-        const nextSearch = searchInput.trim();
-        if ((prev.search || "") === nextSearch) {
-          return prev;
-        }
-
-        searchStartedAtRef.current = Date.now();
-        setIsSearching(true);
-
-        return {
-          ...prev,
-          page: 1,
-          search: nextSearch || undefined,
-        };
-      });
-    }, 1500);
-
-    return () => window.clearTimeout(timer);
-  }, [searchInput, setFilters]);
-
-  useEffect(() => {
-    if (!loading) {
-      const MIN_SPINNER_MS = 500;
-      const elapsed = Date.now() - searchStartedAtRef.current;
-      const remaining = Math.max(0, MIN_SPINNER_MS - elapsed);
-      const timer = window.setTimeout(() => setIsSearching(false), remaining);
-      return () => window.clearTimeout(timer);
-    }
-  }, [loading]);
-
-  const onSortChange = useCallback(
-    (sort: RepositorySortField) => {
-      setFilters((prev) => ({
-        ...prev,
-        page: 1,
-        sort,
-        order: prev.sort === sort && prev.order === "desc" ? "asc" : "desc",
-      }));
-    },
+  const onSearch = useCallback((search: string) => setFilters((prev) => ({ ...prev, page: 1, search: search || undefined })), [setFilters]);
+  const onSort = useCallback(
+    (sort: RepositorySortField) =>
+      setFilters((prev) => ({ ...prev, page: 1, sort, order: prev.sort === sort ? (prev.order === "desc" ? "asc" : "desc") : sort === "name" ? "asc" : "desc" })),
     [setFilters],
   );
 
-  const totalItems = data?.pagination.total_items || 0;
+  const meta = data ? `${data.summary.repositories} repositories · ${data.summary.open} open · ${data.summary.fixable} fixable · from imported Trivy scans` : "Loading";
 
   return (
     <AppShell
       activeRoute="/repositories"
       title="Repositories"
-      subtitle="Browse repositories and vulnerability totals from imported Trivy scans."
+      meta={meta}
+      actions={
+        <LinkButton href="/upload">Upload scan</LinkButton>
+      }
     >
-      {loading && !isSearching && <RepositorySkeleton />}
-      {!loading && error && <ErrorBanner message={error} onRetry={retry} />}
-      {!error && (
-        <section className="rounded-xl border border-slate-700 bg-slate-900/90 p-4 shadow-inner">
-          <label className="grid gap-1">
-            <span className="text-xs font-semibold uppercase tracking-wide text-slate-400">Search</span>
-            <input
-              type="search"
-              placeholder="Search repository"
-              value={searchInput}
-              onChange={(event) => setSearchInput(event.target.value)}
-              className="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-slate-200 placeholder-slate-500 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/50"
-            />
-            {isSearching && loading && (
-              <div className="mt-1 inline-flex items-center gap-2 text-xs text-slate-400">
-                <span
-                  className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-slate-600 border-t-blue-400"
-                  aria-hidden="true"
-                />
-                <span>Searching...</span>
-              </div>
-            )}
-          </label>
-        </section>
-      )}
-      {!loading && !error && totalItems === 0 && <EmptyState />}
-
-      {!loading && !error && data && data.items.length > 0 && (
-        <>
-          <section className="rounded-xl border border-slate-700 bg-slate-900/90 p-4 shadow-inner overflow-x-auto">
-            <table className="w-full border-collapse text-sm">
-              <thead>
-                <tr className="border-b border-slate-700 text-left">
-                  <th className="pb-3 pr-4">
-                    <button type="button" className="text-blue-400 hover:text-blue-300" onClick={() => onSortChange("name")}>
-                      Repository {sortLabel(query.sort, query.order, "name")}
-                    </button>
-                  </th>
-                  <th className="pb-3 pr-4">
-                    <button type="button" className="text-blue-400 hover:text-blue-300" onClick={() => onSortChange("vulnerability_count")}>
-                      Vulnerabilities {sortLabel(query.sort, query.order, "vulnerability_count")}
-                    </button>
-                  </th>
-                  <th className="pb-3 pr-4">
-                    <button type="button" className="text-blue-400 hover:text-blue-300" onClick={() => onSortChange("critical_count")}>
-                      Critical {sortLabel(query.sort, query.order, "critical_count")}
-                    </button>
-                  </th>
-                  <th className="pb-3">
-                    <button type="button" className="text-blue-400 hover:text-blue-300" onClick={() => onSortChange("last_scanned_at")}>
-                      Last Scanned {sortLabel(query.sort, query.order, "last_scanned_at")}
-                    </button>
-                  </th>
-                </tr>
-              </thead>
-              <tbody>
-                {data.items.map((item) => (
-                  <tr
-                    key={item.id}
-                    className="cursor-pointer border-b border-slate-800 last:border-0 hover:bg-slate-800/50"
-                    onClick={() => navigate({ to: "/repositories/by-name/$repoName", params: { repoName: item.name } })}
-                  >
-                    <td className="py-3 pr-4">{item.name}</td>
-                    <td className="py-3 pr-4">{item.vulnerability_count}</td>
-                    <td className="py-3 pr-4">{item.critical_count}</td>
-                    <td className="py-3">{item.last_scanned_at ? new Date(item.last_scanned_at).toLocaleString() : "-"}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </section>
-
-          <Pagination
-            page={data.pagination.page}
-            totalPages={data.pagination.total_pages}
-            totalItems={data.pagination.total_items}
-            limit={data.pagination.limit}
-            onPageChange={(page) => setFilters((prev) => ({ ...prev, page }))}
-            onLimitChange={(limit) => setFilters((prev) => ({ ...prev, page: 1, limit }))}
+      {error && <PageError message={error} onRetry={retry} />}
+      {!error && !data && loading && <PageSkeleton />}
+      {!error && data && (
+        <div className={loading ? "opacity-60 transition-opacity" : undefined} aria-busy={loading}>
+          <RepositoriesView
+            data={data}
+            query={query}
+            onSearch={onSearch}
+            onSort={onSort}
+            onPage={(page) => setFilters((prev) => ({ ...prev, page }))}
+            onLimit={(limit) => setFilters((prev) => ({ ...prev, page: 1, limit }))}
           />
-        </>
+        </div>
       )}
     </AppShell>
   );
