@@ -183,7 +183,7 @@ const FULL_SCHEMA_SQL = `
   VALUES (1, 'ok');
 `;
 
-export function initDb(path = "trivy.db"): TrivyUiDb {
+export function initDb(path = process.env.TRIVYUI_DB_PATH || "trivy.db"): TrivyUiDb {
   const db = new Database(path, { create: true });
   initFullSchema(db);
   return db;
