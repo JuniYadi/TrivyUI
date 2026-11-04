@@ -1,6 +1,15 @@
 import type { Database } from "bun:sqlite";
 import type { Severity, VulnerabilityDetailResponse, VulnerabilityListResponse, VulnerabilitySortField } from "../../services/types";
 import { buildSuccessResponse, sendError } from "./_shared";
+import {
+  getCveSummary,
+  listAffected,
+  listCves,
+  SEVERITIES,
+  type AffectedStateFilter,
+  type CveListSort,
+  type CveSeverity,
+} from "../../services/vuln-cve-queries";
 
 const ALLOWED_SORT_FIELDS: VulnerabilitySortField[] = ["cve_id", "severity", "package_name", "score", "scanned_at"];
 const ALLOWED_SEVERITIES: Severity[] = ["CRITICAL", "HIGH", "MEDIUM", "LOW", "UNKNOWN"];
@@ -205,8 +214,96 @@ function toListItem(row: ListRow) {
   };
 }
 
+const GROUPED_SORT_FIELDS: CveListSort[] = ["cve_id", "severity", "package_name", "score", "affected"];
+
+function handleGroupedList(db: Database, url: URL): Response {
+  const page = parsePositiveInt(url.searchParams.get("page"), 1);
+  const limit = parsePositiveInt(url.searchParams.get("limit"), 25);
+  if (!Number.isFinite(page) || !Number.isFinite(limit) || page < 1 || limit < 1 || limit > 100) {
+    return sendError(400, "INVALID_PAGINATION", "Invalid page or limit. page must be >= 1 and limit must be 1..100");
+  }
+
+  const sort = (url.searchParams.get("sort") || "score") as CveListSort;
+  if (!GROUPED_SORT_FIELDS.includes(sort)) {
+    return sendError(400, "INVALID_SORT_FIELD", "Invalid sort field");
+  }
+  const order = (url.searchParams.get("order") || "desc").toLowerCase() === "asc" ? "asc" : "desc";
+
+  const severity = (url.searchParams.get("severity") || "").toUpperCase();
+  if (severity && !SEVERITIES.includes(severity as CveSeverity)) {
+    return sendError(400, "INVALID_SEVERITY", "Invalid severity value");
+  }
+
+  const result = listCves(
+    db,
+    {
+      severity: (severity || undefined) as CveSeverity | undefined,
+      repository: url.searchParams.get("repository") || url.searchParams.get("repo") || undefined,
+      image: url.searchParams.get("image") || undefined,
+      package: url.searchParams.get("package") || undefined,
+      search: url.searchParams.get("search")?.trim() || undefined,
+      fixAvailable: ["1", "true"].includes((url.searchParams.get("fix_available") || "").toLowerCase()),
+    },
+    { sort, order, page, limit },
+  );
+
+  return buildSuccessResponse({
+    mode: "cve" as const,
+    items: result.items,
+    pagination: {
+      page,
+      limit,
+      total_items: result.total_items,
+      total_pages: result.total_items === 0 ? 0 : Math.ceil(result.total_items / limit),
+    },
+    summary: {
+      unique_cves: result.total_items,
+      findings: result.total_findings,
+      severity_counts: result.severity_counts,
+    },
+    filter_options: { repositories: result.repositories, images: result.images },
+  });
+}
+
+function handleAffected(db: Database, cveId: string, url: URL): Response {
+  const page = parsePositiveInt(url.searchParams.get("page"), 1);
+  const limit = parsePositiveInt(url.searchParams.get("limit"), 10);
+  if (!Number.isFinite(page) || !Number.isFinite(limit) || page < 1 || limit < 1 || limit > 100) {
+    return sendError(400, "INVALID_PAGINATION", "Invalid page or limit. page must be >= 1 and limit must be 1..100");
+  }
+
+  const state = (url.searchParams.get("state") || "open").toLowerCase();
+  if (!["open", "ignored", "fixed", "all"].includes(state)) {
+    return sendError(400, "INVALID_STATE", "state must be open, ignored, fixed or all");
+  }
+
+  const result = listAffected(db, cveId, {
+    state: state as AffectedStateFilter,
+    q: url.searchParams.get("q") || "",
+    page,
+    limit,
+  });
+
+  return buildSuccessResponse({
+    cve_id: result.cve_id,
+    items: result.items,
+    counts: result.counts,
+    pagination: {
+      page,
+      limit,
+      total_items: result.total_items,
+      total_pages: result.total_items === 0 ? 0 : Math.ceil(result.total_items / limit),
+    },
+  });
+}
+
 function handleVulnerabilityList(db: Database, request: Request): Response {
   const url = new URL(request.url);
+
+  const group = (url.searchParams.get("group") || "cve").toLowerCase();
+  if (group !== "finding" && group !== "findings") {
+    return handleGroupedList(db, url);
+  }
 
   const page = parsePositiveInt(url.searchParams.get("page"), 1);
   const limit = parsePositiveInt(url.searchParams.get("limit"), 10);
@@ -372,6 +469,16 @@ export function createVulnerabilitiesHandler(db: Database) {
 
       if (detailId !== null) {
         return handleVulnerabilityDetail(db, detailId);
+      }
+
+      const cveMatch = url.pathname.match(/^\/api\/vulnerabilities\/([^/]+)\/(affected|summary)$/);
+      if (cveMatch?.[1]) {
+        const cveId = decodeURIComponent(cveMatch[1]);
+        if (cveMatch[2] === "summary") {
+          const summary = getCveSummary(db, cveId);
+          return summary.found ? buildSuccessResponse(summary) : sendError(404, "CVE_NOT_FOUND", "CVE not found");
+        }
+        return handleAffected(db, cveId, url);
       }
 
       if (url.pathname === "/api/vulnerabilities") {
