@@ -42,7 +42,6 @@ describe("trivy ignore route list panel", () => {
         onRetry={() => {}}
         onDelete={() => {}}
         onFetchDetail={() => {}}
-        onOpenCveDetail={() => {}}
       />,
     );
 
@@ -64,7 +63,6 @@ describe("trivy ignore route list panel", () => {
         onRetry={() => {}}
         onDelete={() => {}}
         onFetchDetail={() => {}}
-        onOpenCveDetail={() => {}}
       />,
     );
 
@@ -88,7 +86,6 @@ describe("trivy ignore route list panel", () => {
         onRetry={() => {}}
         onDelete={() => {}}
         onFetchDetail={() => {}}
-        onOpenCveDetail={() => {}}
       />,
     );
 
@@ -112,7 +109,6 @@ describe("trivy ignore route list panel", () => {
         onRetry={() => {}}
         onDelete={() => {}}
         onFetchDetail={() => {}}
-        onOpenCveDetail={() => {}}
       />,
     );
 
@@ -150,7 +146,6 @@ describe("trivy ignore route list panel", () => {
         onRetry={() => {}}
         onDelete={() => {}}
         onFetchDetail={() => {}}
-        onOpenCveDetail={() => {}}
       />,
     );
 
