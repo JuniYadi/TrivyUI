@@ -123,8 +123,9 @@ describe("trivy ignore route list panel", () => {
       />,
     );
 
-    expect(html).toContain("No scan results yet");
-    expect(html).toContain("Go to Upload");
+    expect(html).toContain("No ignore rules yet");
+    expect(html).not.toContain("No scan results yet");
+    expect(html).not.toContain("Upload your first Trivy scan");
   });
 
   test("renders list rows for existing ignore rules", () => {
@@ -153,6 +154,44 @@ describe("trivy ignore route list panel", () => {
     expect(html).toContain("legacy");
     expect(html).toContain("/repositories/by-name/ghcr.io%2Facme%2Fplatform-service");
     expect(html).toContain("Delete");
+  });
+
+  test("renders per-repo status summary, hint, filters and bulk checkboxes", () => {
+    const row = {
+      ...SAMPLE_REPOSITORY_ROW,
+      package_name: "next",
+      summary: { total: 5, still_present: 4, fixed: 1, no_scan: 0 },
+      partly_fixed: true,
+      safe_to_remove: false,
+      expiring: false,
+      excluded_repository_ids: [],
+      hint: "1 repo fixed. Stop ignoring there.",
+    };
+    const html = renderToStaticMarkup(
+      <TrivyIgnoreListPanel
+        repoFilter=""
+        repositories={[]}
+        loading={false}
+        error={null}
+        items={[row]}
+        statusByVulnId={{}}
+        fetchingByVulnId={{}}
+        deletingId={null}
+        onRepoFilterChange={() => {}}
+        onRetry={() => {}}
+        onDelete={() => {}}
+        onFetchDetail={() => {}}
+        onOpenCveDetail={() => {}}
+      />,
+    );
+
+    expect(html).toContain("4 still present");
+    expect(html).toContain("1 fixed");
+    expect(html).toContain("1 repo fixed. Stop ignoring there.");
+    expect(html).toContain("Partly fixed");
+    expect(html).toContain("Safe to remove");
+    expect(html).toContain("Expiring");
+    expect(html).toContain('aria-label="Select CVE-2026-1111"');
   });
 
   test("builds generate command example with repo and tag context", () => {

@@ -2,9 +2,14 @@ import type { Database } from "bun:sqlite";
 import {
   createTrivyIgnore,
   deleteTrivyIgnore,
+  deleteTrivyIgnores,
+  importTrivyIgnoreText,
   listTrivyIgnores,
+  previewTrivyIgnoreText,
+  stopIgnoringForRepos,
   type TrivyIgnoreInput,
 } from "../../services/trivy-ignore";
+import { getRuleRepos, listRulesOverview } from "../../services/trivy-ignore-status";
 import { getVulnerabilityCatalogRecord, normalizeVulnerabilityId, upsertVulnerabilityCatalogRecord } from "../../services/vulnerability-catalog";
 import { resolveVulnerabilityDetail, toCatalogUpsertInput } from "../../services/vulnerability-upstream";
 import { ApiError, buildSuccessResponse, sendError, toApiError } from "./_shared";
@@ -112,10 +117,69 @@ async function resolveCatalogForCreate(db: Database, vulnId: string, fetcher: ty
   return { status: "verified" };
 }
 
+function toIdList(value: unknown, field: string): number[] {
+  if (!Array.isArray(value)) {
+    throw new ApiError(400, "INVALID_REQUEST", `'${field}' must be an array of positive integers`);
+  }
+  const ids = value.map((v) => Number(v));
+  if (ids.some((id) => !Number.isInteger(id) || id <= 0)) {
+    throw new ApiError(400, "INVALID_REQUEST", `'${field}' must be an array of positive integers`);
+  }
+  return [...new Set(ids)];
+}
+
+async function readJsonBody(request: Request): Promise<Record<string, unknown>> {
+  try {
+    const body = await request.json();
+    return body && typeof body === "object" ? (body as Record<string, unknown>) : {};
+  } catch {
+    throw new ApiError(400, "INVALID_REQUEST", "Request body must be valid JSON");
+  }
+}
+
 export function createTrivyIgnoreHandler(db: Database, fetcher: typeof fetch = fetch) {
   return async function trivyIgnoreHandler(request: Request): Promise<Response> {
     try {
       const url = new URL(request.url);
+
+      const method = request.method;
+
+      if (method === "GET" && url.pathname === "/api/trivy-ignores/overview") {
+        return buildSuccessResponse(listRulesOverview(db));
+      }
+
+      if (method === "GET" && url.pathname === "/api/trivy-ignores/preview") {
+        const text = previewTrivyIgnoreText(db, url.searchParams.get("repo"), url.searchParams.get("tag"));
+        return buildSuccessResponse({ text });
+      }
+
+      const reposMatch = url.pathname.match(/^\/api\/trivy-ignores\/(\d+)\/repos$/);
+      if (method === "GET" && reposMatch?.[1]) {
+        const repos = getRuleRepos(db, Number.parseInt(reposMatch[1], 10));
+        if (!repos) {
+          return sendError(404, "NOT_FOUND", "Trivy ignore not found");
+        }
+        return buildSuccessResponse(repos);
+      }
+
+      if (method === "POST" && url.pathname === "/api/trivy-ignores/stop-ignoring") {
+        const body = await readJsonBody(request);
+        const result = stopIgnoringForRepos(db, toIdList(body.rule_ids, "rule_ids"), toIdList(body.repository_ids, "repository_ids"));
+        return buildSuccessResponse(result);
+      }
+
+      if (method === "POST" && url.pathname === "/api/trivy-ignores/bulk-delete") {
+        const body = await readJsonBody(request);
+        return buildSuccessResponse({ removed: deleteTrivyIgnores(db, toIdList(body.ids, "ids")) });
+      }
+
+      if (method === "POST" && url.pathname === "/api/trivy-ignores/import") {
+        const body = await readJsonBody(request);
+        if (typeof body.text !== "string") {
+          throw new ApiError(400, "INVALID_REQUEST", "'text' must be a string");
+        }
+        return buildSuccessResponse(importTrivyIgnoreText(db, body.text), 201);
+      }
 
       if (request.method === "GET" && url.pathname === "/api/trivy-ignores") {
         const repositoryId = parseRepoFilter(url);
