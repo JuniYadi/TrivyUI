@@ -18,9 +18,11 @@ export interface DashboardTopRepository {
 export interface DashboardRecentScan {
   id: number;
   repository: string;
+  image_id: number;
   image: string;
   vulnerability_count: number;
   critical_count: number;
+  by_severity: { critical: number; high: number; medium: number; low: number; unknown: number };
   package_count: number;
   vulnerable_package_count: number;
   clean_package_count: number;
