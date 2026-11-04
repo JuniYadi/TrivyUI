@@ -30,7 +30,7 @@ export function FixFirst({ items, criticalTotal }: FixFirstProps) {
               <div className="min-w-0 flex-1">
                 <div className="flex flex-wrap items-baseline gap-x-2">
                   <DashboardLink
-                    href={`/vulnerabilities?search=${encodeURIComponent(item.cve_id)}`}
+                    href={`/vulnerabilities/${encodeURIComponent(item.cve_id)}`}
                     className="text-link no-underline hover:underline"
                   >
                     <Mono>{item.cve_id}</Mono>
