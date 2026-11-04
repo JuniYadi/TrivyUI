@@ -430,9 +430,10 @@ export function listRepositoryRules(
   const summary: RepoRulesSummary = { total: 0, global: 0, repo: 0, still_present: 0, fixed: 0, unknown: 0, not_found: 0, no_scan: 0 };
   const rows: RepoRuleRow[] = rules.map((rule) => {
     const [result] = computeRuleRepos(db, rule, [repo], latestByRepo, presence, new Set(), suppressedScanMs, lastSeen);
-    const fixedGroup = result?.tag_groups.find((group) => group.status === "fixed");
+    // Fixed here = a tag group that had the CVE and no longer reports it; groups that never had it prove nothing.
+    const fixedGroup = result?.tag_groups.find((group) => group.status === "fixed" && group.last_seen_version !== null);
     let status: RepoRuleStatus = result?.status ?? "no_scan";
-    if (status === "fixed" && result?.last_seen_version === null) status = "not_found";
+    if (status === "fixed" && !fixedGroup) status = "not_found";
     const expiresMs = toMs(rule.expires_at);
     summary.total += 1;
     summary[rule.repository_id === null ? "global" : "repo"] += 1;
