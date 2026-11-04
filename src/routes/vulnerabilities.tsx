@@ -88,6 +88,8 @@ export function VulnerabilitiesPage() {
     <>
       {cveData.summary.unique_cves} unique CVEs · {cveData.summary.findings} findings
     </>
+  ) : data && mode === "finding" ? (
+    <>{totalItems} findings</>
   ) : undefined;
 
   const countLine = cveData ? (
