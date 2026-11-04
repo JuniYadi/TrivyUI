@@ -3,7 +3,8 @@ import { formatRelativeTime } from "../lib/relative-time";
 import { DashboardLink } from "./dashboard-link";
 import { Card } from "./ui/card";
 import { Mono } from "./ui/mono";
-import { SeverityBar } from "./ui/severity-bar";
+import { ImageName } from "./image-name";
+import { SeverityCounts } from "./severity-counts";
 
 interface TopReposProps {
   repositories: RepoRisk[];
@@ -40,20 +41,19 @@ export function TopRepos({ repositories }: TopReposProps) {
               key={repo.id}
               className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-4 gap-y-2 border-b border-rowline py-3 last:border-b-0 md:grid-cols-[minmax(0,1.4fr)_minmax(0,2.4fr)_4rem_minmax(0,1fr)_6rem] md:py-2.5"
             >
-              <span role="cell" className="min-w-0 truncate md:col-start-1 md:row-start-1">
+              <span role="cell" className="min-w-0 md:col-start-1 md:row-start-1">
                 <DashboardLink
                   href={`/repositories/${repo.id}`}
-                  className="inline-flex min-h-11 items-center font-semibold text-link no-underline hover:underline md:min-h-0"
-                  title={repo.name}
+                  className="flex min-h-11 min-w-0 items-center no-underline hover:underline md:min-h-0"
                 >
-                  {repo.name}
+                  <ImageName imageRef={repo.name} />
                 </DashboardLink>
               </span>
               <span role="cell" className="text-right font-semibold text-fg md:col-start-3 md:row-start-1">
                 {repo.open.toLocaleString()}
               </span>
               <span role="cell" className="col-span-2 md:col-span-1 md:col-start-2 md:row-start-1">
-                <SeverityBar counts={repo.by_severity} />
+                <SeverityCounts counts={repo.by_severity} />
               </span>
               <span role="cell" className="hidden min-w-0 truncate text-fg2 md:col-start-4 md:row-start-1 md:block" title={repo.latest_tag ?? undefined}>
                 {repo.latest_tag ? <Mono>{repo.latest_tag}</Mono> : "-"}
