@@ -9,7 +9,7 @@ import {
   stopIgnoringForRepos,
   type TrivyIgnoreInput,
 } from "../../services/trivy-ignore";
-import { getRuleRepos, listRulesOverview } from "../../services/trivy-ignore-status";
+import { getRuleRepos, listRepositoryRules, listRulesOverview, type RepoRuleScopeFilter } from "../../services/trivy-ignore-status";
 import { getVulnerabilityCatalogRecord, normalizeVulnerabilityId, upsertVulnerabilityCatalogRecord } from "../../services/vulnerability-catalog";
 import { resolveVulnerabilityDetail, toCatalogUpsertInput } from "../../services/vulnerability-upstream";
 import { ApiError, buildSuccessResponse, sendError, toApiError } from "./_shared";
@@ -145,6 +145,18 @@ export function createTrivyIgnoreHandler(db: Database, fetcher: typeof fetch = f
       const method = request.method;
 
       if (method === "GET" && url.pathname === "/api/trivy-ignores/overview") {
+        if (url.searchParams.has("repository_id")) {
+          const repositoryId = Number(url.searchParams.get("repository_id"));
+          const page = Number.parseInt(url.searchParams.get("page") || "1", 10);
+          const limit = Number.parseInt(url.searchParams.get("limit") || "10", 10);
+          const scope = (url.searchParams.get("scope") || "all") as RepoRuleScopeFilter;
+          const valid = Number.isInteger(repositoryId) && repositoryId > 0 && page >= 1 && limit >= 1 && limit <= 100;
+          if (!valid || !["all", "global", "repo"].includes(scope)) {
+            throw new ApiError(400, "INVALID_REQUEST", "Invalid repository_id, scope, page or limit");
+          }
+          const result = listRepositoryRules(db, repositoryId, { scope, page, limit });
+          return result ? buildSuccessResponse(result) : sendError(404, "REPOSITORY_NOT_FOUND", "Repository not found");
+        }
         return buildSuccessResponse(listRulesOverview(db));
       }
 
