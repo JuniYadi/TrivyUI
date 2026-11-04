@@ -38,5 +38,12 @@ export function ensureTrivyIgnoreSchema(db: Database): void {
     );
   `);
 
+  // scan_results.suppression_aware: 1 when the uploaded report contained the
+  // ExperimentalModifiedFindings key (scan ran with --show-suppressed).
+  const cols = db.query<{ name: string }>("PRAGMA table_info(scan_results)").all();
+  if (!cols.some((c) => c.name === "suppression_aware")) {
+    db.exec("ALTER TABLE scan_results ADD COLUMN suppression_aware INTEGER NOT NULL DEFAULT 0");
+  }
+
   ensured.add(db);
 }
