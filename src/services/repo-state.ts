@@ -5,7 +5,7 @@ import { computeTagGroupStatus, type TagGroupStatus } from "./tag-group-health";
  * Current-state reads for the repository / image pages (issue #57).
  *
  * "Current" = the latest scan per repository + tag group (same definition as
- * `open_vulnerabilities` in vuln-state-sql.ts). Instead of one giant CTE that
+ * the former `open_vulnerabilities` CTE). Instead of one giant CTE that
  * joins every vulnerability row, we:
  *   1. read scan metadata (small: one row per scan) and rank scans in JS,
  *   2. aggregate `vulnerabilities` only for the handful of scan ids we need

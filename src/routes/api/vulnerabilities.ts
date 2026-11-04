@@ -24,15 +24,7 @@ function parseStateFilter(url: URL): VulnerabilityStateFilter {
   return "open";
 }
 
-function buildStateWhereClause(state: VulnerabilityStateFilter): string {
-  if (state === "all") {
-    return "";
-  }
-
-  return "WHERE vs.state = ?";
-}
-
-const VULNERABILITY_STATE_CTE = `
+const LATEST_SCANS_CTE = `
   WITH ranked_group_scans AS (
     SELECT
       sr.id AS scan_result_id,
@@ -49,67 +41,72 @@ const VULNERABILITY_STATE_CTE = `
     SELECT scan_result_id, repository_id, tag_group
     FROM ranked_group_scans
     WHERE row_num = 1
-  ),
+  )
+`;
+
+const LATEST_KEYS_CTE = `,
   latest_keys AS (
     SELECT lgs.repository_id, lgs.tag_group, v.cve_id
     FROM latest_group_scans lgs
     JOIN vulnerabilities v ON v.scan_result_id = lgs.scan_result_id
     GROUP BY lgs.repository_id, lgs.tag_group, v.cve_id
-  ),
-  vulnerability_rows AS (
-    SELECT
-      v.id,
-      v.scan_result_id,
-      v.cve_id,
-      v.severity,
-      v.package_name,
-      v.installed_version,
-      v.fixed_version,
-      v.title,
-      v.description,
-      v.score,
-      v.created_at,
-      sr.scan_date AS scanned_at,
-      i.repository_id,
-      i.tag_group,
-      r.name AS repository_name,
-      i.id AS image_id,
-      i.name AS image_name
-    FROM vulnerabilities v
-    JOIN scan_results sr ON sr.id = v.scan_result_id
-    JOIN images i ON i.id = sr.image_id
-    JOIN repositories r ON r.id = i.repository_id
-  ),
-  resolved_state AS (
-    SELECT
-      vr.repository_id,
-      vr.tag_group,
-      vr.cve_id,
-      MAX(datetime(vr.scanned_at)) AS resolved_at
-    FROM vulnerability_rows vr
-    LEFT JOIN latest_keys lk
-      ON lk.repository_id = vr.repository_id
-     AND lk.tag_group = vr.tag_group
-     AND lk.cve_id = vr.cve_id
-    WHERE lk.cve_id IS NULL
-    GROUP BY vr.repository_id, vr.tag_group, vr.cve_id
-  ),
-  vulnerability_states AS (
-    SELECT
-      vr.*,
-      CASE WHEN lk.cve_id IS NULL THEN 'done' ELSE 'open' END AS state,
-      CASE WHEN lk.cve_id IS NULL THEN rs.resolved_at ELSE NULL END AS resolved_at
-    FROM vulnerability_rows vr
-    LEFT JOIN latest_keys lk
-      ON lk.repository_id = vr.repository_id
-     AND lk.tag_group = vr.tag_group
-     AND lk.cve_id = vr.cve_id
-    LEFT JOIN resolved_state rs
-      ON rs.repository_id = vr.repository_id
-     AND rs.tag_group = vr.tag_group
-     AND rs.cve_id = vr.cve_id
   )
 `;
+
+// Narrow columns only: `description` is never selected for list rows.
+const FINDING_COLUMNS = `
+  v.id, v.scan_result_id, v.cve_id, v.severity, v.package_name, v.installed_version,
+  v.fixed_version, v.title, v.score, v.created_at, sr.scan_date AS scanned_at,
+  i.repository_id, i.tag_group, r.name AS repository_name, i.id AS image_id, i.name AS image_name
+`;
+
+const FINDING_JOINS = `
+  JOIN scan_results sr ON sr.id = v.scan_result_id
+  JOIN images i ON i.id = sr.image_id
+  JOIN repositories r ON r.id = i.repository_id
+`;
+
+/** Open findings = rows of the latest scan per repo + tag group (driven from the small latest set). */
+const OPEN_FINDINGS_SQL = `
+  SELECT ${FINDING_COLUMNS}, 'open' AS state
+  FROM latest_group_scans lgs
+  JOIN vulnerabilities v ON v.scan_result_id = lgs.scan_result_id
+  ${FINDING_JOINS}
+`;
+
+/** Done findings = older rows whose CVE is absent from the latest scan of their group. */
+const DONE_FINDINGS_SQL = `
+  SELECT ${FINDING_COLUMNS}, 'done' AS state
+  FROM vulnerabilities v
+  ${FINDING_JOINS}
+  LEFT JOIN latest_keys lk
+    ON lk.repository_id = i.repository_id AND lk.tag_group IS i.tag_group AND lk.cve_id = v.cve_id
+  WHERE lk.cve_id IS NULL
+`;
+
+/** CTE prefix defining `states` (narrow finding rows) for the requested state filter. */
+function findingStatesCte(state: VulnerabilityStateFilter): string {
+  if (state === "open") {
+    return `${LATEST_SCANS_CTE}, states AS (${OPEN_FINDINGS_SQL})`;
+  }
+  if (state === "done") {
+    return `${LATEST_SCANS_CTE}${LATEST_KEYS_CTE}, states AS (${DONE_FINDINGS_SQL})`;
+  }
+  return `${LATEST_SCANS_CTE}${LATEST_KEYS_CTE}, states AS (${OPEN_FINDINGS_SQL} UNION ALL ${DONE_FINDINGS_SQL})`;
+}
+
+function loadResolvedAt(db: Database, row: { cve_id: string; repository_id: number; tag_group: string | null }): string | null {
+  const found = db
+    .query(
+      `SELECT MAX(datetime(sr.scan_date)) AS resolved_at
+       FROM vulnerabilities v
+       JOIN scan_results sr ON sr.id = v.scan_result_id
+       JOIN images i ON i.id = sr.image_id
+       WHERE v.cve_id = ?1 AND i.repository_id = ?2 AND i.tag_group IS ?3`,
+    )
+    .get(row.cve_id, row.repository_id, row.tag_group) as { resolved_at: string | null } | null;
+  return found?.resolved_at ?? null;
+}
 
 function parsePositiveInt(value: string | null, fallback: number): number {
   if (!value) {
@@ -360,21 +357,16 @@ function handleVulnerabilityList(db: Database, request: Request): Response {
   }
 
   if (search) {
-    where.push("(vs.cve_id LIKE ? OR vs.package_name LIKE ? OR COALESCE(vs.description, '') LIKE ?)");
+    where.push("(vs.cve_id LIKE ? OR vs.package_name LIKE ? OR EXISTS (SELECT 1 FROM vulnerabilities d WHERE d.id = vs.id AND d.description LIKE ?))");
     args.push(`%${search}%`, `%${search}%`, `%${search}%`);
   }
 
-  const stateWhere = buildStateWhereClause(state);
-  const queryArgs: Array<string | number> = state === "all" ? [...args] : [state, ...args];
-  const mergedWhere = [stateWhere, where.length > 0 ? (stateWhere ? `AND ${where.join(" AND ")}` : `WHERE ${where.join(" AND ")}`) : ""]
-    .filter(Boolean)
-    .join(" ");
+  const mergedWhere = where.length > 0 ? `WHERE ${where.join(" AND ")}` : "";
+  const queryArgs = args;
+  const baseFrom = `FROM states vs`;
+  const statesCte = findingStatesCte(state);
 
-  const baseFrom = `
-    FROM vulnerability_states vs
-  `;
-
-  const countSql = `${VULNERABILITY_STATE_CTE} SELECT COUNT(*) AS total ${baseFrom} ${mergedWhere}`;
+  const countSql = `${statesCte} SELECT COUNT(*) AS total ${baseFrom} ${mergedWhere}`;
   const countRow = db.query(countSql).get(...queryArgs) as { total: number };
 
   const totalItems = Number(countRow?.total ?? 0);
@@ -385,32 +377,20 @@ function handleVulnerabilityList(db: Database, request: Request): Response {
 
   const listSql = `
     SELECT
-      vs.id,
-      vs.scan_result_id,
-      vs.cve_id,
-      vs.severity,
-      vs.package_name,
-      vs.installed_version,
-      vs.fixed_version,
-      vs.title,
-      vs.description,
-      vs.score,
-      vs.created_at,
-      vs.repository_id,
-      vs.repository_name,
-      vs.image_id,
-      vs.image_name,
-      vs.scanned_at,
-      vs.tag_group,
-      vs.state,
-      vs.resolved_at
+      vs.id, vs.scan_result_id, vs.cve_id, vs.severity, vs.package_name, vs.installed_version,
+      vs.fixed_version, vs.title, vs.score, vs.created_at, vs.repository_id, vs.repository_name,
+      vs.image_id, vs.image_name, vs.scanned_at, vs.tag_group, vs.state
     ${baseFrom}
     ${mergedWhere}
     ORDER BY ${orderBy}
     LIMIT ? OFFSET ?
   `;
 
-  const rows = db.query(`${VULNERABILITY_STATE_CTE} ${listSql}`).all(...queryArgs, limit, offset) as ListRow[];
+  const rows = (db.query(`${statesCte} ${listSql}`).all(...queryArgs, limit, offset) as ListRow[]).map((row) => ({
+    ...row,
+    description: null,
+    resolved_at: row.state === "done" ? loadResolvedAt(db, row) : null,
+  }));
 
   const data: VulnerabilityListResponse = {
     items: rows.map((row) => toListItem(row)),
@@ -426,36 +406,40 @@ function handleVulnerabilityList(db: Database, request: Request): Response {
 }
 
 function handleVulnerabilityDetail(db: Database, id: number): Response {
-  const detailSql = `
-    SELECT
-      vs.id,
-      vs.scan_result_id,
-      vs.cve_id,
-      vs.severity,
-      vs.package_name,
-      vs.installed_version,
-      vs.fixed_version,
-      vs.title,
-      vs.description,
-      vs.score,
-      vs.created_at,
-      vs.repository_id,
-      vs.repository_name,
-      vs.image_id,
-      vs.image_name,
-      vs.scanned_at,
-      vs.tag_group,
-      vs.state,
-      vs.resolved_at
-    FROM vulnerability_states vs
-    WHERE vs.id = ?
-    LIMIT 1
-  `;
-
-  const row = db.query(`${VULNERABILITY_STATE_CTE} ${detailSql}`).get(id) as ListRow | null;
-  if (!row) {
+  const base = db
+    .query(
+      `SELECT ${FINDING_COLUMNS}, v.description
+       FROM vulnerabilities v
+       ${FINDING_JOINS}
+       WHERE v.id = ?1
+       LIMIT 1`,
+    )
+    .get(id) as (Omit<ListRow, "state" | "resolved_at">) | null;
+  if (!base) {
     return sendError(404, "VULNERABILITY_NOT_FOUND", "Vulnerability not found");
   }
+
+  // Open when the CVE is still present in the latest scan of the same repo + tag group.
+  const stillOpen = db
+    .query(
+      `SELECT 1 AS present
+       FROM vulnerabilities lv
+       WHERE lv.cve_id = ?3
+         AND lv.scan_result_id = (
+           SELECT sr.id FROM scan_results sr JOIN images i ON i.id = sr.image_id
+           WHERE i.repository_id = ?1 AND i.tag_group IS ?2
+           ORDER BY datetime(sr.scan_date) DESC, sr.id DESC
+           LIMIT 1
+         )
+       LIMIT 1`,
+    )
+    .get(base.repository_id, base.tag_group, base.cve_id);
+
+  const row: ListRow = {
+    ...base,
+    state: stillOpen ? "open" : "done",
+    resolved_at: stillOpen ? null : loadResolvedAt(db, base),
+  };
 
   const data: VulnerabilityDetailResponse = toListItem(row);
   return buildSuccessResponse(data);
