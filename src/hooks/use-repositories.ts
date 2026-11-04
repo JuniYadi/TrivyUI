@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import type { RepoListResponse } from "../services/repo-page-types";
 import type { RepositorySortField } from "../services/types";
 import { fetchApi, parseLimit, parsePage } from "./api-fetch";
+import { onListPopState, replaceListUrl } from "./list-url-sync";
 
 export interface RepositoryQueryParams {
   page: number;
@@ -75,18 +76,10 @@ export function useRepositories() {
   }, [load, query]);
 
   useEffect(() => {
-    const nextUrl = `/repositories?${toQueryString(query)}`;
-    const currentUrl = `${window.location.pathname}${window.location.search}`;
-    if (currentUrl !== nextUrl) {
-      window.history.pushState({}, "", nextUrl);
-    }
+    replaceListUrl("/repositories", toQueryString(query));
   }, [query]);
 
-  useEffect(() => {
-    const onPopState = () => setQuery(parseRepositoryParams());
-    window.addEventListener("popstate", onPopState);
-    return () => window.removeEventListener("popstate", onPopState);
-  }, []);
+  useEffect(() => onListPopState("/repositories", () => setQuery(parseRepositoryParams())), []);
 
   const setFilters = useCallback((updater: (prev: RepositoryQueryParams) => RepositoryQueryParams) => {
     setQuery((prev) => updater(prev));
