@@ -1,6 +1,7 @@
 import { useCallback, useState } from "react";
 import { useParams } from "@tanstack/react-router";
 import { AppShell } from "../components/app-shell";
+import { ImageName } from "../components/image-name";
 import { Pagination } from "../components/pagination";
 import {
   AppLink,
@@ -98,8 +99,8 @@ function Metadata({ data }: { data: ImageDetailData }) {
     ["Created", formatDateTime(data.created_at)],
     [
       "Repository",
-      <AppLink key="repo" href={repoHref(data.repository.name)} className="inline-flex min-h-11 items-center break-all text-link hover:underline sm:min-h-0">
-        {data.repository.name}
+      <AppLink key="repo" href={repoHref(data.repository.name)} className="inline-flex min-h-11 items-center hover:underline sm:min-h-0">
+        <ImageName imageRef={data.repository.name} showAccount />
       </AppLink>,
     ],
   ];
@@ -241,7 +242,7 @@ export function ImageDetailPage() {
   return (
     <AppShell
       activeRoute="/images/:id"
-      title={data?.name ?? "Image detail"}
+      title={data ? (data.tag ? `${repoLabel}:${data.tag}` : repoLabel) : "Image detail"}
       meta={meta}
       breadcrumbs={data ? [{ label: "Repositories", to: "/repositories" }, { label: repoLabel, to: repoHref(data.repository.name) }, { label: tag }] : undefined}
       actions={

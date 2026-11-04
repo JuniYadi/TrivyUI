@@ -67,6 +67,8 @@ describe("GET /api/stats", () => {
         top_repositories: Array<{ name: string; vulnerability_count: number; critical_count: number }>;
         recent_scans: Array<{
           id: number;
+          image_id: number;
+          by_severity: { critical: number; high: number; medium: number; low: number; unknown: number };
           vulnerability_count: number;
           critical_count: number;
           package_count: number;
@@ -102,6 +104,10 @@ describe("GET /api/stats", () => {
     expect(body.data.recent_scans[0]?.package_count).toBe(3);
     expect(body.data.recent_scans[0]?.vulnerable_package_count).toBe(2);
     expect(body.data.recent_scans[0]?.clean_package_count).toBe(1);
+    expect(body.data.recent_scans[0]?.image_id).toBeGreaterThan(0);
+    const sev = body.data.recent_scans[0]!.by_severity;
+    expect(sev.critical + sev.high + sev.medium + sev.low + sev.unknown).toBe(body.data.recent_scans[0]!.vulnerability_count);
+    expect(sev.critical).toBe(body.data.recent_scans[0]!.critical_count);
     expect(body.data.daily_trends).toHaveLength(30);
   });
 

@@ -13,6 +13,7 @@ export interface ScanRef {
   repository_id: number;
   repository: string;
   tag_group: string;
+  image_id: number;
   image: string;
   tag: string | null;
   /** Normalised UTC "YYYY-MM-DD HH:MM:SS". */
@@ -40,7 +41,7 @@ export function listScanRefs(db: Database): ScanRef[] {
     .query(
       `
       SELECT sr.id AS id, i.repository_id AS repository_id, r.name AS repository,
-             i.tag_group AS tag_group, i.name AS image, i.tag AS tag,
+             i.tag_group AS tag_group, i.id AS image_id, i.name AS image, i.tag AS tag,
              datetime(sr.scan_date) AS scanned_at
       FROM scan_results sr
       JOIN images i ON i.id = sr.image_id

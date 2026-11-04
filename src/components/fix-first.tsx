@@ -1,5 +1,6 @@
 import type { FixFirstItem } from "../services/dashboard-types";
 import { DashboardLink } from "./dashboard-link";
+import { ImageName } from "./image-name";
 import { Card } from "./ui/card";
 import { Mono } from "./ui/mono";
 import { SeverityChip } from "./ui/severity-chip";
@@ -38,7 +39,7 @@ export function FixFirst({ items, criticalTotal }: FixFirstProps) {
                   <span className="font-semibold text-fg">{item.package_name}</span>
                 </div>
                 <div className="mt-0.5 flex flex-wrap items-baseline gap-x-2 text-xs text-muted">
-                  <span className="min-w-0 break-all">{item.image}</span>
+                  <ImageName imageRef={item.image} withTag variant="inline" />
                   <span className="text-fg2">
                     <Mono>{item.installed_version ?? "?"}</Mono> <span aria-label="to">→</span>{" "}
                     <Mono className="text-success">{item.fixed_version}</Mono>

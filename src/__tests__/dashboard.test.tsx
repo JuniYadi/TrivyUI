@@ -46,7 +46,9 @@ const SAMPLE_STATS: DashboardStatsV2 = {
     {
       id: 100,
       repository: "ghcr.io/acme/api",
+      image_id: 7,
       image: "ghcr.io/acme/api:latest",
+      by_severity: { critical: 2, high: 2, medium: 3, low: 1, unknown: 0 },
       vulnerability_count: 8,
       critical_count: 2,
       package_count: 210,
@@ -85,6 +87,9 @@ describe("dashboard overview ui", () => {
     expect(html).toContain("Repositories by risk");
     expect(html).toContain("ghcr.io/acme/api");
     expect(html).toContain("Recent scans");
+    expect(html).toContain('href="/images/7"');
+    expect(html).toContain("9 of 210 vulnerable");
+    expect(html).toContain("GHCR");
     expect(html).toContain('aria-label="trend-window-filter"');
     expect(html).toContain(">7d<");
     expect(html).toContain(">14d<");
