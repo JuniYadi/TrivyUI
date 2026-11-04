@@ -161,7 +161,7 @@ function VulnerabilityGroups({ data, query, onQueryChange, loading }: ImageDetai
                 <li key={item.id} className="flex flex-wrap items-center gap-x-4 gap-y-1 border-t border-rowline px-4 py-2 text-sm">
                   <SeverityChip severity={item.severity} />
                   <a
-                    href={`/vulnerabilities?search=${encodeURIComponent(item.cve_id)}`}
+                    href={`/vulnerabilities/${encodeURIComponent(item.cve_id)}`}
                     className={`inline-flex min-h-11 min-w-[9.5rem] items-center font-mono text-link hover:underline sm:min-h-9 ${FOCUS}`}
                   >
                     {item.cve_id}
