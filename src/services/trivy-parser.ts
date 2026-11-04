@@ -55,9 +55,13 @@ export function parseTrivyResult(input: unknown): ParseResult {
   const vulnerabilities: NormalizedVulnerability[] = [];
   const packages: NormalizedPackage[] = [];
   const suppressed: NormalizedSuppressedFinding[] = [];
+  let suppressionAware = false;
 
   for (const result of results) {
     suppressed.push(...extractSuppressedFindings(result));
+    if (Object.prototype.hasOwnProperty.call(result, "ExperimentalModifiedFindings")) {
+      suppressionAware = true;
+    }
     const inventoryPackages = extractInventoryPackages(result);
     for (const pkg of inventoryPackages) {
       const normalizedPackage = normalizePackage(result, pkg);
@@ -115,6 +119,7 @@ export function parseTrivyResult(input: unknown): ParseResult {
     vulnerabilities,
     packages,
     suppressed,
+    suppression_aware: suppressionAware,
   };
 }
 
