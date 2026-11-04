@@ -50,7 +50,7 @@ interface ImagesViewProps {
 
 export function ImagesView({ data, query, onSearch, onSort, onPage, onLimit }: ImagesViewProps) {
   return (
-    <div className="grid gap-4">
+    <div className="grid grid-cols-[minmax(0,1fr)] [&>*]:min-w-0 gap-4">
       <div className="flex flex-wrap items-center gap-2">
         <SearchBox label="images" value={query.search ?? ""} onSearch={onSearch} placeholder="Search image or repository" />
         <div className="flex flex-wrap items-center gap-2" role="group" aria-label="Sort repositories">
