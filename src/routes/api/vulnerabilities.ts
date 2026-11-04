@@ -274,11 +274,25 @@ function handleAffected(db: Database, cveId: string, url: URL): Response {
     return sendError(400, "INVALID_STATE", "state must be open, ignored, fixed or all");
   }
 
+  // `repository` (name, or numeric id) narrows the lookup to one repository: its tag groups only.
+  const repositoryParam = url.searchParams.get("repository")?.trim();
+  let repositoryId: number | undefined;
+  if (repositoryParam) {
+    const row = db
+      .query("SELECT id FROM repositories WHERE name = ?1 OR CAST(id AS TEXT) = ?1 ORDER BY name = ?1 DESC LIMIT 1")
+      .get(repositoryParam) as { id: number } | null;
+    if (!row) {
+      return sendError(404, "REPOSITORY_NOT_FOUND", "Repository not found");
+    }
+    repositoryId = row.id;
+  }
+
   const result = listAffected(db, cveId, {
     state: state as AffectedStateFilter,
     q: url.searchParams.get("q") || "",
     page,
     limit,
+    repositoryId,
   });
 
   return buildSuccessResponse({
