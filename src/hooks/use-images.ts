@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import type { ImageListResponse } from "../services/repo-page-types";
 import type { ImageSortField } from "../services/types";
 import { fetchApi, parseLimit, parsePage } from "./api-fetch";
+import { onListPopState, replaceListUrl } from "./list-url-sync";
 
 export interface ImageQueryParams {
   page: number;
@@ -75,18 +76,10 @@ export function useImages() {
   }, [load, query]);
 
   useEffect(() => {
-    const nextUrl = `/images?${toQueryString(query)}`;
-    const currentUrl = `${window.location.pathname}${window.location.search}`;
-    if (currentUrl !== nextUrl) {
-      window.history.pushState({}, "", nextUrl);
-    }
+    replaceListUrl("/images", toQueryString(query));
   }, [query]);
 
-  useEffect(() => {
-    const onPopState = () => setQuery(parseImageParams());
-    window.addEventListener("popstate", onPopState);
-    return () => window.removeEventListener("popstate", onPopState);
-  }, []);
+  useEffect(() => onListPopState("/images", () => setQuery(parseImageParams())), []);
 
   const setFilters = useCallback((updater: (prev: ImageQueryParams) => ImageQueryParams) => {
     setQuery((prev) => updater(prev));
