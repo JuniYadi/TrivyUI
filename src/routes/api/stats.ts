@@ -246,7 +246,9 @@ export function buildDashboardStats(db: Database): DashboardStatsV2 {
       return {
         id: scan.id,
         repository: scan.repository,
+        image_id: scan.image_id,
         image: scan.image,
+        by_severity: { critical: c.critical, high: c.high, medium: c.medium, low: c.low, unknown: c.unknown },
         vulnerability_count: c.total,
         critical_count: c.critical,
         package_count: pk.package_count,
