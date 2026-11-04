@@ -1,8 +1,8 @@
 import { describe, expect, test } from "bun:test";
 import { renderToStaticMarkup } from "react-dom/server";
-import { CveDetailDrawer, renderMarkdown, renderMarkdownInRuntime } from "../components/cve-detail-drawer";
+import { renderMarkdown, renderMarkdownInRuntime } from "../components/markdown";
 
-describe("cve detail drawer markdown", () => {
+describe("markdown rendering", () => {
   test("renders markdown with Bun.markdown.react", () => {
     const html = renderToStaticMarkup(renderMarkdown("# Title\n\nA **bold** note."));
 
@@ -16,31 +16,8 @@ describe("cve detail drawer markdown", () => {
     expect(html).toContain("<strong>bold</strong>");
   });
 
-  test("shows rendered markdown in description area", () => {
-    const html = renderToStaticMarkup(
-      <CveDetailDrawer
-        open
-        loading={false}
-        error={null}
-        onClose={() => {}}
-        data={{
-          id: 1,
-          scan_result_id: 1,
-          cve_id: "CVE-2026-1111",
-          severity: "HIGH",
-          package_name: "openssl",
-          installed_version: "1.0.0",
-          fixed_version: "1.0.1",
-          title: "sample",
-          description: "- [x] patched\n- [ ] pending",
-          score: 7.5,
-          created_at: "2026-01-01T00:00:00.000Z",
-          scanned_at: "2026-01-01T00:00:00.000Z",
-          repository: { id: 1, name: "ghcr.io/acme/api" },
-          image: { id: 1, name: "ghcr.io/acme/api:latest" },
-        }}
-      />,
-    );
+  test("renders task lists as list items", () => {
+    const html = renderToStaticMarkup(renderMarkdown("- [x] patched\n- [ ] pending"));
 
     expect(html).toContain("patched");
     expect(html).toContain("pending");
