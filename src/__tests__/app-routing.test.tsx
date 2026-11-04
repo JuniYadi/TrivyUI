@@ -27,3 +27,16 @@ describe("app routing", () => {
     expect(APP_ROUTE_PATHS.includes("/images/$id")).toBe(true);
   });
 });
+
+describe("router not found", () => {
+  test("renders 404 for unknown paths", async () => {
+    const { renderToStaticMarkup } = await import("react-dom/server");
+    const { RouterProvider, createMemoryHistory, createRouter } = await import("@tanstack/react-router");
+    const { router } = await import("../router");
+    const memory = createRouter({ routeTree: router.routeTree, history: createMemoryHistory({ initialEntries: ["/nope"] }) });
+    await memory.load();
+    const html = renderToStaticMarkup(<RouterProvider router={memory} />);
+    expect(html).toContain("404");
+    expect(html).toContain("Page not found.");
+  });
+});
