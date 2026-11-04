@@ -1,4 +1,5 @@
 import { useEffect, useState, type AnchorHTMLAttributes, type ReactNode } from "react";
+import { repoLabel } from "../lib/image-ref";
 import { navigate } from "../lib/navigation";
 import { SEVERITY, type SeverityKey } from "./ui/severity";
 import type { SeverityCounts } from "../services/repo-page-types";
@@ -58,8 +59,9 @@ export function repoHref(name: string): string {
   return `/repositories/by-name/${encodeURIComponent(name)}`;
 }
 
-export function displayRepoName(name: string, registry: string | null): string {
-  return registry && name.startsWith(`${registry}/`) ? name.slice(registry.length + 1) : name;
+/** Repository name without its registry host (parser based). `registry` is kept for call-site compatibility. */
+export function displayRepoName(name: string, _registry?: string | null): string {
+  return repoLabel(name);
 }
 
 export function formatDateTime(value: string | null | undefined): string {
