@@ -1,3 +1,4 @@
+import { insertSuppressedFindings } from "../../services/suppressed-findings";
 import type { Database } from "bun:sqlite";
 import { insertScanPackages, insertVulnerabilities, upsertImage, upsertRepository, upsertScanResult } from "../../services/db-service";
 import { parseImageTagGrouping } from "../../services/image-tag-grouping";
@@ -19,6 +20,7 @@ export interface UploadSummary {
   repository: string;
   image: string;
   vulnerability_count: number;
+  suppressed_count?: number;
   package_count: number;
   vulnerable_package_count: number;
   clean_package_count: number;
@@ -88,6 +90,7 @@ export function importTrivyPayload(db: Database, parsedJson: unknown, rawJson: s
     const scanResultId = upsertScanResult(db, imageId, rawJson, parsed.source, parsed.scan_date);
     insertScanPackages(db, scanResultId, parsed.packages);
     insertVulnerabilities(db, scanResultId, parsed.vulnerabilities);
+    insertSuppressedFindings(db, scanResultId, parsed.suppressed);
     retentionTarget = {
       repository: parsed.repo_name,
       tagGroup: imageGrouping.tag_group,
@@ -114,6 +117,7 @@ export function importTrivyPayload(db: Database, parsedJson: unknown, rawJson: s
       repository: parsed.repo_name,
       image: parsed.image_name,
       vulnerability_count: parsed.vulnerabilities.length,
+      suppressed_count: parsed.suppressed.length,
       package_count: packageCount,
       vulnerable_package_count: vulnerablePackageCount,
       clean_package_count: cleanPackageCount,
