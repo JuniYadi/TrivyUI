@@ -1,177 +1,168 @@
-import { useCallback, useEffect, useRef, useState } from "react";
-import { useNavigate } from "@tanstack/react-router";
+import { Fragment, useCallback } from "react";
 import { AppShell } from "../components/app-shell";
-import { EmptyState } from "../components/empty-state";
-import { ErrorBanner } from "../components/error-banner";
 import { Pagination } from "../components/pagination";
-import { useImages } from "../hooks/use-images";
+import {
+  AppLink,
+  ChipButton,
+  LatestBadge,
+  LinkButton,
+  PageError,
+  PageSkeleton,
+  SearchBox,
+  SeverityCountChips,
+  displayRepoName,
+  formatDateTime,
+  repoHref,
+} from "../components/repo-ui";
+import { Card } from "../components/ui/card";
+import { Mono } from "../components/ui/mono";
+import { useImages, type ImageQueryParams } from "../hooks/use-images";
+import type { ImageListResponse, ImageListRow } from "../services/repo-page-types";
 import type { ImageSortField } from "../services/types";
-import { formatRepositoryName } from "../utils/format-repository-name";
 
-function sortLabel(currentSort: ImageSortField, currentOrder: "asc" | "desc", sort: ImageSortField): string {
-  if (currentSort !== sort) {
-    return "";
+const SORTS: Array<{ key: ImageSortField; label: string }> = [
+  { key: "vulnerability_count", label: "Open vulns" },
+  { key: "critical_count", label: "Critical" },
+  { key: "last_scanned_at", label: "Last scanned" },
+];
+
+export function ChangeText({ change }: { change: ImageListRow["change"] }) {
+  if (!change) {
+    return <span className="text-muted">First scan, no baseline</span>;
   }
-  return currentOrder === "asc" ? "↑" : "↓";
+  const tone = change.total > 0 ? "text-warning" : change.total < 0 ? "text-success" : "text-fg2";
+  const sign = (n: number) => (n > 0 ? `+${n}` : n < 0 ? `−${Math.abs(n)}` : "0");
+  return (
+    <span className={tone}>
+      {sign(change.total)} total, {sign(change.critical)} critical <span className="text-muted">vs {change.previous_tag ?? "previous"}</span>
+    </span>
+  );
 }
 
-function ImagesSkeleton() {
+interface ImagesViewProps {
+  data: ImageListResponse;
+  query: ImageQueryParams;
+  onSearch: (value: string) => void;
+  onSort: (sort: ImageSortField) => void;
+  onPage: (page: number) => void;
+  onLimit: (limit: number) => void;
+}
+
+export function ImagesView({ data, query, onSearch, onSort, onPage, onLimit }: ImagesViewProps) {
   return (
-    <section className="grid gap-4">
-      <div className="h-16 rounded-xl border border-slate-700 bg-gradient-to-r from-slate-900 via-slate-800 to-slate-900 bg-[length:200%_100%] animate-pulse" />
-      <div className="h-64 rounded-xl border border-slate-700 bg-gradient-to-r from-slate-900 via-slate-800 to-slate-900 bg-[length:200%_100%] animate-pulse" />
-    </section>
+    <div className="grid gap-4">
+      <div className="flex flex-wrap items-center gap-2">
+        <SearchBox label="images" value={query.search ?? ""} onSearch={onSearch} placeholder="Search image or repository" />
+        <div className="flex flex-wrap items-center gap-2" role="group" aria-label="Sort repositories">
+          <span className="text-xs text-muted">Sort</span>
+          {SORTS.map((sort) => (
+            <ChipButton key={sort.key} active={query.sort === sort.key} onClick={() => onSort(sort.key)}>
+              {sort.label}
+              {query.sort === sort.key && <span aria-hidden="true">{query.order === "asc" ? "↑" : "↓"}</span>}
+            </ChipButton>
+          ))}
+        </div>
+      </div>
+
+      {data.groups.length === 0 ? (
+        <Card className="text-center text-sm text-fg2">
+          {query.search ? "No images match this search. Clear the search to see all repositories." : "No scan results yet. Upload a Trivy scan to see images."}
+        </Card>
+      ) : (
+        <Card className="overflow-x-auto !p-0">
+          <table className="w-full min-w-[760px] border-collapse text-sm">
+            <thead>
+              <tr className="border-b border-line text-left text-xs font-medium text-muted">
+                <th scope="col" className="px-4 py-3">Tag</th>
+                <th scope="col" className="px-4 py-3">Severity</th>
+                <th scope="col" className="px-4 py-3 text-right">Total</th>
+                <th scope="col" className="px-4 py-3">Change vs previous tag</th>
+                <th scope="col" className="px-4 py-3 text-right">Digest {"·"} scanned</th>
+              </tr>
+            </thead>
+            <tbody>
+              {data.groups.map((group) => (
+                <Fragment key={group.repository.id}>
+                  <tr className="border-b border-rowline bg-bg/40">
+                    <th scope="colgroup" colSpan={3} className="px-4 py-2 text-left font-normal">
+                      <AppLink href={repoHref(group.repository.name)} className="inline-flex min-h-11 items-center gap-2 font-semibold text-link hover:underline sm:min-h-9">
+                        {displayRepoName(group.repository.name, group.repository.registry)}
+                      </AppLink>
+                      <span className="ml-2 text-xs text-muted">
+                        {group.repository.registry ?? "docker.io"} {"·"} {group.tag_count} {group.tag_count === 1 ? "tag" : "tags"}
+                        {group.tag_count > group.images.length && ` (showing ${group.images.length})`}
+                      </span>
+                    </th>
+                    <td colSpan={2} className="px-4 py-2 text-right text-xs text-muted">
+                      {group.open} open across tags
+                    </td>
+                  </tr>
+                  {group.images.map((image) => (
+                    <tr key={image.id} className="border-b border-rowline last:border-0 hover:bg-bg/40">
+                      <td className="px-4 py-2">
+                        <AppLink href={`/images/${image.id}`} className="inline-flex min-h-11 items-center gap-2 text-link hover:underline sm:min-h-9">
+                          <Mono>{image.tag ?? image.name}</Mono>
+                          {image.is_latest && <LatestBadge />}
+                        </AppLink>
+                      </td>
+                      <td className="px-4 py-2">
+                        <SeverityCountChips counts={image.by_severity} />
+                      </td>
+                      <td className="px-4 py-2 text-right font-semibold tabular-nums">{image.open}</td>
+                      <td className="px-4 py-2 text-xs">
+                        <ChangeText change={image.change} />
+                      </td>
+                      <td className="px-4 py-2 text-right text-xs text-fg2">
+                        <Mono className="text-fg">{image.digest ?? "—"}</Mono>
+                        <div className="text-muted">{formatDateTime(image.last_scanned_at)}</div>
+                      </td>
+                    </tr>
+                  ))}
+                </Fragment>
+              ))}
+            </tbody>
+          </table>
+        </Card>
+      )}
+
+      <Pagination
+        page={data.pagination.page}
+        totalPages={data.pagination.total_pages}
+        totalItems={data.pagination.total_items}
+        limit={data.pagination.limit}
+        onPageChange={onPage}
+        onLimitChange={onLimit}
+      />
+    </div>
   );
 }
 
 export function ImagesPage() {
   const { query, data, loading, error, retry, setFilters } = useImages();
-  const navigate = useNavigate();
-  const [searchInput, setSearchInput] = useState(query.search || "");
-  const [isSearching, setIsSearching] = useState(false);
-  const searchStartedAtRef = useRef(0);
 
-  useEffect(() => {
-    setSearchInput(query.search || "");
-  }, [query.search]);
-
-  useEffect(() => {
-    const timer = window.setTimeout(() => {
-      setFilters((prev) => {
-        const nextSearch = searchInput.trim();
-        if ((prev.search || "") === nextSearch) {
-          return prev;
-        }
-
-        searchStartedAtRef.current = Date.now();
-        setIsSearching(true);
-
-        return {
-          ...prev,
-          page: 1,
-          search: nextSearch || undefined,
-        };
-      });
-    }, 1500);
-
-    return () => window.clearTimeout(timer);
-  }, [searchInput, setFilters]);
-
-  useEffect(() => {
-    if (!loading) {
-      const MIN_SPINNER_MS = 500;
-      const elapsed = Date.now() - searchStartedAtRef.current;
-      const remaining = Math.max(0, MIN_SPINNER_MS - elapsed);
-      const timer = window.setTimeout(() => setIsSearching(false), remaining);
-      return () => window.clearTimeout(timer);
-    }
-  }, [loading]);
-
-  const onSortChange = useCallback(
-    (sort: ImageSortField) => {
-      setFilters((prev) => ({
-        ...prev,
-        page: 1,
-        sort,
-        order: prev.sort === sort && prev.order === "desc" ? "asc" : "desc",
-      }));
-    },
+  const onSearch = useCallback((search: string) => setFilters((prev) => ({ ...prev, page: 1, search: search || undefined })), [setFilters]);
+  const onSort = useCallback(
+    (sort: ImageSortField) => setFilters((prev) => ({ ...prev, page: 1, sort, order: prev.sort === sort && prev.order === "desc" ? "asc" : "desc" })),
     [setFilters],
   );
 
-  const totalItems = data?.pagination.total_items || 0;
+  const meta = data ? `${data.summary.images} images across ${data.summary.repositories} repositories · newest tag first within each repository` : "Loading";
 
   return (
-    <AppShell activeRoute="/images" title="Images" subtitle="Browse container images, repository mapping, and vulnerability totals.">
-      {loading && !isSearching && <ImagesSkeleton />}
-      {!loading && error && <ErrorBanner message={error} onRetry={retry} />}
-      {!error && (
-        <section className="rounded-xl border border-slate-700 bg-slate-900/90 p-4 shadow-inner">
-          <label className="grid gap-1">
-            <span className="text-xs font-semibold uppercase tracking-wide text-slate-400">Search</span>
-            <input
-              type="search"
-              placeholder="Search image or repository"
-              value={searchInput}
-              onChange={(event) => setSearchInput(event.target.value)}
-              className="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-slate-200 placeholder-slate-500 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/50"
-            />
-            {isSearching && loading && (
-              <div className="mt-1 inline-flex items-center gap-2 text-xs text-slate-400">
-                <span
-                  className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-slate-600 border-t-blue-400"
-                  aria-hidden="true"
-                />
-                <span>Searching...</span>
-              </div>
-            )}
-          </label>
-        </section>
-      )}
-      {!loading && !error && totalItems === 0 && <EmptyState />}
-
-      {!loading && !error && data && data.items.length > 0 && (
-        <>
-          <section className="rounded-xl border border-slate-700 bg-slate-900/90 p-4 shadow-inner overflow-x-auto">
-            <table className="w-full border-collapse text-sm">
-              <thead>
-                <tr className="border-b border-slate-700 text-left">
-                  <th className="pb-3 pr-4">
-                    <button type="button" className="text-blue-400 hover:text-blue-300" onClick={() => onSortChange("name")}>
-                      Image {sortLabel(query.sort, query.order, "name")}
-                    </button>
-                  </th>
-                  <th className="pb-3 pr-4">
-                    <button type="button" className="text-blue-400 hover:text-blue-300" onClick={() => onSortChange("repository")}>
-                      Repository {sortLabel(query.sort, query.order, "repository")}
-                    </button>
-                  </th>
-                  <th className="pb-3 pr-4">
-                    <button type="button" className="text-blue-400 hover:text-blue-300" onClick={() => onSortChange("vulnerability_count")}>
-                      Vulnerabilities {sortLabel(query.sort, query.order, "vulnerability_count")}
-                    </button>
-                  </th>
-                  <th className="pb-3 pr-4">
-                    <button type="button" className="text-blue-400 hover:text-blue-300" onClick={() => onSortChange("critical_count")}>
-                      Critical {sortLabel(query.sort, query.order, "critical_count")}
-                    </button>
-                  </th>
-                  <th className="pb-3">
-                    <button type="button" className="text-blue-400 hover:text-blue-300" onClick={() => onSortChange("last_scanned_at")}>
-                      Last Scanned {sortLabel(query.sort, query.order, "last_scanned_at")}
-                    </button>
-                  </th>
-                </tr>
-              </thead>
-              <tbody>
-                {data.items.map((item) => (
-                  <tr
-                    key={item.id}
-                    className="cursor-pointer border-b border-slate-800 last:border-0 hover:bg-slate-800/50"
-                    onClick={() => void navigate({ to: "/images/$id", params: { id: String(item.id) } })}
-                  >
-                    <td className="py-3 pr-4">{item.name}</td>
-                    <td className="py-3 pr-4" title={item.repository.name}>
-                      {formatRepositoryName(item.repository.name)}
-                    </td>
-                    <td className="py-3 pr-4">{item.vulnerability_count}</td>
-                    <td className="py-3 pr-4">{item.critical_count}</td>
-                    <td className="py-3">{item.last_scanned_at ? new Date(item.last_scanned_at).toLocaleString() : "-"}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </section>
-
-          <Pagination
-            page={data.pagination.page}
-            totalPages={data.pagination.total_pages}
-            totalItems={data.pagination.total_items}
-            limit={data.pagination.limit}
-            onPageChange={(page) => setFilters((prev) => ({ ...prev, page }))}
-            onLimitChange={(limit) => setFilters((prev) => ({ ...prev, page: 1, limit }))}
+    <AppShell activeRoute="/images" title="Images" meta={meta} actions={<LinkButton href="/upload">Upload scan</LinkButton>}>
+      {error && <PageError message={error} onRetry={retry} />}
+      {!error && !data && loading && <PageSkeleton />}
+      {!error && data && (
+        <div className={loading ? "opacity-60 transition-opacity" : undefined} aria-busy={loading}>
+          <ImagesView
+            data={data}
+            query={query}
+            onSearch={onSearch}
+            onSort={onSort}
+            onPage={(page) => setFilters((prev) => ({ ...prev, page }))}
+            onLimit={(limit) => setFilters((prev) => ({ ...prev, page: 1, limit }))}
           />
-        </>
+        </div>
       )}
     </AppShell>
   );
