@@ -215,15 +215,18 @@ function TagsTable({ tags, group }: { tags: RepoTagRow[]; group: string | null }
   );
 }
 
-function TopPackages({ data }: { data: RepositoryDetail }) {
+function TopPackages({ data, group }: { data: RepositoryDetail; group: string | null }) {
+  const selected = group ? data.tag_groups.find((g) => g.group_name === group) : undefined;
+  const tag = selected ? selected.latest_tag : data.latest_tag?.name;
+  const packages = selected ? (selected.top_packages ?? []) : data.top_packages;
   return (
     <Card>
-      <h3 className="text-base font-semibold">Top packages{data.latest_tag ? ` in ${data.latest_tag.name}` : ""}</h3>
-      {data.top_packages.length === 0 ? (
+      <h3 className="text-base font-semibold">Top packages{tag ? ` in ${tag}` : ""}</h3>
+      {packages.length === 0 ? (
         <p className="mt-3 text-sm text-muted">No open vulnerabilities in the latest tag.</p>
       ) : (
         <ul className="mt-2">
-          {data.top_packages.map((pkg) => (
+          {packages.map((pkg) => (
             <li key={`${pkg.package_name}@${pkg.installed_version}`} className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-0.5 border-b border-rowline py-2 text-sm last:border-0">
               <span>
                 <strong>{pkg.package_name}</strong> <Mono className="text-xs text-muted">{pkg.installed_version ?? ""}</Mono>
@@ -427,7 +430,7 @@ export function RepositoryDetailView(props: RepositoryDetailViewProps) {
       <TagsTable tags={data.tags} group={group} />
 
       <div className="grid grid-cols-[minmax(0,1fr)] [&>*]:min-w-0 gap-4 lg:grid-cols-[repeat(2,minmax(0,1fr))]">
-        <TopPackages data={data} />
+        <TopPackages data={data} group={group} />
         <IgnoreRulesCard rules={props.rules} failed={props.rulesFailed} />
       </div>
 
