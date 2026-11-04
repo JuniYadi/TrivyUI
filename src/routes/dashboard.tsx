@@ -1,4 +1,5 @@
 import { AppShell } from "../components/app-shell";
+import { DashboardLink } from "../components/dashboard-link";
 import { DailyTrendChart } from "../components/daily-trend-chart";
 import { DashboardSkeleton } from "../components/dashboard-skeleton";
 import { EmptyState } from "../components/empty-state";
@@ -78,7 +79,22 @@ export function DashboardPage() {
     : undefined;
 
   return (
-    <AppShell activeRoute="/dashboard" title="Overview" meta={meta}>
+    <AppShell
+      activeRoute="/dashboard"
+      title="Overview"
+      meta={meta}
+      actions={
+        <DashboardLink
+          href="/upload"
+          className="inline-flex min-h-9 items-center gap-2 rounded-lg bg-accent px-3 text-sm font-medium text-white no-underline hover:brightness-110 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
+        >
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" aria-hidden="true">
+            <path d="M12 16V4M6 10l6-6 6 6M4 20h16" />
+          </svg>
+          Upload scan
+        </DashboardLink>
+      }
+    >
       {loading && <DashboardSkeleton />}
       {!loading && error && <ErrorBanner message={error} onRetry={retry} />}
       {!loading && !error && data && isDashboardEmpty(data) && <EmptyState />}
