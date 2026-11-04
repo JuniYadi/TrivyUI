@@ -1,5 +1,6 @@
 import { Database } from "bun:sqlite";
 import { parseImageTagGrouping } from "./services/image-tag-grouping";
+import { ensureTrivyIgnoreSchema } from "./services/trivy-ignore-schema";
 
 export type TrivyUiDb = Database;
 
@@ -193,6 +194,7 @@ export function initFullSchema(db: TrivyUiDb): void {
   db.exec(FULL_SCHEMA_SQL);
   evolveImagesSchemaSqlite(db);
   evolveTrivyIgnoreSchemaSqlite(db);
+  ensureTrivyIgnoreSchema(db);
   evolveVulnerabilityCatalogSchemaSqlite(db);
   // Indexes for latest-scan-per-group reads (issue #57). After evolveImagesSchemaSqlite so images.tag_group exists.
   db.exec("CREATE INDEX IF NOT EXISTS idx_images_repo_group ON images(repository_id, tag_group);");
