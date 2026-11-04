@@ -129,6 +129,8 @@ export interface ParseResult {
   packages: NormalizedPackage[];
   /** Findings from Result.ExperimentalModifiedFindings (trivy --show-suppressed). */
   suppressed: NormalizedSuppressedFinding[];
+  /** true when any Result carried the ExperimentalModifiedFindings key (scan ran with --show-suppressed). */
+  suppression_aware: boolean;
 }
 
 export interface Repository {
