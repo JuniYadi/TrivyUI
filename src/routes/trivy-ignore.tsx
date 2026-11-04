@@ -391,7 +391,9 @@ export function TrivyIgnoreListPanel({
             </div>
           )}
 
-          <div className="hidden items-center gap-3 border-b border-line px-3 text-xs font-semibold uppercase tracking-wide text-muted lg:flex">
+          <div className="overflow-x-auto">
+          <div className="min-w-[960px]">
+          <div className="flex items-center gap-3 border-b border-line px-3 text-xs font-semibold uppercase tracking-wide text-muted">
             <label className="flex min-h-11 min-w-11 cursor-pointer items-center justify-center">
               <input
                 type="checkbox"
@@ -400,10 +402,11 @@ export function TrivyIgnoreListPanel({
                 onChange={(e) => setSelected(e.target.checked ? visible.map((r) => r.id) : [])}
               />
             </label>
-            <span className="flex-[1.3]">Rule</span>
-            <span className="flex-1">Applies to</span>
-            <span className="flex-[1.3]">Status in latest scans</span>
-            <span className="w-24">Expires</span>
+            <span className="min-w-0 flex-[1.3] basis-64">Rule</span>
+            <span className="min-w-0 flex-1 basis-44">Applies to</span>
+            <span className="min-w-0 flex-[1.3] basis-52">Status in latest scans</span>
+            <span className="w-24 shrink-0">Expires</span>
+            <span className="w-48 shrink-0" aria-hidden="true" />
           </div>
 
           <ul className="m-0 list-none p-0">
@@ -415,7 +418,7 @@ export function TrivyIgnoreListPanel({
               const summary = row.summary;
               return (
                 <li key={row.id} className="border-b border-rowline last:border-0">
-                  <div className="flex flex-wrap items-start gap-x-3 gap-y-2 px-3 py-2 lg:flex-nowrap">
+                  <div className="flex items-start gap-3 px-3 py-2">
                     <label className="flex min-h-11 min-w-11 cursor-pointer items-center justify-center">
                       <input
                         type="checkbox"
@@ -424,32 +427,32 @@ export function TrivyIgnoreListPanel({
                         onChange={(e) => setSelected((prev) => (e.target.checked ? [...prev, row.id] : prev.filter((id) => id !== row.id)))}
                       />
                     </label>
-                    <div className="min-w-0 flex-1 basis-48 lg:flex-[1.3]">
-                      <div className="flex flex-wrap items-center gap-2">
+                    <div className="min-w-0 flex-[1.3] basis-64">
+                      <div className="flex items-center gap-1">
                         <button
                           type="button"
                           aria-expanded={open}
                           aria-label={open ? "Collapse repositories" : "Expand repositories"}
-                          className="inline-flex min-h-11 min-w-11 items-center justify-center text-fg2"
+                          className="inline-flex min-h-11 min-w-8 shrink-0 items-center justify-center text-fg2"
                           onClick={() => setExpanded(open ? null : row.id)}
                         >
                           {open ? "▾" : "▸"}
                         </button>
                         <a
                           href={`/vulnerabilities/${encodeURIComponent(row.cve_id)}`}
-                          className="max-w-full truncate font-mono font-semibold text-link hover:underline"
+                          className="min-w-0 truncate font-mono font-semibold text-link hover:underline"
                           title={row.cve_id}
                         >
                           {row.cve_id}
                         </a>
-                        <span className="rounded border border-line px-1.5 text-[11px] uppercase text-muted">{status}</span>
+                        <span className="ml-1 shrink-0 rounded border border-line px-1.5 text-[11px] uppercase text-muted">{status}</span>
                       </div>
-                      {row.package_name && <p className="m-0 pl-11 text-sm font-semibold">{row.package_name}</p>}
-                      <p className="m-0 truncate pl-11 text-sm text-fg2" title={row.reason || "-"}>
+                      {row.package_name && <p className="m-0 pl-8 text-sm font-semibold">{row.package_name}</p>}
+                      <p className="m-0 truncate pl-8 text-sm text-fg2" title={row.reason || "-"}>
                         {row.reason ? `"${row.reason}"` : "-"}
                       </p>
                     </div>
-                    <div className="min-w-0 basis-40 pl-11 lg:flex-1 lg:pl-0">
+                    <div className="min-w-0 flex-1 basis-44">
                       <span className={`rounded px-1.5 py-0.5 text-[11px] font-bold ${pill.className}`}>{pill.label}</span>
                       <div className="mt-1 text-sm">
                         {row.repository_id === null || !row.repository_name ? (
@@ -470,7 +473,7 @@ export function TrivyIgnoreListPanel({
                         </div>
                       )}
                     </div>
-                    <div className="basis-40 pl-11 lg:flex-[1.3] lg:pl-0">
+                    <div className="min-w-0 flex-[1.3] basis-52">
                       {summary ? (
                         <>
                           <div className="flex flex-wrap gap-1 text-xs font-semibold">
@@ -489,10 +492,10 @@ export function TrivyIgnoreListPanel({
                         <span className="text-sm text-muted">-</span>
                       )}
                     </div>
-                    <div className="w-24 pl-11 text-sm text-fg2 lg:pl-0">
+                    <div className="w-24 shrink-0 text-sm text-fg2">
                       {row.expires_at ? <span className={row.expiring ? "text-warning" : ""}>{formatDate(row.expires_at)}</span> : "no expiry"}
                     </div>
-                    <div className="flex flex-wrap gap-2 pl-11 lg:pl-0">
+                    <div className="flex w-48 shrink-0 gap-2">
                       <Button className="min-h-11" onClick={() => onFetchDetail(row)} disabled={fetchingByVulnId[row.cve_id] === true}>
                         {fetchingByVulnId[row.cve_id] ? "Fetching..." : "Fetch detail"}
                       </Button>
@@ -510,6 +513,8 @@ export function TrivyIgnoreListPanel({
               );
             })}
           </ul>
+          </div>
+          </div>
         </Card>
       )}
     </section>
@@ -840,9 +845,9 @@ export function TrivyIgnorePage() {
       title="Ignore rules"
       meta={
         <>
-          {items.length} rules · {globalCount} global
-          {safeCount > 0 && <span className="text-success"> · {safeCount} safe to remove</span>}
-          {expiringCount > 0 && <span className="text-warning"> · {expiringCount} expiring soon</span>}
+          {items.length} {items.length === 1 ? "rule" : "rules"} · {globalCount} global
+          <span className="text-success"> · {safeCount} safe to remove</span>
+          <span className="text-warning"> · {expiringCount} expiring this week</span>
         </>
       }
       actions={
