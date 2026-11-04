@@ -1,6 +1,7 @@
 import { createRootRoute, createRoute, createRouter, Navigate } from "@tanstack/react-router";
 import { DashboardPage } from "./routes/dashboard";
 import { VulnerabilitiesPage } from "./routes/vulnerabilities";
+import { CveDetailPage } from "./routes/cve-detail";
 import { RepositoriesPage } from "./routes/repositories";
 import { RepositoryDetailPage } from "./routes/repository-detail";
 import { ImagesPage } from "./routes/images";
@@ -15,6 +16,7 @@ export const APP_ROUTE_PATHS = [
   "/dashboard",
   "/upload",
   "/vulnerabilities",
+  "/vulnerabilities/$cveId",
   "/repositories",
   "/repositories/$id",
   "/repositories/by-name/$repoName",
@@ -57,6 +59,12 @@ const vulnerabilitiesRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/vulnerabilities",
   component: VulnerabilitiesPage,
+});
+
+const cveDetailRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/vulnerabilities/$cveId",
+  component: CveDetailPage,
 });
 
 const repositoriesRoute = createRoute({
@@ -118,6 +126,7 @@ const routeTree = rootRoute.addChildren([
   dashboardRoute,
   uploadRoute,
   vulnerabilitiesRoute,
+  cveDetailRoute,
   repositoriesRoute,
   repositoryDetailRoute,
   repositoryByNameRoute,
