@@ -43,6 +43,7 @@ export interface RuleOverview extends TrivyIgnoreRow {
   partly_fixed: boolean;
   safe_to_remove: boolean;
   expiring: boolean;
+  package_name: string | null;
   hint: string;
 }
 
@@ -261,6 +262,18 @@ export function listRulesOverview(db: Database): RuleOverview[] {
   const rules = listTrivyIgnores(db);
   const ctx = loadContext(db);
   const now = Date.now();
+  const packageByCve = new Map<string, string>();
+  for (const row of db
+    .query<{ cve_id: string; package_name: string }>(
+      `SELECT cve_id, MAX(package_name) AS package_name FROM (
+         SELECT cve_id, package_name FROM vulnerabilities WHERE lower(cve_id) IN (SELECT lower(cve_id) FROM trivy_ignores)
+         UNION ALL
+         SELECT cve_id, package_name FROM suppressed_findings WHERE lower(cve_id) IN (SELECT lower(cve_id) FROM trivy_ignores)
+       ) GROUP BY lower(cve_id)`,
+    )
+    .all()) {
+    packageByCve.set(row.cve_id.toLowerCase(), row.package_name);
+  }
 
   return rules.map((rule) => {
     const excluded = ctx.exclusions.get(rule.id) ?? new Set<number>();
@@ -282,6 +295,7 @@ export function listRulesOverview(db: Database): RuleOverview[] {
       partly_fixed,
       safe_to_remove,
       expiring,
+      package_name: packageByCve.get(rule.cve_id.toLowerCase()) ?? null,
       hint: buildHint(summary, safe_to_remove, partly_fixed, rule, expiring),
     };
   });
