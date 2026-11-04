@@ -1,5 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import type { DashboardDailyTrend } from "../services/types";
+import type { DashboardDailyTrendV2, SeverityCounts } from "../services/dashboard-types";
+import { Card } from "./ui/card";
+import { SEVERITY, type SeverityKey } from "./ui/severity";
 
 export type DailyTrendWindow = 7 | 14 | 30;
 
@@ -9,54 +11,37 @@ const WINDOW_OPTIONS: Array<{ label: string; days: DailyTrendWindow }> = [
   { label: "30d", days: 30 },
 ];
 
-const DATASET_COLORS = {
-  vulnerabilities: "#f97316",
-  scanned: "#38bdf8",
-  resolved: "#22c55e",
-};
+const STACK_ORDER: SeverityKey[] = ["critical", "high", "medium", "low"];
 
-export function sliceDailyTrendsByWindow(trends: DashboardDailyTrend[], days: DailyTrendWindow): DashboardDailyTrend[] {
-  if (trends.length <= days) {
-    return trends;
-  }
-
-  return trends.slice(-days);
+export function sliceDailyTrendsByWindow<T>(trends: T[], days: DailyTrendWindow): T[] {
+  return trends.length <= days ? trends : trends.slice(-days);
 }
 
 function formatTrendDay(day: string): string {
   const [year, month, date] = day.split("-");
-  if (!year || !month || !date) {
-    return day;
-  }
-
-  return `${month}/${date}`;
+  return year && month && date ? `${month}/${date}` : day;
 }
 
 interface DailyTrendChartProps {
-  trends: DashboardDailyTrend[];
+  trends: DashboardDailyTrendV2[];
+  /** Current open counts, shown in the legend. */
+  current: SeverityCounts;
 }
 
-export function DailyTrendChart({ trends }: DailyTrendChartProps) {
-  const [windowDays, setWindowDays] = useState<DailyTrendWindow>(7);
+export function DailyTrendChart({ trends, current }: DailyTrendChartProps) {
+  const [windowDays, setWindowDays] = useState<DailyTrendWindow>(14);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const chartRef = useRef<{ destroy: () => void } | null>(null);
 
-  const visibleTrends = useMemo(
-    () => sliceDailyTrendsByWindow(trends, windowDays),
-    [trends, windowDays]
-  );
+  const visibleTrends = useMemo(() => sliceDailyTrendsByWindow(trends, windowDays), [trends, windowDays]);
 
   useEffect(() => {
     let isCancelled = false;
 
     const renderChart = async () => {
       const canvas = canvasRef.current;
-      if (!canvas) {
-        return;
-      }
-
-      const ctx = canvas.getContext("2d");
-      if (!ctx) {
+      const ctx = canvas?.getContext("2d");
+      if (!canvas || !ctx) {
         return;
       }
 
@@ -69,75 +54,26 @@ export function DailyTrendChart({ trends }: DailyTrendChartProps) {
 
       const Chart = chartModule.default;
       chartRef.current = new Chart(ctx, {
-        type: "line",
+        type: "bar",
         data: {
           labels: visibleTrends.map((point) => formatTrendDay(point.date)),
-          datasets: [
-            {
-              label: "Vulnerabilities Detected",
-              data: visibleTrends.map((point) => point.vulnerabilities_detected),
-              borderColor: DATASET_COLORS.vulnerabilities,
-              backgroundColor: DATASET_COLORS.vulnerabilities,
-              pointRadius: 3,
-              pointHoverRadius: 5,
-              tension: 0.25,
-              borderWidth: 2,
-            },
-            {
-              label: "Packages Scanned",
-              data: visibleTrends.map((point) => point.packages_scanned),
-              borderColor: DATASET_COLORS.scanned,
-              backgroundColor: DATASET_COLORS.scanned,
-              pointRadius: 3,
-              pointHoverRadius: 5,
-              tension: 0.25,
-              borderWidth: 2,
-            },
-            {
-              label: "Packages Resolved",
-              data: visibleTrends.map((point) => point.packages_resolved),
-              borderColor: DATASET_COLORS.resolved,
-              backgroundColor: DATASET_COLORS.resolved,
-              pointRadius: 3,
-              pointHoverRadius: 5,
-              tension: 0.25,
-              borderWidth: 2,
-            },
-          ],
+          datasets: STACK_ORDER.map((key) => ({
+            label: SEVERITY[key].label,
+            data: visibleTrends.map((point) => point[key]),
+            backgroundColor: SEVERITY[key].bar,
+            borderWidth: 0,
+            borderRadius: 0,
+            stack: "open",
+          })),
         },
         options: {
           responsive: true,
           maintainAspectRatio: false,
-          interaction: {
-            mode: "index",
-            intersect: false,
-          },
-          plugins: {
-            legend: {
-              labels: {
-                color: "#cbd5e1",
-              },
-            },
-          },
+          interaction: { mode: "index", intersect: false },
+          plugins: { legend: { display: false } },
           scales: {
-            x: {
-              grid: {
-                color: "rgba(148, 163, 184, 0.12)",
-              },
-              ticks: {
-                color: "#94a3b8",
-              },
-            },
-            y: {
-              beginAtZero: true,
-              grid: {
-                color: "rgba(148, 163, 184, 0.12)",
-              },
-              ticks: {
-                color: "#94a3b8",
-                precision: 0,
-              },
-            },
+            x: { stacked: true, grid: { display: false }, ticks: { color: "#8b95a5", maxRotation: 0, autoSkip: true, maxTicksLimit: 8 } },
+            y: { stacked: true, beginAtZero: true, grid: { color: "rgba(139, 149, 165, 0.12)" }, ticks: { color: "#8b95a5", precision: 0 } },
           },
         },
       });
@@ -153,10 +89,10 @@ export function DailyTrendChart({ trends }: DailyTrendChartProps) {
   }, [visibleTrends]);
 
   return (
-    <section className="rounded-xl border border-slate-700 bg-slate-900/80 p-4 shadow-inner">
+    <Card className="min-w-0">
       <div className="mb-3 flex items-center justify-between gap-3">
-        <h3 className="text-base font-semibold text-slate-100">Daily Vulnerability & Package Trend</h3>
-        <div className="inline-flex rounded-lg border border-slate-700 bg-slate-900/70 p-1" role="group" aria-label="trend-window-filter">
+        <h2 className="text-base font-semibold text-fg">Open vulnerabilities, last {windowDays} days</h2>
+        <div className="inline-flex rounded-lg border border-line p-0.5" role="group" aria-label="trend-window-filter">
           {WINDOW_OPTIONS.map((option) => {
             const active = option.days === windowDays;
             return (
@@ -164,8 +100,8 @@ export function DailyTrendChart({ trends }: DailyTrendChartProps) {
                 key={option.days}
                 type="button"
                 className={[
-                  "rounded-md px-2.5 py-1 text-xs font-semibold transition",
-                  active ? "bg-sky-500/20 text-sky-300" : "text-slate-300 hover:bg-slate-800 hover:text-slate-100",
+                  "min-h-11 min-w-11 rounded-md px-2.5 text-xs font-semibold transition sm:min-h-8 sm:min-w-9",
+                  active ? "bg-line text-fg" : "text-muted hover:text-fg",
                 ].join(" ")}
                 aria-pressed={active}
                 onClick={() => setWindowDays(option.days)}
@@ -176,9 +112,17 @@ export function DailyTrendChart({ trends }: DailyTrendChartProps) {
           })}
         </div>
       </div>
-      <div className="h-72">
-        <canvas ref={canvasRef} aria-label="daily-trend-chart" />
+      <div className="h-56 sm:h-64">
+        <canvas ref={canvasRef} role="img" aria-label="daily-trend-chart" />
       </div>
-    </section>
+      <ul className="m-0 mt-3 flex list-none flex-wrap gap-x-4 gap-y-1 p-0 text-xs text-fg2">
+        {STACK_ORDER.map((key) => (
+          <li key={key} className="inline-flex items-center gap-1.5">
+            <span className="h-2 w-2 rounded-sm" style={{ background: SEVERITY[key].bar }} />
+            {SEVERITY[key].label} {current[key].toLocaleString()}
+          </li>
+        ))}
+      </ul>
+    </Card>
   );
 }

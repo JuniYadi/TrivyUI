@@ -194,6 +194,11 @@ export function initFullSchema(db: TrivyUiDb): void {
   evolveImagesSchemaSqlite(db);
   evolveTrivyIgnoreSchemaSqlite(db);
   evolveVulnerabilityCatalogSchemaSqlite(db);
+  // Indexes for latest-scan-per-group reads (issue #57). After evolveImagesSchemaSqlite so images.tag_group exists.
+  db.exec("CREATE INDEX IF NOT EXISTS idx_images_repo_group ON images(repository_id, tag_group);");
+  db.exec("CREATE INDEX IF NOT EXISTS idx_scan_results_image_date ON scan_results(image_id, scan_date DESC, id DESC);");
+  db.exec("CREATE INDEX IF NOT EXISTS idx_vulns_scan_cve ON vulnerabilities(scan_result_id, cve_id);");
+  db.exec("PRAGMA optimize;");
   db.query(
     `
       INSERT INTO email_templates (template_key, name, subject, html_body, text_body, enabled)
