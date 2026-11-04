@@ -98,7 +98,7 @@ function Metadata({ data }: { data: ImageDetailData }) {
     ["Created", formatDateTime(data.created_at)],
     [
       "Repository",
-      <AppLink key="repo" href={repoHref(data.repository.name)} className="text-link hover:underline">
+      <AppLink key="repo" href={repoHref(data.repository.name)} className="inline-flex min-h-11 items-center break-all text-link hover:underline sm:min-h-0">
         {data.repository.name}
       </AppLink>,
     ],
@@ -127,7 +127,7 @@ function VulnerabilityGroups({ data, query, onQueryChange, loading }: ImageDetai
   const groups = groupByPackage(data.items);
   const { pagination } = data;
   return (
-    <div className="grid gap-3">
+    <div className="grid grid-cols-[minmax(0,1fr)] [&>*]:min-w-0 gap-3">
       <div className="flex flex-wrap items-center gap-2">
         <SearchBox label="image-vulns" value={query.search} onSearch={(search) => onQueryChange({ search, page: 1 })} placeholder="CVE or package" />
         <div className="flex flex-wrap items-center gap-2" role="group" aria-label="Filter by severity">
@@ -208,8 +208,8 @@ export function ImageDetailContent({ data, loading, error, retry, query = DEFAUL
   }
 
   return (
-    <div className="grid gap-4">
-      <div className="grid gap-4 lg:grid-cols-[minmax(0,3fr)_minmax(0,2fr)]">
+    <div className="grid grid-cols-[minmax(0,1fr)] [&>*]:min-w-0 gap-4">
+      <div className="grid grid-cols-[minmax(0,1fr)] [&>*]:min-w-0 gap-4 lg:grid-cols-[minmax(0,3fr)_minmax(0,2fr)]">
         <Summary data={data} />
         <Metadata data={data} />
       </div>
