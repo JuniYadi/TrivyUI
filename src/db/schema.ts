@@ -217,6 +217,29 @@ export async function initSchema(driver: DatabaseDriver): Promise<void> {
   }
 
   await evolveImagesSchema(driver);
+  await ensurePerformanceIndexes(driver);
+}
+
+/** Indexes for latest-scan-per-group reads (issue #57). Created after the images schema evolves. */
+export const PERFORMANCE_INDEXES: Array<{ name: string; table: string; columns: string }> = [
+  { name: "idx_images_repo_group", table: "images", columns: "repository_id, tag_group" },
+  { name: "idx_scan_results_image_date", table: "scan_results", columns: "image_id, scan_date DESC, id DESC" },
+  { name: "idx_vulns_scan_cve", table: "vulnerabilities", columns: "scan_result_id, cve_id" },
+];
+
+async function ensurePerformanceIndexes(driver: DatabaseDriver): Promise<void> {
+  for (const index of PERFORMANCE_INDEXES) {
+    const ifNotExists = driver.dialect === "mysql" ? "" : "IF NOT EXISTS ";
+    try {
+      await driver.execute(`CREATE INDEX ${ifNotExists}${index.name} ON ${index.table}(${index.columns})`);
+    } catch (error) {
+      // MySQL has no CREATE INDEX IF NOT EXISTS; an existing index is fine.
+      if (driver.dialect === "mysql" && /duplicate key name|ER_DUP_KEYNAME/i.test(String(error))) {
+        continue;
+      }
+      throw error;
+    }
+  }
 }
 
 async function evolveImagesSchema(driver: DatabaseDriver): Promise<void> {
