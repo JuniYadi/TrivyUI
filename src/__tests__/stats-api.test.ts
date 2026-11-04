@@ -580,7 +580,7 @@ describe("GET /api/stats", () => {
     expect(data.fix_first.map((item: any) => item.cve_id)).toEqual(["CVE-K-2", "CVE-K-1"]);
     expect(data.fix_first[0]).toMatchObject({ package_name: "openssl", installed_version: "3.0", fixed_version: "3.1", score: 9.8 });
     expect(data.repos_by_risk).toHaveLength(1);
-    expect(data.repos_by_risk[0]).toMatchObject({ name: "ghcr.io/acme", open: 4, latest_tag: "1.0" });
+    expect(data.repos_by_risk[0]).toMatchObject({ name: "ghcr.io/acme/api", open: 4, latest_tag: "1.0" });
     expect(data.repos_by_risk[0].by_severity).toMatchObject({ critical: 3, high: 1 });
 
     expect(data.has_package_inventory).toBe(false);
