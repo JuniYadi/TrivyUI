@@ -39,6 +39,7 @@ export const SPA_ROUTES = {
   "/dashboard": homepage,
   "/upload": homepage,
   "/vulnerabilities": homepage,
+  "/vulnerabilities/:cveId": homepage,
   "/repositories": homepage,
   "/repositories/:id": homepage,
   "/repositories/by-name/:repo-name": homepage,

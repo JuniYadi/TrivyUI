@@ -1,38 +1,29 @@
 import { useCallback, useEffect, useState } from "react";
 import { AppShell } from "../components/app-shell";
-import { CveDetailDrawer } from "../components/cve-detail-drawer";
+import { CveQuickPanel } from "../components/cve-quick-panel";
 import { EmptyState } from "../components/empty-state";
 import { ErrorBanner } from "../components/error-banner";
 import { FilterBar } from "../components/filter-bar";
 import { IgnoreVulnerabilityModal } from "../components/ignore-vulnerability-modal";
 import { Pagination } from "../components/pagination";
-import { VulnerabilityTable } from "../components/vulnerability-table";
-import { createTrivyIgnoreRecord } from "../hooks/use-trivy-ignores";
-import { fetchVulnerabilityDetail, hasActiveFilters, useVulnerabilities } from "../hooks/use-vulnerabilities";
-import type { VulnerabilityDetailResponse, VulnerabilitySortField, VulnerabilityWithRelations } from "../services/types";
-import { applyIgnoreSubmitResult, openIgnoreModalState, submitIgnoreFlow } from "../utils/ignore-vulnerability-flow";
+import { Card } from "../components/ui/card";
+import { CveTable, FindingTable, ListToolbar } from "../components/vulnerability-table";
+import { useCveIgnore } from "../hooks/use-cve-ignore";
+import { useCveSummary } from "../hooks/use-cve-detail";
+import { defaultSort, hasActiveFilters, useVulnerabilities, type VulnerabilityListMode } from "../hooks/use-vulnerabilities";
 
-function VulnerabilitySkeleton() {
-  return (
-    <section className="grid gap-4">
-      <div className="h-16 rounded-xl border border-slate-700 bg-gradient-to-r from-slate-900 via-slate-800 to-slate-900 bg-[length:200%_100%] animate-pulse" />
-      <div className="h-64 rounded-xl border border-slate-700 bg-gradient-to-r from-slate-900 via-slate-800 to-slate-900 bg-[length:200%_100%] animate-pulse" />
-    </section>
-  );
+function ListSkeleton() {
+  return <div className="h-64 animate-pulse rounded-xl border border-line bg-card" aria-busy="true" aria-label="Loading vulnerabilities" />;
 }
 
 export function VulnerabilitiesPage() {
   const { query, data, loading, error, retry, setFilters, repositories, images } = useVulnerabilities();
-  const [drawerOpen, setDrawerOpen] = useState(false);
-  const [detailLoading, setDetailLoading] = useState(false);
-  const [detailError, setDetailError] = useState<string | null>(null);
-  const [detail, setDetail] = useState<VulnerabilityDetailResponse | null>(null);
-  const [ignoreTarget, setIgnoreTarget] = useState<VulnerabilityWithRelations | null>(null);
-  const [ignoreReason, setIgnoreReason] = useState("");
-  const [ignoreExpiresAt, setIgnoreExpiresAt] = useState("");
-  const [ignoreBusy, setIgnoreBusy] = useState(false);
-  const [ignoreError, setIgnoreError] = useState<string | null>(null);
-  const [ignoreNotice, setIgnoreNotice] = useState<string | null>(null);
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [activeCve, setActiveCve] = useState<string | null>(null);
+  const summary = useCveSummary(activeCve);
+  const mode: VulnerabilityListMode = query.group === "finding" ? "finding" : "cve";
+
+  const ignore = useCveIgnore(retry);
 
   const onChange = useCallback(
     (patch: Partial<typeof query>) => {
@@ -42,7 +33,7 @@ export function VulnerabilitiesPage() {
   );
 
   const onSortChange = useCallback(
-    (sort: VulnerabilitySortField) => {
+    (sort: typeof query.sort) => {
       setFilters((prev) => ({
         ...prev,
         page: 1,
@@ -53,165 +44,125 @@ export function VulnerabilitiesPage() {
     [setFilters],
   );
 
-  const onClear = useCallback(() => {
-    setFilters(() => ({
-      page: 1,
-      limit: 25,
-      sort: "severity",
-      order: "desc",
-    }));
-  }, [setFilters]);
-
-  const openDetail = useCallback(async (id: number) => {
-    setDrawerOpen(true);
-    setDetailLoading(true);
-    setDetailError(null);
-    setDetail(null);
-
-    try {
-      const result = await fetchVulnerabilityDetail(id);
-      setDetail(result);
-    } catch (err) {
-      setDetailError(err instanceof Error ? err.message : "Failed to load vulnerability detail");
-    } finally {
-      setDetailLoading(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    if (!query.vulnerabilityId) {
-      setDrawerOpen(false);
-      return;
-    }
-
-    void openDetail(query.vulnerabilityId);
-  }, [openDetail, query.vulnerabilityId]);
-
-  const onSelectRow = useCallback(
-    async (id: number) => {
-      setFilters((prev) => ({ ...prev, vulnerabilityId: id }));
+  const onModeChange = useCallback(
+    (next: VulnerabilityListMode) => {
+      setSelected(new Set());
+      setActiveCve(null);
+      setFilters((prev) => ({
+        ...prev,
+        group: next,
+        page: 1,
+        sort: defaultSort(next),
+        order: "desc",
+        image: undefined,
+      }));
     },
     [setFilters],
   );
 
-  const onIgnoreRequest = useCallback((item: VulnerabilityWithRelations) => {
-    const next = openIgnoreModalState({ item, previousNotice: ignoreNotice });
-    setIgnoreTarget(next.target);
-    setIgnoreReason(next.reason);
-    setIgnoreExpiresAt(next.expiresAt);
-    setIgnoreError(next.error);
-    setIgnoreNotice(next.notice);
-  }, [ignoreNotice]);
+  const onClear = useCallback(() => {
+    setFilters((prev) => ({ page: 1, limit: prev.limit, sort: defaultSort(prev.group), order: "desc", group: prev.group }));
+  }, [setFilters]);
 
-  const onCloseIgnoreModal = useCallback(() => {
-    if (ignoreBusy) {
-      return;
-    }
-
-    setIgnoreTarget(null);
-    setIgnoreError(null);
-  }, [ignoreBusy]);
-
-  const handleConfirmIgnore = useCallback(async () => {
-    if (!ignoreTarget || ignoreBusy) {
-      return;
-    }
-
-    setIgnoreBusy(true);
-    setIgnoreError(null);
-
-    try {
-      const result = await submitIgnoreFlow({
-        target: ignoreTarget,
-        reason: ignoreReason,
-        expiresAt: ignoreExpiresAt,
-        createIgnore: (payload) => createTrivyIgnoreRecord(fetch, payload),
-      });
-
-      const next = applyIgnoreSubmitResult({ currentTarget: ignoreTarget, currentReason: ignoreReason, currentExpiresAt: ignoreExpiresAt, result });
-      setIgnoreNotice(next.notice);
-      setIgnoreTarget(next.target);
-      setIgnoreReason(next.reason);
-      setIgnoreExpiresAt(next.expiresAt);
-      setIgnoreError(next.error);
-    } catch (error) {
-      setIgnoreError(error instanceof Error ? error.message : "Failed to create ignore rule");
-      setIgnoreNotice(null);
-      setIgnoreTarget(ignoreTarget);
-      setIgnoreReason(ignoreReason);
-      setIgnoreExpiresAt(ignoreExpiresAt);
-    } finally {
-      setIgnoreBusy(false);
-    }
-  }, [ignoreTarget, ignoreBusy, ignoreReason, ignoreExpiresAt]);
+  // Selection is per page of results; reset when the result set changes.
+  useEffect(() => {
+    setSelected(new Set());
+  }, [query.page, query.search, query.severity, query.repository, query.image, query.fixAvailable, query.limit]);
 
   const totalItems = data?.pagination.total_items || 0;
   const noData = !loading && !error && totalItems === 0;
   const noScans = noData && !hasActiveFilters(query);
+  const cveData = data?.mode === "cve" ? data : null;
+
+  const toggle = (cveId: string) =>
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(cveId)) next.delete(cveId);
+      else next.add(cveId);
+      return next;
+    });
+
+  const togglePage = (on: boolean) => setSelected(on && cveData ? new Set(cveData.items.map((item) => item.cve_id)) : new Set());
+
+  const meta = cveData ? (
+    <>
+      {cveData.summary.unique_cves} unique CVEs · {cveData.summary.findings} findings
+    </>
+  ) : undefined;
+
+  const countLine = cveData ? (
+    <>
+      {cveData.summary.unique_cves} unique CVEs · {cveData.summary.findings} findings · sorted by {query.sort === "score" ? "CVSS" : query.sort}
+    </>
+  ) : (
+    <>{totalItems} findings</>
+  );
 
   return (
-    <AppShell
-      activeRoute="/vulnerabilities"
-      title="Vulnerability Explorer"
-      subtitle="Search and filter vulnerabilities across scanned repositories and images."
-    >
-      <FilterBar query={query} repositories={repositories} images={images} onChange={onChange} onClear={onClear} />
+    <AppShell activeRoute="/vulnerabilities" title="Vulnerabilities" meta={meta}>
+      <FilterBar query={query} repositories={repositories} images={images} severityCounts={cveData?.summary.severity_counts} onChange={onChange} onClear={onClear} />
 
-      {loading && <VulnerabilitySkeleton />}
+      {ignore.notice && (
+        <p role="status" className="mb-3 rounded-lg border border-success/40 bg-success/10 px-3 py-2 text-sm text-success">
+          {ignore.notice}
+        </p>
+      )}
+
+      {loading && !data && <ListSkeleton />}
       {!loading && error && <ErrorBanner message={error} onRetry={retry} />}
-
       {!loading && !error && noScans && <EmptyState />}
 
       {!loading && !error && noData && !noScans && (
-        <section className="rounded-xl border border-dashed border-slate-600 p-8 text-center">
-          <h2 className="mt-0 text-xl font-semibold">No vulnerabilities found</h2>
-          <p className="mb-0 text-slate-400">No vulnerabilities found matching your filters.</p>
-        </section>
+        <Card className="border-dashed p-8 text-center">
+          <h2 className="m-0 text-lg font-semibold">No vulnerabilities found</h2>
+          <p className="mb-0 mt-1 text-muted">No vulnerabilities found matching your filters.</p>
+        </Card>
       )}
 
-      {!loading && !error && data && data.items.length > 0 && (
-        <>
-          {ignoreNotice ? <p className="mb-3 rounded-lg border border-emerald-700/50 bg-emerald-950/40 px-3 py-2 text-sm text-emerald-200">{ignoreNotice}</p> : null}
-          <VulnerabilityTable items={data.items} query={query} onSortChange={onSortChange} onSelect={onSelectRow} onIgnoreRequest={onIgnoreRequest} />
-          <Pagination
-            page={data.pagination.page}
-            totalPages={data.pagination.total_pages}
-            totalItems={data.pagination.total_items}
-            limit={data.pagination.limit}
-            onPageChange={(page) => onChange({ page })}
-            onLimitChange={(limit) => onChange({ limit, page: 1 })}
-          />
-        </>
+      {!error && data && data.items.length > 0 && (
+        <div className={`grid gap-4 ${activeCve ? "lg:grid-cols-[minmax(0,1fr)_380px]" : ""} ${loading ? "opacity-60" : ""}`}>
+          <Card className="min-w-0 overflow-hidden p-0">
+            <ListToolbar mode={mode} onModeChange={onModeChange} countLine={countLine} selectedCount={selected.size} onIgnoreSelected={() => ignore.open({ cveIds: Array.from(selected) })} />
+            {cveData ? (
+              <CveTable
+                items={cveData.items}
+                query={query}
+                selected={selected}
+                activeCve={activeCve}
+                onToggle={toggle}
+                onTogglePage={togglePage}
+                onSortChange={onSortChange}
+                onOpen={setActiveCve}
+              />
+            ) : (
+              <FindingTable items={data.mode === "cve" ? [] : data.items} query={query} onSortChange={onSortChange} onOpen={setActiveCve} />
+            )}
+            <Pagination
+              embedded
+              noun={mode === "cve" ? "CVEs" : "findings"}
+              page={data.pagination.page}
+              totalPages={data.pagination.total_pages}
+              totalItems={data.pagination.total_items}
+              limit={data.pagination.limit}
+              onPageChange={(page) => onChange({ page })}
+              onLimitChange={(limit) => onChange({ limit, page: 1 })}
+            />
+          </Card>
+
+          {activeCve && (
+            <CveQuickPanel
+              cveId={activeCve}
+              data={summary.data}
+              loading={summary.loading}
+              error={summary.error}
+              onClose={() => setActiveCve(null)}
+              onIgnore={(cveId) => ignore.open({ cveIds: [cveId] })}
+            />
+          )}
+        </div>
       )}
 
-      <CveDetailDrawer
-        open={drawerOpen}
-        loading={detailLoading}
-        error={detailError}
-        data={detail}
-        onClose={() => {
-          setDrawerOpen(false);
-          setFilters((prev) => {
-            const next = { ...prev };
-            delete next.vulnerabilityId;
-            return next;
-          });
-        }}
-      />
-
-      <IgnoreVulnerabilityModal
-        open={Boolean(ignoreTarget)}
-        cveId={ignoreTarget?.cve_id || ""}
-        repositoryName={ignoreTarget?.image.repository_name || ignoreTarget?.repository.name || "Unknown repository"}
-        reason={ignoreReason}
-        expiresAt={ignoreExpiresAt}
-        busy={ignoreBusy}
-        error={ignoreError}
-        onReasonChange={setIgnoreReason}
-        onExpiresAtChange={setIgnoreExpiresAt}
-        onCancel={onCloseIgnoreModal}
-        onConfirm={handleConfirmIgnore}
-      />
+      <IgnoreVulnerabilityModal {...ignore.modalProps} />
     </AppShell>
   );
 }
