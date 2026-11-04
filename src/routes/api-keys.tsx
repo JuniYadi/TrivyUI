@@ -130,7 +130,7 @@ export function ApiKeysPage() {
 
   return (
     <AppShell activeRoute="/api-keys" title="API keys" meta="Keys authorise protected POST endpoints such as scan upload.">
-      <div className="grid gap-4">
+      <div className="grid grid-cols-[minmax(0,1fr)] gap-4">
         <Card className="grid gap-3">
           <div>
             <h2 className="text-base font-semibold">Create key</h2>
