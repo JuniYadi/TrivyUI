@@ -1,10 +1,41 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type { Severity, VulnerabilityDetailResponse, VulnerabilityListResponse, VulnerabilitySortField } from "../services/types";
 
+export type VulnerabilityListMode = "cve" | "finding";
+
+export interface CveListItem {
+  cve_id: string;
+  severity: Severity;
+  score: number | null;
+  title: string | null;
+  package_names: string[];
+  package_count: number;
+  installed_versions: string[];
+  installed_min: string | null;
+  installed_max: string | null;
+  fixed_version: string | null;
+  fixed_versions: string[];
+  images: number;
+  repositories: number;
+  findings: number;
+  counts: { open: number; ignored: number; fixed: number };
+}
+
+export interface CveListResponse {
+  mode: "cve";
+  items: CveListItem[];
+  pagination: VulnerabilityListResponse["pagination"];
+  summary: { unique_cves: number; findings: number; severity_counts: Record<Severity, number> };
+  filter_options: { repositories: string[]; images: string[] };
+}
+
 export interface VulnerabilityQueryParams {
+  /** "cve" = one row per CVE (default), "finding" = every finding. */
+  group?: VulnerabilityListMode;
+  fixAvailable?: boolean;
   page: number;
   limit: number;
-  sort: VulnerabilitySortField;
+  sort: VulnerabilitySortField | "affected";
   order: "asc" | "desc";
   severity?: Severity;
   repository?: string;
@@ -30,21 +61,19 @@ interface ApiFailure {
 
 type ApiResponse<T> = ApiSuccess<T> | ApiFailure;
 
-const DEFAULT_QUERY: VulnerabilityQueryParams = {
-  page: 1,
-  limit: 10,
-  sort: "severity",
-  order: "desc",
-};
-
 const ALLOWED_LIMITS = [10, 25, 50, 100] as const;
 
 function isSeverity(value: string): value is Severity {
   return ["CRITICAL", "HIGH", "MEDIUM", "LOW", "UNKNOWN"].includes(value);
 }
 
-function isSortField(value: string): value is VulnerabilitySortField {
-  return ["cve_id", "severity", "package_name", "score", "scanned_at"].includes(value);
+function isSortField(value: string): value is VulnerabilitySortField | "affected" {
+  return ["cve_id", "severity", "package_name", "score", "scanned_at", "affected"].includes(value);
+}
+
+/** Default sort per mode: CVSS for grouped, severity for per-finding. */
+export function defaultSort(group: VulnerabilityListMode | undefined): VulnerabilityQueryParams["sort"] {
+  return group === "finding" ? "severity" : "score";
 }
 
 export function parseVulnerabilityParams(search = window.location.search): VulnerabilityQueryParams {
@@ -52,16 +81,22 @@ export function parseVulnerabilityParams(search = window.location.search): Vulne
 
   const page = Number.parseInt(params.get("page") || "1", 10);
   const limit = Number.parseInt(params.get("limit") || "10", 10);
-  const sortRaw = params.get("sort") || "severity";
+  const group: VulnerabilityListMode = params.get("group") === "finding" ? "finding" : "cve";
+  const sortRaw = params.get("sort") || defaultSort(group);
   const orderRaw = (params.get("order") || "desc").toLowerCase();
   const severityRaw = (params.get("severity") || "").toUpperCase();
 
   const parsed: VulnerabilityQueryParams = {
     page: Number.isFinite(page) && page > 0 ? page : 1,
     limit: ALLOWED_LIMITS.includes(limit as (typeof ALLOWED_LIMITS)[number]) ? limit : 10,
-    sort: isSortField(sortRaw) ? sortRaw : "severity",
+    sort: isSortField(sortRaw) ? sortRaw : defaultSort(group),
     order: orderRaw === "asc" ? "asc" : "desc",
+    group,
   };
+
+  if (params.get("fix") === "1" || params.get("fix_available") === "1") {
+    parsed.fixAvailable = true;
+  }
 
   if (isSeverity(severityRaw)) {
     parsed.severity = severityRaw;
@@ -109,6 +144,8 @@ export function toQueryString(query: VulnerabilityQueryParams): string {
   params.set("limit", String(query.limit));
   params.set("sort", query.sort);
   params.set("order", query.order);
+  if (query.group === "finding") params.set("group", "finding");
+  if (query.fixAvailable) params.set("fix_available", "1");
 
   if (query.severity) params.set("severity", query.severity);
   if (query.repository) params.set("repository", query.repository);
@@ -121,16 +158,18 @@ export function toQueryString(query: VulnerabilityQueryParams): string {
   return params.toString();
 }
 
+export type VulnerabilityListResult = CveListResponse | (VulnerabilityListResponse & { mode?: "finding" });
+
 export async function fetchVulnerabilities(
   query: VulnerabilityQueryParams,
   fetcher: typeof fetch = fetch,
-): Promise<VulnerabilityListResponse> {
+): Promise<VulnerabilityListResult> {
   const qs = toQueryString(query);
   const response = await fetcher(`/api/vulnerabilities?${qs}`);
 
-  let payload: ApiResponse<VulnerabilityListResponse> | null = null;
+  let payload: ApiResponse<VulnerabilityListResult> | null = null;
   try {
-    payload = (await response.json()) as ApiResponse<VulnerabilityListResponse>;
+    payload = (await response.json()) as ApiResponse<VulnerabilityListResult>;
   } catch {
     throw new Error("Failed to load vulnerabilities");
   }
@@ -166,7 +205,7 @@ function buildUrl(query: VulnerabilityQueryParams): string {
 
 export function useVulnerabilities() {
   const [query, setQuery] = useState<VulnerabilityQueryParams>(() => parseVulnerabilityParams());
-  const [data, setData] = useState<VulnerabilityListResponse | null>(null);
+  const [data, setData] = useState<VulnerabilityListResult | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -215,7 +254,9 @@ export function useVulnerabilities() {
   }, [load, query]);
 
   const derived = useMemo(() => {
-    const items = data?.items || [];
+    if (!data) return { repositories: [] as string[], images: [] as string[] };
+    if (data.mode === "cve") return { repositories: data.filter_options.repositories, images: data.filter_options.images };
+    const items = data.items;
     const repositories = Array.from(new Set(items.map((item) => item.repository.name))).sort((a, b) => a.localeCompare(b));
     const images = Array.from(new Set(items.map((item) => item.image.name))).sort((a, b) => a.localeCompare(b));
     return { repositories, images };
@@ -240,10 +281,8 @@ export function hasActiveFilters(query: VulnerabilityQueryParams): boolean {
       query.repository ||
       query.image ||
       query.package ||
+      query.fixAvailable ||
       query.state ||
-      query.page !== 1 ||
-      query.limit !== 10 ||
-      query.sort !== "severity" ||
-      query.order !== "desc",
+      query.page !== 1,
   );
 }
