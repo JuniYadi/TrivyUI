@@ -32,31 +32,49 @@ interface AppShellProps {
   children: ReactNode;
 }
 
-type NavItem = { to: string; label: string; match: (r: ActiveRoute) => boolean };
+type NavItem = { to: string; label: string; icon: ReactNode; match: (r: ActiveRoute) => boolean };
+
+const icon = (children: ReactNode) => (
+  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" className="shrink-0">
+    {children}
+  </svg>
+);
+
+const ICONS = {
+  dashboard: icon(<><rect x="3" y="3" width="7" height="9" /><rect x="14" y="3" width="7" height="5" /><rect x="14" y="12" width="7" height="9" /><rect x="3" y="16" width="7" height="5" /></>),
+  vulns: icon(<><path d="M12 3l10 18H2z" /><path d="M12 10v5M12 18h.01" /></>),
+  repos: icon(<><path d="M3 7a2 2 0 012-2h4l2 2h8a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2z" /></>),
+  images: icon(<><path d="M12 2l9 5v10l-9 5-9-5V7z" /><path d="M3 7l9 5 9-5M12 12v10" /></>),
+  ignore: icon(<><circle cx="12" cy="12" r="9" /><path d="M5.6 5.6l12.8 12.8" /></>),
+  upload: icon(<path d="M12 16V4M6 10l6-6 6 6M4 20h16" />),
+  settings: icon(<><circle cx="12" cy="12" r="3" /><path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M4.9 19.1L7 17M17 7l2.1-2.1" /></>),
+  key: icon(<><circle cx="8" cy="15" r="4" /><path d="M11 12l9-9M16 7l3 3" /></>),
+  mail: icon(<><rect x="3" y="5" width="18" height="14" rx="2" /><path d="M3 7l9 6 9-6" /></>),
+};
 
 const NAV: { heading?: string; items: NavItem[] }[] = [
-  { items: [{ to: "/dashboard", label: "Dashboard", match: (r) => r === "/dashboard" }] },
+  { items: [{ to: "/dashboard", label: "Dashboard", icon: ICONS.dashboard, match: (r) => r === "/dashboard" }] },
   {
     heading: "Explore",
     items: [
-      { to: "/vulnerabilities", label: "Vulnerabilities", match: (r) => r === "/vulnerabilities" },
-      { to: "/repositories", label: "Repositories", match: (r) => r.startsWith("/repositories") },
-      { to: "/images", label: "Images", match: (r) => r.startsWith("/images") },
+      { to: "/vulnerabilities", label: "Vulnerabilities", icon: ICONS.vulns, match: (r) => r === "/vulnerabilities" },
+      { to: "/repositories", label: "Repositories", icon: ICONS.repos, match: (r) => r.startsWith("/repositories") },
+      { to: "/images", label: "Images", icon: ICONS.images, match: (r) => r.startsWith("/images") },
     ],
   },
   {
     heading: "Remediate",
     items: [
-      { to: "/trivy-ignore", label: "Ignore rules", match: (r) => r === "/trivy-ignore" },
-      { to: "/upload", label: "Upload scan", match: (r) => r === "/upload" },
+      { to: "/trivy-ignore", label: "Ignore rules", icon: ICONS.ignore, match: (r) => r === "/trivy-ignore" },
+      { to: "/upload", label: "Upload scan", icon: ICONS.upload, match: (r) => r === "/upload" },
     ],
   },
   {
     heading: "Admin",
     items: [
-      { to: "/settings", label: "Settings", match: (r) => r === "/settings" },
-      { to: "/api-keys", label: "API keys", match: (r) => r === "/api-keys" },
-      { to: "/email-templates", label: "Email templates", match: (r) => r === "/email-templates" },
+      { to: "/settings", label: "Settings", icon: ICONS.settings, match: (r) => r === "/settings" },
+      { to: "/api-keys", label: "API keys", icon: ICONS.key, match: (r) => r === "/api-keys" },
+      { to: "/email-templates", label: "Email templates", icon: ICONS.mail, match: (r) => r === "/email-templates" },
     ],
   },
 ];
@@ -79,10 +97,11 @@ function SidebarNav({ activeRoute, onNavigate }: { activeRoute: ActiveRoute; onN
                 to={item.to}
                 onClick={onNavigate}
                 aria-current={active ? "page" : undefined}
-                className={`flex min-h-9 items-center rounded-lg px-2 text-sm font-medium ${FOCUS} ${
+                className={`flex min-h-9 items-center gap-2.5 rounded-lg px-2 text-sm font-medium ${FOCUS} ${
                   active ? "bg-accent/15 text-link" : "text-fg2 hover:bg-line hover:text-fg"
                 }`}
               >
+                {item.icon}
                 {item.label}
               </Link>
             );
@@ -134,7 +153,11 @@ export function AppShell({ title, meta, subtitle, actions, breadcrumbs, activeRo
           open ? "translate-x-0" : "-translate-x-full"
         }`}
       >
-        <Link to="/dashboard" onClick={() => setOpen(false)} className={`px-5 py-4 text-base font-bold tracking-tight text-fg ${FOCUS}`}>
+        <Link to="/dashboard" onClick={() => setOpen(false)} className={`flex items-center gap-2.5 px-5 py-4 text-base font-bold tracking-tight text-fg ${FOCUS}`}>
+          <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" className="text-accent">
+            <path d="M12 2l8 3v6c0 5-3.5 9-8 11-4.5-2-8-6-8-11V5z" />
+            <path d="M9 12l2 2 4-4" />
+          </svg>
           TrivyUI
         </Link>
         <SidebarNav activeRoute={activeRoute} onNavigate={() => setOpen(false)} />
