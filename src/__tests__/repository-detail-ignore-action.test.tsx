@@ -136,6 +136,6 @@ describe("repository detail view", () => {
       },
     });
     expect(html).toContain("CVE-2026-1111");
-    expect(html).toContain("/vulnerabilities?search=CVE-2026-1111");
+    expect(html).toContain("/vulnerabilities/CVE-2026-1111");
   });
 });
