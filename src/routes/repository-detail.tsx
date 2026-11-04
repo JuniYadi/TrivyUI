@@ -332,11 +332,11 @@ function VulnerabilityList({
               {(vulns?.items ?? []).map((item) => (
                 <tr key={item.id} className="border-b border-rowline last:border-0">
                   <td className="px-4 py-2">
-                    <span className="inline-flex min-h-11 items-center gap-2 sm:min-h-9">
+                    <span className="flex items-center gap-2">
                       <SeverityChip severity={item.severity} />
                       <a
                         href={`/vulnerabilities?search=${encodeURIComponent(item.cve_id)}&repository=${encodeURIComponent(repositoryName)}`}
-                        className={`font-mono text-link hover:underline ${FOCUS}`}
+                        className={`inline-flex min-h-11 items-center font-mono text-link hover:underline sm:min-h-9 ${FOCUS}`}
                       >
                         {item.cve_id}
                       </a>
@@ -399,7 +399,7 @@ export function RepositoryDetailView(props: RepositoryDetailViewProps) {
   const { data, group, onGroupChange } = props;
 
   return (
-    <div className="grid gap-5">
+    <div className="grid grid-cols-[minmax(0,1fr)] [&>*]:min-w-0 gap-5">
       <SeverityTiles data={data} />
 
       <section aria-label="Tag group health" className="grid gap-3">
@@ -416,7 +416,7 @@ export function RepositoryDetailView(props: RepositoryDetailViewProps) {
             ))}
           </div>
         </div>
-        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+        <div className="grid grid-cols-[minmax(0,1fr)] [&>*]:min-w-0 gap-3 sm:grid-cols-2 lg:grid-cols-3">
           {data.tag_groups.map((g) => (
             <GroupCard key={g.group_name} group={g} selected={group === g.group_name} onSelect={() => onGroupChange(group === g.group_name ? null : g.group_name)} />
           ))}
@@ -426,7 +426,7 @@ export function RepositoryDetailView(props: RepositoryDetailViewProps) {
 
       <TagsTable tags={data.tags} group={group} />
 
-      <div className="grid gap-4 lg:grid-cols-2">
+      <div className="grid grid-cols-[minmax(0,1fr)] [&>*]:min-w-0 gap-4 lg:grid-cols-[repeat(2,minmax(0,1fr))]">
         <TopPackages data={data} />
         <IgnoreRulesCard rules={props.rules} failed={props.rulesFailed} />
       </div>
