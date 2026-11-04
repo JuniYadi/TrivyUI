@@ -1,9 +1,9 @@
 import { useCallback, useEffect, useState } from "react";
-import type { DashboardStats } from "../services/types";
+import type { DashboardStatsV2 } from "../services/dashboard-types";
 
 interface ApiSuccess {
   success: true;
-  data: DashboardStats;
+  data: DashboardStatsV2;
 }
 
 interface ApiFailure {
@@ -16,7 +16,7 @@ interface ApiFailure {
 
 type ApiStatsResponse = ApiSuccess | ApiFailure;
 
-export async function fetchDashboardStats(fetcher: typeof fetch = fetch): Promise<DashboardStats> {
+export async function fetchDashboardStats(fetcher: typeof fetch = fetch): Promise<DashboardStatsV2> {
   const response = await fetcher("/api/stats");
 
   let payload: ApiStatsResponse | null = null;
@@ -33,7 +33,7 @@ export async function fetchDashboardStats(fetcher: typeof fetch = fetch): Promis
   return payload.data;
 }
 
-export function isDashboardEmpty(stats: DashboardStats): boolean {
+export function isDashboardEmpty(stats: DashboardStatsV2): boolean {
   return (
     stats.total_vulnerabilities === 0 &&
     stats.total_packages_scanned === 0 &&
@@ -42,7 +42,7 @@ export function isDashboardEmpty(stats: DashboardStats): boolean {
 }
 
 export function useStats() {
-  const [data, setData] = useState<DashboardStats | null>(null);
+  const [data, setData] = useState<DashboardStatsV2 | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
