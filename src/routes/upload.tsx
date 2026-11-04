@@ -336,7 +336,7 @@ export function UploadPage() {
 
   return (
     <AppShell activeRoute="/upload" title="Upload scan" meta="Add Trivy JSON reports. Results appear on the dashboard as soon as processing finishes.">
-      <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_340px] lg:items-start">
+      <div className="grid grid-cols-[minmax(0,1fr)] gap-4 lg:grid-cols-[minmax(0,1fr)_340px] lg:items-start">
         <Card className="p-0">
           <div role="tablist" aria-label="Upload method" className="flex border-b border-rowline px-2">
             <button type="button" role="tab" aria-selected={tab === "file"} className={tabClass(tab === "file")} onClick={() => setTab("file")}>
