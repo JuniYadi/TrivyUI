@@ -1,20 +1,33 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useNavigate, useParams } from "@tanstack/react-router";
+import { useEffect, useMemo, useState } from "react";
+import { useParams } from "@tanstack/react-router";
 import { AppShell } from "../components/app-shell";
-import { CveDetailDrawer } from "../components/cve-detail-drawer";
-import { ErrorBanner } from "../components/error-banner";
-import { IgnoreVulnerabilityModal } from "../components/ignore-vulnerability-modal";
 import { Pagination } from "../components/pagination";
-import { SeverityChart } from "../components/severity-chart";
-import { StatCard } from "../components/stat-card";
-import { useRepoDetail } from "../hooks/use-repo-detail";
-import { createTrivyIgnoreRecord, fetchTrivyIgnores } from "../hooks/use-trivy-ignores";
-import { fetchVulnerabilityDetail } from "../hooks/use-vulnerabilities";
+import {
+  AppLink,
+  ChipButton,
+  Delta,
+  FOCUS,
+  LatestBadge,
+  LinkButton,
+  NotFoundCard,
+  PageError,
+  PageSkeleton,
+  displayRepoName,
+  formatDateTime,
+  timeAgo,
+  toBarCounts,
+} from "../components/repo-ui";
+import { Card } from "../components/ui/card";
+import { Mono } from "../components/ui/mono";
+import { SEVERITY, type SeverityKey } from "../components/ui/severity";
+import { SeverityBar } from "../components/ui/severity-bar";
+import { SeverityChip } from "../components/ui/severity-chip";
+import { useRepoDetail, useRepoVulnerabilities } from "../hooks/use-repo-detail";
+import { fetchTrivyIgnores } from "../hooks/use-trivy-ignores";
+import type { RepoGroupHealth, RepoTagRow } from "../services/repo-state";
+import type { RepoVulnerabilityPage, RepositoryDetail } from "../services/repo-page-types";
 import type { TrivyIgnoreRow } from "../services/trivy-ignore";
-import type { RepositoryDetailResponse, VulnerabilityDetailResponse, VulnerabilityListResponse, VulnerabilityWithRelations } from "../services/types";
-import { filterVulnerabilitiesByGroup } from "../utils/filter-vulnerabilities-by-group";
-import { applyIgnoreSubmitResult, openIgnoreModalState, submitIgnoreFlowAndRefresh } from "../utils/ignore-vulnerability-flow";
-import { paginateList } from "../utils/paginate-list";
+import type { TagGroupStatus } from "../services/tag-group-health";
 
 function parseRepositoryId(value: string | undefined): number | null {
   if (!value) {
@@ -25,850 +38,546 @@ function parseRepositoryId(value: string | undefined): number | null {
   return Number.isFinite(id) ? id : null;
 }
 
-function DetailSkeleton() {
+// ---------------------------------------------------------------------------
+// Ignore rule summary (read-only; editing lives on /trivy-ignore)
+// ---------------------------------------------------------------------------
+
+const DAY_MS = 24 * 60 * 60 * 1000;
+const EXPIRY_WARNING_DAYS = 7;
+
+export interface IgnoreRuleSummary {
+  active: Array<TrivyIgnoreRow & { expiryLabel: string; expiringSoon: boolean }>;
+  expiredCount: number;
+}
+
+export function summarizeIgnoreRules(rows: TrivyIgnoreRow[], now = Date.now()): IgnoreRuleSummary {
+  const active: IgnoreRuleSummary["active"] = [];
+  let expiredCount = 0;
+
+  for (const row of rows) {
+    if (!row.expires_at) {
+      active.push({ ...row, expiryLabel: "no expiry", expiringSoon: false });
+      continue;
+    }
+    const expires = Date.parse(row.expires_at);
+    if (!Number.isFinite(expires)) {
+      active.push({ ...row, expiryLabel: "no expiry", expiringSoon: false });
+    } else if (expires <= now) {
+      expiredCount += 1;
+    } else {
+      const days = Math.ceil((expires - now) / DAY_MS);
+      active.push({ ...row, expiryLabel: `expires in ${days} ${days === 1 ? "day" : "days"}`, expiringSoon: days <= EXPIRY_WARNING_DAYS });
+    }
+  }
+
+  active.sort((a, b) => Number(b.expiringSoon) - Number(a.expiringSoon));
+  return { active, expiredCount };
+}
+
+// ---------------------------------------------------------------------------
+// Presentational pieces
+// ---------------------------------------------------------------------------
+
+const TILE_ORDER: Array<{ key: SeverityKey; api: "CRITICAL" | "HIGH" | "MEDIUM" | "LOW" | "UNKNOWN" }> = [
+  { key: "critical", api: "CRITICAL" },
+  { key: "high", api: "HIGH" },
+  { key: "medium", api: "MEDIUM" },
+  { key: "low", api: "LOW" },
+  { key: "unknown", api: "UNKNOWN" },
+];
+
+function SeverityTiles({ data }: { data: RepositoryDetail }) {
   return (
-    <section className="skeleton-stack">
-      <div className="skeleton-block" />
-      <div className="skeleton-block" />
-      <div className="skeleton-block skeleton-block--tall" />
+    <section aria-label="Severity summary" className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
+      {TILE_ORDER.map(({ key, api }) => (
+        <Card key={key} className="flex items-center gap-3 !p-3">
+          <SeverityChip severity={key} className="!h-8 !w-8 !text-sm" />
+          <div className="min-w-0">
+            <p className="text-2xl font-semibold leading-none tabular-nums">{data.by_severity[api]}</p>
+            <p className="mt-1 truncate text-xs text-muted">
+              {SEVERITY[key].label}
+              {data.severity_change[api] !== null && (
+                <>
+                  {" · "}
+                  <Delta value={data.severity_change[api]} />
+                </>
+              )}
+            </p>
+          </div>
+        </Card>
+      ))}
     </section>
   );
 }
 
-type RetryHandler = () => void | Promise<void>;
+const STATUS_LABEL: Record<TagGroupStatus, string> = { improving: "Improving", at_risk: "At risk", critical: "Critical" };
 
-interface RepositoryDetailContentProps {
-  data: RepositoryDetailResponse | null;
-  loading: boolean;
-  error: string | null;
-  retry: RetryHandler;
-  state: VulnerabilityStateFilter;
-  onStateChange: (next: VulnerabilityStateFilter) => void;
-}
-
-type VulnerabilityStateFilter = "open" | "done" | "all";
-
-const STATE_FILTERS: VulnerabilityStateFilter[] = ["open", "done", "all"];
-
-type ParsedImageRef = {
-  registry: string;
-  owner: string;
-  region: string;
-  image: string;
-};
-
-function parseImageReference(imageName: string): ParsedImageRef {
-  const value = imageName.trim();
-  if (!value) {
-    return { registry: "Unknown", owner: "-", region: "-", image: imageName };
-  }
-
-  const ecrMatch = value.match(/^([^.]*)\.dkr\.ecr\.([a-z0-9-]+)\.amazonaws\.com\/(.+)$/i);
-  if (ecrMatch) {
-    const [, accountId, region, image] = ecrMatch;
-    return { registry: "ECR", owner: accountId || "-", region: region || "-", image: image || "-" };
-  }
-
-  const slash = value.indexOf("/");
-  const image = slash >= 0 ? value.slice(slash + 1) : value;
-
-  return { registry: "Other", owner: "-", region: "-", image };
-}
-
-function formatRelativeTime(iso: string): string {
-  const then = new Date(iso).getTime();
-  const now = Date.now();
-  const diffMs = Math.max(0, now - then);
-
-  const minute = 60 * 1000;
-  const hour = 60 * minute;
-  const day = 24 * hour;
-
-  if (diffMs < hour) {
-    const mins = Math.max(1, Math.floor(diffMs / minute));
-    return `${mins}m ago`;
-  }
-
-  if (diffMs < day) {
-    const hours = Math.max(1, Math.floor(diffMs / hour));
-    return `${hours}h ago`;
-  }
-
-  const days = Math.max(1, Math.floor(diffMs / day));
-  return `${days}d ago`;
-}
-
-const SEVERITY_STYLES: Record<string, string> = {
-  CRITICAL: "rounded-full bg-red-950 px-2 py-0.5 text-xs font-bold text-red-200",
-  HIGH: "rounded-full bg-orange-950 px-2 py-0.5 text-xs font-bold text-orange-200",
-  MEDIUM: "rounded-full bg-yellow-950 px-2 py-0.5 text-xs font-bold text-yellow-200",
-  LOW: "rounded-full bg-blue-950 px-2 py-0.5 text-xs font-bold text-blue-200",
-  UNKNOWN: "rounded-full bg-gray-800 px-2 py-0.5 text-xs font-bold text-gray-300",
-};
-
-const STATE_STYLES: Record<string, string> = {
-  open: "rounded-full bg-rose-950 px-2 py-0.5 text-xs font-bold uppercase tracking-wide text-rose-200",
-  done: "rounded-full bg-emerald-950 px-2 py-0.5 text-xs font-bold uppercase tracking-wide text-emerald-200",
-};
-
-function formatScore(score: number | null): string {
-  return score === null ? "-" : score.toFixed(1);
-}
-
-interface ApiSuccess<T> {
-  success: true;
-  data: T;
-}
-
-interface ApiFailure {
-  success: false;
-  error?: {
-    code?: string;
-    message?: string;
-  };
-}
-
-type ApiResponse<T> = ApiSuccess<T> | ApiFailure;
-
-export function pickRepositoryIgnoreCveCandidate(items: VulnerabilityWithRelations[], repositoryName?: string | null): VulnerabilityWithRelations | null {
-  const normalizedRepo = repositoryName?.trim().toLowerCase();
-  if (normalizedRepo) {
-    const exactMatch = items.find((item) => item.repository.name.trim().toLowerCase() === normalizedRepo);
-    if (exactMatch) {
-      return exactMatch;
-    }
-  }
-
-  return items[0] || null;
-}
-
-async function fetchVulnerabilityMatches(
-  cveId: string,
-  repositoryName?: string | null,
-  fetcher: typeof fetch = fetch,
-): Promise<VulnerabilityWithRelations[]> {
-  const params = new URLSearchParams({
-    cve_id: cveId,
-    state: "all",
-    page: "1",
-    limit: "50",
-    sort: "scanned_at",
-    order: "desc",
-  });
-
-  if (repositoryName?.trim()) {
-    params.set("repository", repositoryName.trim());
-  }
-
-  const response = await fetcher(`/api/vulnerabilities?${params.toString()}`);
-
-  let payload: ApiResponse<VulnerabilityListResponse> | null = null;
-  try {
-    payload = (await response.json()) as ApiResponse<VulnerabilityListResponse>;
-  } catch {
-    throw new Error("Failed to load vulnerability detail");
-  }
-
-  if (!response.ok || !payload || payload.success !== true) {
-    throw new Error(payload?.error?.message || "Failed to load vulnerability detail");
-  }
-
-  return payload.data.items;
-}
-
-export async function fetchRepositoryIgnoreCveDetail(
-  cveId: string,
-  repositoryName?: string | null,
-  fetcher: typeof fetch = fetch,
-): Promise<VulnerabilityDetailResponse> {
-  const normalizedCve = cveId.trim();
-  if (!normalizedCve) {
-    throw new Error("CVE ID is required");
-  }
-
-  const scopedItems = repositoryName?.trim() ? await fetchVulnerabilityMatches(normalizedCve, repositoryName, fetcher) : [];
-  let candidate = pickRepositoryIgnoreCveCandidate(scopedItems, repositoryName);
-
-  if (!candidate) {
-    const fallbackItems = await fetchVulnerabilityMatches(normalizedCve, undefined, fetcher);
-    candidate = pickRepositoryIgnoreCveCandidate(fallbackItems);
-  }
-
-  if (!candidate) {
-    throw new Error("No vulnerability detail found for this CVE.");
-  }
-
-  return fetchVulnerabilityDetail(candidate.id, fetcher);
-}
-
-export function formatIgnoreDate(raw: string | null): string {
-  if (!raw) {
-    return "-";
-  }
-
-  const parsed = new Date(raw);
-  if (Number.isNaN(parsed.getTime())) {
-    return raw;
-  }
-
-  return parsed.toLocaleString();
-}
-
-export function resolveIgnoreRuleStatus(expiresAt: string | null, nowMs: number = Date.now()): "Active" | "Expired" {
-  if (!expiresAt) {
-    return "Active";
-  }
-
-  const expiresMs = new Date(expiresAt).getTime();
-  if (!Number.isFinite(expiresMs)) {
-    return "Active";
-  }
-
-  return expiresMs < nowMs ? "Expired" : "Active";
-}
-
-export function formatIgnoreScopeAndTags(row: TrivyIgnoreRow): string {
-  if (row.scope === "selected_tags") {
-    const tags = row.tag_groups?.join(", ") || "";
-    return tags ? `Selected: ${tags}` : "Selected tags";
-  }
-
-  return "All tags";
-}
-
-export function buildRepositoryIgnoreSummary(rows: TrivyIgnoreRow[], nowMs: number = Date.now()): {
-  total: number;
-  global: number;
-  repository: number;
-  active: number;
-  expired: number;
-} {
-  let global = 0;
-  let repository = 0;
-  let active = 0;
-  let expired = 0;
-
-  for (const row of rows) {
-    if (row.repository_id === null) {
-      global += 1;
-    } else {
-      repository += 1;
-    }
-
-    const status = resolveIgnoreRuleStatus(row.expires_at, nowMs);
-    if (status === "Active") {
-      active += 1;
-    } else {
-      expired += 1;
-    }
-  }
-
-  return {
-    total: rows.length,
-    global,
-    repository,
-    active,
-    expired,
-  };
-}
-
-interface RepositoryIgnoreTrackingPanelProps {
-  items: TrivyIgnoreRow[];
-  loading: boolean;
-  error: string | null;
-  onRetry: () => void;
-  onOpenCveDetail: (row: TrivyIgnoreRow) => void;
-}
-
-export function RepositoryIgnoreTrackingPanel({ items, loading, error, onRetry, onOpenCveDetail }: RepositoryIgnoreTrackingPanelProps) {
-  const summary = buildRepositoryIgnoreSummary(items);
-  const hasRows = items.length > 0;
-
+export function StatusBadge({ status }: { status: TagGroupStatus }) {
+  const style = status === "critical" ? { background: SEVERITY.critical.bg, color: SEVERITY.critical.fg } : undefined;
+  const cls = status === "improving" ? "bg-success/15 text-success" : status === "at_risk" ? "bg-warning/15 text-warning" : "";
   return (
-    <section className="rounded-xl border border-slate-700 bg-slate-900/90 p-4 shadow-inner">
-      <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-        <h3 className="text-base font-semibold">Trivy Ignore Tracking</h3>
-        <a
-          className="rounded-lg bg-blue-600 px-3 py-1.5 text-sm font-semibold text-white transition hover:bg-blue-700"
-          href="/trivy-ignore"
-        >
-          Manage Full
-        </a>
-      </div>
-      <p className="mb-3 text-xs text-slate-400">Effective rules for this repo (Global + Repository).</p>
+    <span className={`rounded px-2 py-0.5 text-xs font-semibold ${cls}`} style={style}>
+      {STATUS_LABEL[status]}
+    </span>
+  );
+}
 
-      <div className="mb-3 flex flex-wrap gap-2 text-xs">
-        <span className="rounded-full border border-slate-600 bg-slate-950 px-2 py-1 text-slate-200">Total: {summary.total}</span>
-        <span className="rounded-full border border-slate-600 bg-slate-950 px-2 py-1 text-slate-200">Global: {summary.global}</span>
-        <span className="rounded-full border border-slate-600 bg-slate-950 px-2 py-1 text-slate-200">Repository: {summary.repository}</span>
-        <span className="rounded-full border border-emerald-700/60 bg-emerald-950/40 px-2 py-1 text-emerald-200">Active: {summary.active}</span>
-        <span className="rounded-full border border-amber-700/60 bg-amber-950/40 px-2 py-1 text-amber-200">Expired: {summary.expired}</span>
-      </div>
+function GroupCard({ group, selected, onSelect }: { group: RepoGroupHealth; selected: boolean; onSelect: () => void }) {
+  return (
+    <button
+      type="button"
+      onClick={onSelect}
+      aria-pressed={selected}
+      className={`min-h-11 rounded-xl border bg-card p-4 text-left transition ${FOCUS} ${selected ? "border-accent" : "border-line hover:border-accent/60"}`}
+    >
+      <span className="flex items-start justify-between gap-2">
+        <span className="truncate text-base font-semibold">{group.group_name}</span>
+        <StatusBadge status={group.status} />
+      </span>
+      <span className="mt-1 block text-xs text-fg2">
+        Latest <Mono className="text-fg">{group.latest_tag ?? "-"}</Mono> {"·"} {group.tag_count} {group.tag_count === 1 ? "tag" : "tags"}
+      </span>
+      <SeverityBar counts={toBarCounts(group.by_severity)} className="my-3" />
+      <span className="flex flex-wrap items-baseline justify-between gap-x-3 text-sm">
+        <span>
+          <strong className="tabular-nums">{group.open}</strong> open {"·"}{" "}
+          <span style={{ color: SEVERITY.critical.fg }}>{group.critical} critical</span>
+        </span>
+        {group.change !== null && group.previous_tag && (
+          <span className="text-xs">
+            <Delta value={group.change} /> <span className="text-muted">vs <Mono>{group.previous_tag}</Mono></span>
+          </span>
+        )}
+      </span>
+    </button>
+  );
+}
 
-      {loading && !error && <p className="py-2 text-sm text-slate-400">Loading ignore rules...</p>}
-      {error ? <ErrorBanner message={error} onRetry={onRetry} /> : null}
-      {!loading && !error && !hasRows && (
-        <p className="rounded-lg border border-slate-700 bg-slate-950/60 px-3 py-2 text-sm text-slate-300">
-          No ignore rules currently affect this repository.
+export function filterTagsByGroup(tags: RepoTagRow[], group: string | null): RepoTagRow[] {
+  return group ? tags.filter((tag) => tag.tag_group === group) : tags;
+}
+
+function TagsTable({ tags, group }: { tags: RepoTagRow[]; group: string | null }) {
+  const rows = filterTagsByGroup(tags, group);
+  return (
+    <Card className="overflow-x-auto !p-0">
+      <div className="flex flex-wrap items-baseline justify-between gap-2 px-4 pt-4">
+        <h3 className="text-base font-semibold">
+          Tags <span className="font-normal text-fg2">{"·"} {group ?? "all groups"}</span>
+        </h3>
+        <p className="text-xs text-muted">Newest first {"·"} change vs previous tag in the same group</p>
+      </div>
+      <table className="mt-3 w-full min-w-[680px] border-collapse text-sm">
+        <thead>
+          <tr className="border-b border-line text-left text-xs font-medium text-muted">
+            <th scope="col" className="px-4 py-2">Tag</th>
+            <th scope="col" className="px-4 py-2">Group</th>
+            <th scope="col" className="px-4 py-2">Severity mix</th>
+            <th scope="col" className="px-4 py-2 text-right">Open</th>
+            <th scope="col" className="px-4 py-2 text-right">Change</th>
+            <th scope="col" className="px-4 py-2 text-right">Fixable</th>
+            <th scope="col" className="px-4 py-2 text-right">Scanned</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((tag) => (
+            <tr key={tag.image_id} className="border-b border-rowline last:border-0">
+              <td className="px-4 py-2">
+                <AppLink href={`/images/${tag.image_id}`} className="inline-flex min-h-11 items-center gap-2 text-link hover:underline sm:min-h-9">
+                  <Mono>{tag.tag ?? tag.name}</Mono>
+                  {tag.is_latest && <LatestBadge />}
+                </AppLink>
+              </td>
+              <td className="px-4 py-2 text-fg2">{tag.tag_group}</td>
+              <td className="w-[220px] px-4 py-2">
+                <SeverityBar counts={toBarCounts(tag.by_severity)} />
+              </td>
+              <td className="px-4 py-2 text-right font-semibold tabular-nums">{tag.open}</td>
+              <td className="px-4 py-2 text-right">
+                <Delta value={tag.change} />
+              </td>
+              <td className="px-4 py-2 text-right tabular-nums text-success">{tag.fixable}</td>
+              <td className="px-4 py-2 text-right text-xs text-fg2" title={formatDateTime(tag.last_scanned_at)}>
+                {timeAgo(tag.last_scanned_at)}
+              </td>
+            </tr>
+          ))}
+          {rows.length === 0 && (
+            <tr>
+              <td colSpan={7} className="px-4 py-6 text-center text-muted">
+                No tags in this group.
+              </td>
+            </tr>
+          )}
+        </tbody>
+      </table>
+    </Card>
+  );
+}
+
+function TopPackages({ data }: { data: RepositoryDetail }) {
+  return (
+    <Card>
+      <h3 className="text-base font-semibold">Top packages{data.latest_tag ? ` in ${data.latest_tag.name}` : ""}</h3>
+      {data.top_packages.length === 0 ? (
+        <p className="mt-3 text-sm text-muted">No open vulnerabilities in the latest tag.</p>
+      ) : (
+        <ul className="mt-2">
+          {data.top_packages.map((pkg) => (
+            <li key={`${pkg.package_name}@${pkg.installed_version}`} className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-0.5 border-b border-rowline py-2 text-sm last:border-0">
+              <span>
+                <strong>{pkg.package_name}</strong> <Mono className="text-xs text-muted">{pkg.installed_version ?? ""}</Mono>
+              </span>
+              <span className="text-xs text-fg2">
+                {pkg.cve_count} {pkg.cve_count === 1 ? "CVE" : "CVEs"}
+                {pkg.critical_count > 0 && ` · ${pkg.critical_count} critical`}
+                {" → "}
+                {pkg.fixed_version ? <Mono className="text-success">{pkg.fixed_version}</Mono> : <span className="text-muted">no fix yet</span>}
+              </span>
+            </li>
+          ))}
+        </ul>
+      )}
+    </Card>
+  );
+}
+
+export function IgnoreRulesCard({ rules, failed }: { rules: TrivyIgnoreRow[] | null; failed: boolean }) {
+  const summary = useMemo(() => summarizeIgnoreRules(rules ?? []), [rules]);
+  return (
+    <Card>
+      <div className="flex items-baseline justify-between gap-2">
+        <h3 className="text-base font-semibold">Active ignore rules</h3>
+        <AppLink href="/trivy-ignore" className="inline-flex min-h-11 items-center text-sm text-link hover:underline sm:min-h-0">
+          Manage {"→"}
+        </AppLink>
+      </div>
+      {failed ? (
+        <p className="mt-3 text-sm text-muted">Ignore rules could not be loaded.</p>
+      ) : rules === null ? (
+        <p className="mt-3 text-sm text-muted">Loading rules...</p>
+      ) : summary.active.length === 0 ? (
+        <p className="mt-3 text-sm text-muted">No active ignore rules for this repository.</p>
+      ) : (
+        <ul className="mt-2 grid gap-2">
+          {summary.active.slice(0, 4).map((rule) => (
+            <li key={rule.id} className="rounded-lg border border-line p-3 text-sm">
+              <div className="flex flex-wrap items-baseline justify-between gap-2">
+                <Mono className="font-semibold">{rule.cve_id}</Mono>
+                <span className={`text-xs ${rule.expiringSoon ? "text-warning" : "text-muted"}`}>{rule.expiryLabel}</span>
+              </div>
+              <p className="mt-1 truncate text-xs text-fg2">
+                {rule.scope === "all_tags" ? "All tags" : rule.tag_groups.join(", ") || "Selected tags"}
+                {rule.reason ? ` · "${rule.reason}"` : ""}
+              </p>
+            </li>
+          ))}
+        </ul>
+      )}
+      {(summary.active.length > 4 || summary.expiredCount > 0) && (
+        <p className="mt-2 text-xs text-muted">
+          {summary.active.length > 4 ? `+${summary.active.length - 4} more active` : ""}
+          {summary.active.length > 4 && summary.expiredCount > 0 ? " · " : ""}
+          {summary.expiredCount > 0 ? `${summary.expiredCount} expired` : ""}
         </p>
       )}
+    </Card>
+  );
+}
 
-      {!loading && !error && hasRows && (
-        <section className="overflow-x-auto rounded-lg border border-slate-700 bg-slate-950/60">
-          <table className="w-full table-fixed border-collapse text-sm">
+function VulnerabilityList({
+  vulns,
+  loading,
+  error,
+  group,
+  page,
+  limit,
+  onPage,
+  onLimit,
+  repositoryName,
+}: {
+  vulns: RepoVulnerabilityPage | null;
+  loading: boolean;
+  error: string | null;
+  group: string | null;
+  page: number;
+  limit: number;
+  onPage: (page: number) => void;
+  onLimit: (limit: number) => void;
+  repositoryName: string;
+}) {
+  return (
+    <section aria-label="Open vulnerabilities">
+      <Card className="overflow-x-auto !p-0">
+        <div className="flex flex-wrap items-baseline justify-between gap-2 px-4 pt-4">
+          <h3 className="text-base font-semibold">
+            Open vulnerabilities <span className="font-normal text-fg2">{"·"} {group ?? "all groups"}</span>
+          </h3>
+          <p className="text-xs text-muted">Latest scan of each tag group</p>
+        </div>
+        {error ? (
+          <p role="alert" className="px-4 py-6 text-sm text-fg2">{error}</p>
+        ) : (
+          <table className={`mt-3 w-full min-w-[720px] border-collapse text-sm ${loading ? "opacity-60" : ""}`}>
             <thead>
-              <tr className="border-b border-slate-700 text-left text-slate-300">
-                <th className="w-[180px] px-3 py-2">CVE</th>
-                <th className="w-[120px] px-3 py-2">Source</th>
-                <th className="w-[220px] px-3 py-2">Scope / Tags</th>
-                <th className="w-[170px] px-3 py-2">Reason</th>
-                <th className="w-[160px] px-3 py-2">Expires</th>
-                <th className="w-[160px] px-3 py-2">Created</th>
-                <th className="w-[100px] px-3 py-2">Status</th>
+              <tr className="border-b border-line text-left text-xs font-medium text-muted">
+                <th scope="col" className="px-4 py-2">CVE</th>
+                <th scope="col" className="px-4 py-2">Package</th>
+                <th scope="col" className="px-4 py-2">Installed {"→"} fixed</th>
+                <th scope="col" className="px-4 py-2">Tag</th>
+                <th scope="col" className="px-4 py-2 text-right">Scanned</th>
               </tr>
             </thead>
             <tbody>
-              {items.map((row) => {
-                const status = resolveIgnoreRuleStatus(row.expires_at);
-                const expired = status === "Expired";
-
-                return (
-                  <tr key={row.id} className="border-b border-slate-800 last:border-0">
-                    <td className="px-3 py-2">
-                      <button
-                        type="button"
-                        className="block max-w-full truncate font-semibold text-blue-300 hover:text-blue-200 hover:underline"
-                        title={row.cve_id}
-                        aria-label={`Open CVE detail ${row.cve_id}`}
-                        onClick={() => onOpenCveDetail(row)}
+              {(vulns?.items ?? []).map((item) => (
+                <tr key={item.id} className="border-b border-rowline last:border-0">
+                  <td className="px-4 py-2">
+                    <span className="inline-flex min-h-11 items-center gap-2 sm:min-h-9">
+                      <SeverityChip severity={item.severity} />
+                      <a
+                        href={`/vulnerabilities?search=${encodeURIComponent(item.cve_id)}&repository=${encodeURIComponent(repositoryName)}`}
+                        className={`font-mono text-link hover:underline ${FOCUS}`}
                       >
-                        {row.cve_id}
-                      </button>
-                    </td>
-                    <td className="px-3 py-2">{row.repository_id === null ? "Global" : "Repository"}</td>
-                    <td className="px-3 py-2">
-                      <span className="block max-w-full truncate" title={formatIgnoreScopeAndTags(row)}>
-                        {formatIgnoreScopeAndTags(row)}
-                      </span>
-                    </td>
-                    <td className="px-3 py-2">
-                      <span className="block max-w-full truncate" title={row.reason || "-"}>
-                        {row.reason || "-"}
-                      </span>
-                    </td>
-                    <td className="px-3 py-2">{formatIgnoreDate(row.expires_at)}</td>
-                    <td className="px-3 py-2">{formatIgnoreDate(row.created_at)}</td>
-                    <td className="px-3 py-2">
-                      <span
-                        className={
-                          expired
-                            ? "rounded-full bg-amber-950 px-2 py-0.5 text-xs font-bold text-amber-200"
-                            : "rounded-full bg-emerald-950 px-2 py-0.5 text-xs font-bold text-emerald-200"
-                        }
-                      >
-                        {status}
-                      </span>
-                    </td>
-                  </tr>
-                );
-              })}
+                        {item.cve_id}
+                      </a>
+                    </span>
+                  </td>
+                  <td className="px-4 py-2">{item.package_name}</td>
+                  <td className="px-4 py-2">
+                    <Mono className="text-fg2">{item.installed_version ?? "-"}</Mono> {"→"}{" "}
+                    {item.fixed_version ? <Mono className="text-success">{item.fixed_version}</Mono> : <span className="text-muted">none</span>}
+                  </td>
+                  <td className="px-4 py-2 text-fg2">{item.tag_group}</td>
+                  <td className="px-4 py-2 text-right text-xs text-fg2">{timeAgo(item.scanned_at)}</td>
+                </tr>
+              ))}
+              {vulns && vulns.items.length === 0 && (
+                <tr>
+                  <td colSpan={5} className="px-4 py-6 text-center text-muted">
+                    No open vulnerabilities.
+                  </td>
+                </tr>
+              )}
             </tbody>
           </table>
-        </section>
+        )}
+      </Card>
+      {vulns && (
+        <Pagination
+          page={vulns.pagination.page}
+          totalPages={vulns.pagination.total_pages}
+          totalItems={vulns.pagination.total_items}
+          limit={limit}
+          onPageChange={onPage}
+          onLimitChange={onLimit}
+        />
       )}
     </section>
   );
 }
 
-export function RepositoryDetailContent({ data, loading, error, retry, state, onStateChange }: RepositoryDetailContentProps) {
-  const navigate = useNavigate();
-  const [drawerOpen, setDrawerOpen] = useState(false);
-  const [detailLoading, setDetailLoading] = useState(false);
-  const [detailError, setDetailError] = useState<string | null>(null);
-  const [detail, setDetail] = useState<VulnerabilityDetailResponse | null>(null);
-  const [ignoreTarget, setIgnoreTarget] = useState<VulnerabilityWithRelations | null>(null);
-  const [ignoreReason, setIgnoreReason] = useState("");
-  const [ignoreExpiresAt, setIgnoreExpiresAt] = useState("");
-  const [ignoreBusy, setIgnoreBusy] = useState(false);
-  const [ignoreError, setIgnoreError] = useState<string | null>(null);
-  const [ignoreNotice, setIgnoreNotice] = useState<string | null>(null);
-  const [ignoreItems, setIgnoreItems] = useState<TrivyIgnoreRow[]>([]);
-  const [ignoreLoading, setIgnoreLoading] = useState(false);
-  const [ignoreLoadError, setIgnoreLoadError] = useState<string | null>(null);
-  const [selectedGroup, setSelectedGroup] = useState<string | null>(null);
-  const [vulnerabilityPage, setVulnerabilityPage] = useState(1);
-  const [vulnerabilityLimit, setVulnerabilityLimit] = useState(10);
-  const ignoreLoadRequestId = useRef(0);
-  const cveDetailRequestIdRef = useRef(0);
+// ---------------------------------------------------------------------------
+// View + container
+// ---------------------------------------------------------------------------
 
-  const openDetail = useCallback(async (id: number) => {
-    setDrawerOpen(true);
-    setDetailLoading(true);
-    setDetailError(null);
-    setDetail(null);
+export interface RepositoryDetailViewProps {
+  data: RepositoryDetail;
+  group: string | null;
+  onGroupChange: (group: string | null) => void;
+  rules: TrivyIgnoreRow[] | null;
+  rulesFailed: boolean;
+  vulns: RepoVulnerabilityPage | null;
+  vulnsLoading: boolean;
+  vulnsError: string | null;
+  page: number;
+  limit: number;
+  onPage: (page: number) => void;
+  onLimit: (limit: number) => void;
+}
 
-    cveDetailRequestIdRef.current += 1;
-    const requestId = cveDetailRequestIdRef.current;
-
-    try {
-      const result = await fetchVulnerabilityDetail(id);
-      if (requestId === cveDetailRequestIdRef.current) {
-        setDetail(result);
-      }
-    } catch (err) {
-      if (requestId === cveDetailRequestIdRef.current) {
-        setDetailError(err instanceof Error ? err.message : "Failed to load vulnerability detail");
-      }
-    } finally {
-      if (requestId === cveDetailRequestIdRef.current) {
-        setDetailLoading(false);
-      }
-    }
-  }, []);
-
-  const groupSummary = useMemo(() => data?.group_summaries || [], [data?.group_summaries]);
-  const filteredVulnerabilities = useMemo(() => {
-    return filterVulnerabilitiesByGroup(data?.vulnerabilities || [], selectedGroup);
-  }, [data?.vulnerabilities, selectedGroup]);
-
-  const paginatedVulnerabilities = useMemo(() => {
-    return paginateList(filteredVulnerabilities, vulnerabilityPage, vulnerabilityLimit);
-  }, [filteredVulnerabilities, vulnerabilityLimit, vulnerabilityPage]);
-
-  const refreshIgnores = useCallback(async (repositoryId: number | null | undefined) => {
-    if (!repositoryId || repositoryId <= 0) {
-      ignoreLoadRequestId.current += 1;
-      setIgnoreItems([]);
-      setIgnoreLoadError(null);
-      setIgnoreLoading(false);
-      return;
-    }
-
-    ignoreLoadRequestId.current += 1;
-    const requestId = ignoreLoadRequestId.current;
-    setIgnoreLoading(true);
-    setIgnoreLoadError(null);
-
-    try {
-      const rows = await fetchTrivyIgnores(fetch, repositoryId);
-      if (requestId === ignoreLoadRequestId.current) {
-        setIgnoreItems(rows);
-      }
-    } catch (err) {
-      if (requestId === ignoreLoadRequestId.current) {
-        setIgnoreItems([]);
-        setIgnoreLoadError(err instanceof Error ? err.message : "Failed to load repository ignores");
-      }
-    } finally {
-      if (requestId === ignoreLoadRequestId.current) {
-        setIgnoreLoading(false);
-      }
-    }
-  }, []);
-
-  useEffect(() => {
-    setVulnerabilityPage(1);
-    setSelectedGroup(null);
-  }, [data?.id]);
-
-  useEffect(() => {
-    setVulnerabilityPage(1);
-  }, [selectedGroup]);
-
-  useEffect(() => {
-    void refreshIgnores(data?.id);
-  }, [data?.id, refreshIgnores]);
-
-  const onIgnoreRequest = useCallback((item: VulnerabilityWithRelations) => {
-    const next = openIgnoreModalState({ item, previousNotice: ignoreNotice });
-    setIgnoreTarget(next.target);
-    setIgnoreReason(next.reason);
-    setIgnoreExpiresAt(next.expiresAt);
-    setIgnoreError(next.error);
-    setIgnoreNotice(next.notice);
-  }, [ignoreNotice]);
-
-  const onCloseIgnoreModal = useCallback(() => {
-    if (ignoreBusy) {
-      return;
-    }
-
-    setIgnoreTarget(null);
-    setIgnoreError(null);
-  }, [ignoreBusy]);
-
-  const onConfirmIgnore = useCallback(async () => {
-    if (!ignoreTarget || ignoreBusy) {
-      return;
-    }
-
-    setIgnoreBusy(true);
-    setIgnoreError(null);
-
-    try {
-      const result = await submitIgnoreFlowAndRefresh({
-        target: ignoreTarget,
-        reason: ignoreReason,
-        expiresAt: ignoreExpiresAt,
-        createIgnore: (payload) => createTrivyIgnoreRecord(fetch, payload),
-        refreshRepositoryIgnores: async (repositoryId) => {
-          await refreshIgnores(repositoryId);
-        },
-      });
-
-      const next = applyIgnoreSubmitResult({
-        currentTarget: ignoreTarget,
-        currentReason: ignoreReason,
-        currentExpiresAt: ignoreExpiresAt,
-        result,
-      });
-      setIgnoreNotice(next.notice);
-      setIgnoreTarget(next.target);
-      setIgnoreReason(next.reason);
-      setIgnoreExpiresAt(next.expiresAt);
-      setIgnoreError(next.error);
-    } catch (error) {
-      setIgnoreError(error instanceof Error ? error.message : "Failed to create ignore rule");
-      setIgnoreNotice(null);
-      setIgnoreTarget(ignoreTarget);
-      setIgnoreReason(ignoreReason);
-      setIgnoreExpiresAt(ignoreExpiresAt);
-    } finally {
-      setIgnoreBusy(false);
-    }
-  }, [ignoreTarget, ignoreBusy, ignoreReason, ignoreExpiresAt, refreshIgnores]);
-
-  const onOpenIgnoreCveDetail = useCallback(async (row: TrivyIgnoreRow) => {
-    setDrawerOpen(true);
-    setDetailLoading(true);
-    setDetailError(null);
-    setDetail(null);
-
-    cveDetailRequestIdRef.current += 1;
-    const requestId = cveDetailRequestIdRef.current;
-    const scopedRepositoryName = row.repository_name ?? data?.name ?? null;
-
-    try {
-      const result = await fetchRepositoryIgnoreCveDetail(row.cve_id, scopedRepositoryName);
-      if (requestId === cveDetailRequestIdRef.current) {
-        setDetail(result);
-      }
-    } catch (err) {
-      if (requestId === cveDetailRequestIdRef.current) {
-        setDetailError(err instanceof Error ? err.message : "Failed to load vulnerability detail");
-      }
-    } finally {
-      if (requestId === cveDetailRequestIdRef.current) {
-        setDetailLoading(false);
-      }
-    }
-  }, [data?.name]);
+export function RepositoryDetailView(props: RepositoryDetailViewProps) {
+  const { data, group, onGroupChange } = props;
 
   return (
-    <>
-      {loading && (
-        <section className="grid gap-4">
-          <div className="h-16 rounded-xl border border-slate-700 bg-gradient-to-r from-slate-900 via-slate-800 to-slate-900 bg-[length:200%_100%] animate-pulse" />
-          <div className="h-56 rounded-xl border border-slate-700 bg-gradient-to-r from-slate-900 via-slate-800 to-slate-900 bg-[length:200%_100%] animate-pulse" />
-          <div className="h-64 rounded-xl border border-slate-700 bg-gradient-to-r from-slate-900 via-slate-800 to-slate-900 bg-[length:200%_100%] animate-pulse" />
-        </section>
-      )}
-      {!loading && error && <ErrorBanner message={error} onRetry={retry} />}
+    <div className="grid gap-5">
+      <SeverityTiles data={data} />
 
-      {!loading && !error && !data && (
-        <section className="rounded-xl border border-slate-700 bg-slate-900/90 p-5">
-          <h2 className="mb-2 text-base font-semibold">Repository not found</h2>
-          <p className="mb-4 text-slate-400">This repository does not exist or may have been removed.</p>
-          <button
-            type="button"
-            className="rounded-lg border border-slate-700 bg-slate-950 px-4 py-2 text-sm font-semibold text-slate-300 transition hover:border-slate-500"
-            onClick={() => void navigate({ to: "/repositories" })}
-          >
-            Back to Repositories
-          </button>
-        </section>
-      )}
+      <section aria-label="Tag group health" className="grid gap-3">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <h2 className="text-base font-semibold">Tag group health</h2>
+          <div className="flex flex-wrap gap-2" role="group" aria-label="Filter by tag group">
+            <ChipButton active={group === null} onClick={() => onGroupChange(null)}>
+              All groups
+            </ChipButton>
+            {data.tag_groups.map((g) => (
+              <ChipButton key={g.group_name} active={group === g.group_name} onClick={() => onGroupChange(group === g.group_name ? null : g.group_name)}>
+                {g.group_name} {"·"} {g.open}
+              </ChipButton>
+            ))}
+          </div>
+        </div>
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+          {data.tag_groups.map((g) => (
+            <GroupCard key={g.group_name} group={g} selected={group === g.group_name} onSelect={() => onGroupChange(group === g.group_name ? null : g.group_name)} />
+          ))}
+        </div>
+        {data.tag_groups.length === 0 && <Card className="text-sm text-muted">No scans yet for this repository.</Card>}
+      </section>
 
-      {!loading && !error && data && (
-        <section className="grid gap-4">
-          <section className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
-            <StatCard label="Total Vulnerabilities" value={data.vulnerabilities.length} tone="neutral" />
-            <StatCard label="Critical" value={data.by_severity.CRITICAL} tone="critical" />
-            <StatCard label="High" value={data.by_severity.HIGH} tone="high" />
-            <StatCard label="Medium" value={data.by_severity.MEDIUM} tone="medium" />
-            <StatCard label="Low" value={data.by_severity.LOW} tone="low" />
-            <StatCard label="Unknown" value={data.by_severity.UNKNOWN} tone="unknown" />
-          </section>
+      <TagsTable tags={data.tags} group={group} />
 
-          <section className="grid md:grid-cols-2 gap-4">
-            <SeverityChart bySeverity={data.by_severity} />
-            <section className="rounded-xl border border-slate-700 bg-slate-900/60 p-3">
-              <h3 className="mb-2 text-sm font-semibold text-slate-200">Package Coverage</h3>
-              <div className="grid grid-cols-2 md:grid-cols-2 gap-3">
-                <StatCard label="Packages Scanned" value={data.total_packages_scanned} tone="neutral" compact />
-                <StatCard label="Clean Packages" value={data.total_clean_packages} tone="neutral" compact />
-                <StatCard label="Vulnerable Packages" value={data.total_vulnerable_packages} tone="neutral" compact />
-                <StatCard label="Clean Rate (%)" value={Math.round(data.clean_package_rate)} tone="neutral" compact />
-              </div>
-            </section>
-          </section>
+      <div className="grid gap-4 lg:grid-cols-2">
+        <TopPackages data={data} />
+        <IgnoreRulesCard rules={props.rules} failed={props.rulesFailed} />
+      </div>
 
-          {groupSummary.length > 0 && (
-            <section className="rounded-xl border border-slate-700 bg-slate-900/90 p-4 shadow-inner">
-              <h3 className="mb-3 text-base font-semibold">Tag Group Health</h3>
-              <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
-                {groupSummary.map((group, index) => {
-                  const groupName = group.group_name || "ungrouped";
-                  const isSelected = selectedGroup === groupName;
-
-                  return (
-                  <button
-                    key={`${groupName}-${index}`}
-                    type="button"
-                    className={
-                      isSelected
-                        ? "rounded-lg border border-blue-500 bg-blue-500/10 p-3 text-left"
-                        : "rounded-lg border border-slate-700 bg-slate-950/60 p-3 text-left hover:border-slate-500"
-                    }
-                    onClick={() => setSelectedGroup((prev) => (prev === groupName ? null : groupName))}
-                    title={isSelected ? "Clear tag group filter" : `Filter vulnerabilities by ${groupName}`}
-                  >
-                    <div className="mb-2 flex items-center justify-between gap-2">
-                      <p className={isSelected ? "m-0 text-sm font-semibold text-blue-300" : "m-0 text-sm font-semibold text-slate-100"}>{groupName}</p>
-                      <span
-                        className={
-                          group.status === "at_risk"
-                            ? "rounded-full bg-rose-950 px-2 py-0.5 text-xs font-bold uppercase tracking-wide text-rose-200"
-                            : "rounded-full bg-emerald-950 px-2 py-0.5 text-xs font-bold uppercase tracking-wide text-emerald-200"
-                        }
-                      >
-                        {group.status === "at_risk" ? "at risk" : "healthy"}
-                      </span>
-                    </div>
-                    <p className="m-0 text-sm text-slate-300">Open vulnerabilities: {group.open_vulnerability_count}</p>
-                    <p className="m-0 text-xs text-slate-400">
-                      Last scan: {group.last_scan_at ? new Date(group.last_scan_at).toLocaleString() : "-"}
-                    </p>
-                  </button>
-                  );
-                })}
-              </div>
-            </section>
-          )}
-
-          <RepositoryIgnoreTrackingPanel
-            items={ignoreItems}
-            loading={ignoreLoading}
-            error={ignoreLoadError}
-            onRetry={() => {
-              void refreshIgnores(data.id);
-            }}
-            onOpenCveDetail={(row) => {
-              void onOpenIgnoreCveDetail(row);
-            }}
-          />
-
-          <section className="rounded-xl border border-slate-700 bg-slate-900/90 p-4 shadow-inner">
-            <h3 className="mb-3 text-base font-semibold">Images in repository</h3>
-            <div className="overflow-x-auto">
-              <table className="w-full border-collapse text-sm">
-                <thead>
-                  <tr className="border-b border-slate-700 text-left text-slate-300">
-                    <th className="py-2 pr-3 font-medium">Registry</th>
-                    <th className="py-2 pr-3 font-medium">Owner</th>
-                    <th className="py-2 pr-3 font-medium">Region</th>
-                    <th className="py-2 pr-3 font-medium">Image</th>
-                    <th className="py-2 pr-3 font-medium">Vulnerabilities</th>
-                    <th className="py-2 pr-3 font-medium">Packages</th>
-                    <th className="py-2 font-medium">Scanned</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {data.images.map((image) => {
-                    const parsed = parseImageReference(image.name);
-
-                    return (
-                      <tr key={image.id} className="border-b border-slate-800/80 last:border-b-0">
-                        <td className="py-2 pr-3 whitespace-nowrap">{parsed.registry}</td>
-                        <td className="py-2 pr-3 whitespace-nowrap">{parsed.owner}</td>
-                        <td className="py-2 pr-3 whitespace-nowrap">{parsed.region}</td>
-                        <td className="py-2 pr-3">
-                          <button
-                            type="button"
-                            className="block max-w-[320px] truncate text-blue-400 hover:text-blue-300 hover:underline"
-                            title={image.name}
-                            onClick={() => void navigate({ to: "/images/$id", params: { id: String(image.id) } })}
-                          >
-                            {parsed.image}
-                          </button>
-                        </td>
-                        <td className="py-2 pr-3 whitespace-nowrap">
-                          {image.vulnerability_count} total / {image.critical_count} critical
-                        </td>
-                        <td className="py-2 pr-3 whitespace-nowrap">
-                          {image.package_count} total / {image.clean_package_count} clean / {image.vulnerable_package_count} vuln
-                        </td>
-                        <td className="py-2 whitespace-nowrap">{image.last_scanned_at ? formatRelativeTime(image.last_scanned_at) : "-"}</td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
-          </section>
-
-          <section className="rounded-xl border border-slate-700 bg-slate-900/90 p-4 shadow-inner overflow-x-auto">
-            <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-              <h3 className="text-base font-semibold">Vulnerabilities</h3>
-              <div className="flex flex-wrap items-center gap-2">
-                {STATE_FILTERS.map((item) => (
-                  <button
-                    key={item}
-                    type="button"
-                    className={
-                      state === item
-                        ? "rounded-full border border-blue-500 bg-blue-500/20 px-3 py-1 text-xs font-semibold uppercase tracking-wide text-blue-200"
-                        : "rounded-full border border-slate-700 bg-slate-950 px-3 py-1 text-xs font-semibold uppercase tracking-wide text-slate-300 hover:border-slate-500"
-                    }
-                    onClick={() => onStateChange(item)}
-                  >
-                    {item}
-                  </button>
-                ))}
-                {selectedGroup && (
-                  <button
-                    type="button"
-                    className="rounded-full border border-blue-500/60 bg-blue-500/10 px-3 py-1 text-xs font-semibold text-blue-200"
-                    onClick={() => setSelectedGroup(null)}
-                  >
-                    Group: {selectedGroup} x
-                  </button>
-                )}
-              </div>
-            </div>
-            <p className="mb-3 text-xs text-slate-400">
-              Showing {paginatedVulnerabilities.pagination.total_items} vulnerabilities{selectedGroup ? ` in group ${selectedGroup}` : ""}.
-            </p>
-            {ignoreNotice ? <p className="mb-3 rounded-lg border border-emerald-700/50 bg-emerald-950/40 px-3 py-2 text-sm text-emerald-200">{ignoreNotice}</p> : null}
-            <table className="w-full table-fixed border-collapse text-sm">
-              <thead>
-                <tr className="border-b border-slate-700 text-left">
-                  <th className="pb-3 pr-4">CVE ID</th>
-                  <th className="pb-3 pr-4">Severity</th>
-                  <th className="pb-3 pr-4 w-[220px]">Package</th>
-                  <th className="hidden md:table-cell pb-3 pr-4 w-[260px]">Image</th>
-                  <th className="hidden md:table-cell pb-3 pr-4">Group</th>
-                  <th className="hidden lg:table-cell pb-3 pr-4">State</th>
-                  <th className="pb-3 pr-4">Installed</th>
-                  <th className="hidden lg:table-cell pb-3 pr-4">Fixed</th>
-                  <th className="pb-3 pr-4">Actions</th>
-                  <th className="pb-3">Score</th>
-                </tr>
-              </thead>
-              <tbody>
-                {paginatedVulnerabilities.items.map((item) => (
-                  <tr key={item.id} className="cursor-pointer border-b border-slate-800 last:border-0 hover:bg-slate-800/50" onClick={() => void openDetail(item.id)}>
-                    <td className="py-3 pr-4">{item.cve_id}</td>
-                    <td className="py-3 pr-4">
-                      <span className={SEVERITY_STYLES[item.severity] || ""}>{item.severity}</span>
-                    </td>
-                    <td className="py-3 pr-4">
-                      <span className="block max-w-[220px] truncate" title={item.package_name}>
-                        {item.package_name}
-                      </span>
-                    </td>
-                    <td className="hidden md:table-cell py-3 pr-4">
-                      <button
-                        type="button"
-                        className="block max-w-[260px] truncate text-blue-400 hover:text-blue-300 hover:underline"
-                        title={item.image.name}
-                        onClick={(event) => {
-                          event.preventDefault();
-                          event.stopPropagation();
-                          void navigate({ to: "/images/$id", params: { id: String(item.image.id) } });
-                        }}
-                      >
-                        {parseImageReference(item.image.name).image}
-                      </button>
-                    </td>
-                    <td className="hidden md:table-cell py-3 pr-4">{item.tag_group || "ungrouped"}</td>
-                    <td className="hidden lg:table-cell py-3 pr-4">
-                      <span className={STATE_STYLES[item.state || ""] || "rounded-full bg-slate-800 px-2 py-0.5 text-xs font-bold uppercase tracking-wide text-slate-300"}>
-                        {item.state || "-"}
-                      </span>
-                    </td>
-                    <td className="py-3 pr-4">{item.installed_version || "-"}</td>
-                    <td className="hidden lg:table-cell py-3 pr-4">{item.fixed_version || "-"}</td>
-                    <td className="py-3 pr-4">
-                      <button
-                        type="button"
-                        aria-label={`Ignore vulnerability ${item.cve_id} for ${item.repository.name}`}
-                        className="rounded border border-red-700 bg-red-950/50 px-2 py-1 text-xs font-semibold text-red-200 transition hover:bg-red-900/70"
-                        onClick={(event) => {
-                          event.preventDefault();
-                          event.stopPropagation();
-                          onIgnoreRequest(item);
-                        }}
-                      >
-                        Ignore
-                      </button>
-                    </td>
-                    <td className="py-3">{formatScore(item.score)}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-
-            <Pagination
-              page={paginatedVulnerabilities.pagination.page}
-              totalPages={paginatedVulnerabilities.pagination.total_pages}
-              totalItems={paginatedVulnerabilities.pagination.total_items}
-              limit={paginatedVulnerabilities.pagination.limit}
-              onPageChange={(page) => setVulnerabilityPage(page)}
-              onLimitChange={(limit) => {
-                setVulnerabilityLimit(limit);
-                setVulnerabilityPage(1);
-              }}
-            />
-          </section>
-        </section>
-      )}
-
-      <CveDetailDrawer
-        open={drawerOpen}
-        loading={detailLoading}
-        error={detailError}
-        data={detail}
-        onClose={() => setDrawerOpen(false)}
+      <VulnerabilityList
+        vulns={props.vulns}
+        loading={props.vulnsLoading}
+        error={props.vulnsError}
+        group={group}
+        page={props.page}
+        limit={props.limit}
+        onPage={props.onPage}
+        onLimit={props.onLimit}
+        repositoryName={data.name}
       />
+    </div>
+  );
+}
 
-      <IgnoreVulnerabilityModal
-        open={Boolean(ignoreTarget)}
-        cveId={ignoreTarget?.cve_id || ""}
-        repositoryName={ignoreTarget?.image.repository_name || ignoreTarget?.repository.name || "Unknown repository"}
-        reason={ignoreReason}
-        expiresAt={ignoreExpiresAt}
-        busy={ignoreBusy}
-        error={ignoreError}
-        onReasonChange={setIgnoreReason}
-        onExpiresAtChange={setIgnoreExpiresAt}
-        onCancel={onCloseIgnoreModal}
-        onConfirm={onConfirmIgnore}
-      />
-    </>
+interface RepositoryDetailContentProps extends Partial<Omit<RepositoryDetailViewProps, "data">> {
+  data: RepositoryDetail | null;
+  loading: boolean;
+  error: string | null;
+  retry: () => void | Promise<void>;
+}
+
+export function RepositoryDetailContent({ data, loading, error, retry, ...rest }: RepositoryDetailContentProps) {
+  if (loading && !data) {
+    return <PageSkeleton />;
+  }
+  if (error) {
+    return <PageError message={error} onRetry={retry} />;
+  }
+  if (!data) {
+    return <NotFoundCard title="Repository not found" backTo="/repositories" backLabel="Back to Repositories" />;
+  }
+
+  return (
+    <RepositoryDetailView
+      data={data}
+      group={rest.group ?? null}
+      onGroupChange={rest.onGroupChange ?? (() => {})}
+      rules={rest.rules ?? null}
+      rulesFailed={rest.rulesFailed ?? false}
+      vulns={rest.vulns ?? null}
+      vulnsLoading={rest.vulnsLoading ?? false}
+      vulnsError={rest.vulnsError ?? null}
+      page={rest.page ?? 1}
+      limit={rest.limit ?? 25}
+      onPage={rest.onPage ?? (() => {})}
+      onLimit={rest.onLimit ?? (() => {})}
+    />
   );
 }
 
 export function RepositoryDetailPage() {
-  const { id: rawId, repoName } = useParams({ strict: false }) as { id?: string; repoName?: string };
-  const [state, setState] = useState<VulnerabilityStateFilter>("open");
-  const id = parseRepositoryId(rawId);
-  const identifier = id !== null ? { type: "id" as const, value: id } : repoName ? { type: "name" as const, value: repoName } : null;
-  const { data, loading, error, retry } = useRepoDetail(identifier, state);
+  const params = useParams({ strict: false }) as { id?: string; repoName?: string };
+  const id = parseRepositoryId(params.id);
+  const identifier = useMemo(() => {
+    if (params.repoName) {
+      return { type: "name" as const, value: params.repoName };
+    }
+    return id === null ? null : { type: "id" as const, value: id };
+  }, [params.repoName, id]);
+
+  const { data, loading, error, retry } = useRepoDetail(identifier);
+  const [group, setGroup] = useState<string | null>(null);
+  const [page, setPage] = useState(1);
+  const [limit, setLimit] = useState(25);
+  const [rules, setRules] = useState<TrivyIgnoreRow[] | null>(null);
+  const [rulesFailed, setRulesFailed] = useState(false);
+
+  const repositoryId = data?.id ?? null;
+  const vulns = useRepoVulnerabilities(repositoryId, group, page, limit);
+
+  useEffect(() => {
+    setGroup(null);
+    setPage(1);
+  }, [repositoryId]);
+
+  useEffect(() => {
+    if (repositoryId === null) {
+      return;
+    }
+    let cancelled = false;
+    setRules(null);
+    setRulesFailed(false);
+    fetchTrivyIgnores(fetch, repositoryId)
+      .then((rows) => !cancelled && setRules(rows))
+      .catch(() => !cancelled && setRulesFailed(true));
+    return () => {
+      cancelled = true;
+    };
+  }, [repositoryId]);
+
+  const activeRules = summarizeIgnoreRules(rules ?? []).active.length;
+  const name = data ? displayRepoName(data.name, data.registry) : "Repository";
+  const meta = data
+    ? [
+        `${data.tag_groups.length} tag ${data.tag_groups.length === 1 ? "group" : "groups"}`,
+        `${data.tag_count} ${data.tag_count === 1 ? "tag" : "tags"} scanned`,
+        data.latest_tag ? `latest ${data.latest_tag.name}` : null,
+        data.last_scanned_at ? timeAgo(data.last_scanned_at) : null,
+      ]
+        .filter(Boolean)
+        .join(" · ")
+    : undefined;
 
   return (
-    <AppShell activeRoute="/repositories/:id" title={data?.name || "Repository Detail"} subtitle="Severity summary, images, and vulnerabilities for the selected repository.">
-      <RepositoryDetailContent data={data} loading={loading} error={error} retry={retry} state={state} onStateChange={setState} />
+    <AppShell
+      activeRoute="/repositories/:id"
+      title={name}
+      meta={meta}
+      breadcrumbs={[{ label: "Repositories", to: "/repositories" }, { label: name }]}
+      actions={
+        data && (
+          <>
+            <LinkButton href="/trivy-ignore">{`Ignore rules${rules ? ` (${activeRules})` : ""}`}</LinkButton>
+            <a
+              href={`/vulnerabilities?repository=${encodeURIComponent(data.name)}`}
+              className={`inline-flex min-h-11 items-center justify-center rounded-lg bg-accent px-3 text-sm font-medium text-white hover:brightness-110 sm:min-h-9 ${FOCUS}`}
+            >
+              Open in explorer
+            </a>
+          </>
+        )
+      }
+    >
+      <RepositoryDetailContent
+        data={data}
+        loading={loading}
+        error={error}
+        retry={retry}
+        group={group}
+        onGroupChange={(next) => {
+          setGroup(next);
+          setPage(1);
+        }}
+        rules={rules}
+        rulesFailed={rulesFailed}
+        vulns={vulns.data}
+        vulnsLoading={vulns.loading}
+        vulnsError={vulns.error}
+        page={page}
+        limit={limit}
+        onPage={setPage}
+        onLimit={(next) => {
+          setLimit(next);
+          setPage(1);
+        }}
+      />
     </AppShell>
   );
 }
