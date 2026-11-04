@@ -126,6 +126,7 @@ async function fetchVulnerabilityMatches(
   fetcher: typeof fetch = fetch,
 ): Promise<VulnerabilityWithRelations[]> {
   const params = new URLSearchParams({
+    group: "finding",
     cve_id: cveId,
     state: "all",
     page: "1",
