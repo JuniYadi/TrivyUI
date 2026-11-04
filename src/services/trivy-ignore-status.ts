@@ -2,7 +2,7 @@ import type { Database } from "bun:sqlite";
 import { ensureTrivyIgnoreSchema } from "./trivy-ignore-schema";
 import { listTrivyIgnores, type TrivyIgnoreRow } from "./trivy-ignore";
 
-export type RuleStatus = "still_present" | "fixed" | "no_scan";
+export type RuleStatus = "still_present" | "fixed" | "no_scan" | "unknown";
 
 export interface TagGroupStatus {
   tag_group: string;
@@ -35,6 +35,8 @@ export interface RuleSummary {
   still_present: number;
   fixed: number;
   no_scan: number;
+  /** scanned after the rule, but without --show-suppressed so absence proves nothing */
+  unknown: number;
 }
 
 export interface RuleOverview extends TrivyIgnoreRow {
@@ -54,6 +56,7 @@ interface LatestScan {
   tag: string | null;
   scan_id: number;
   scan_date: string;
+  suppression_aware: number;
 }
 
 interface Presence {
@@ -80,9 +83,9 @@ function loadLatestScans(db: Database): LatestScan[] {
   return db
     .query<LatestScan>(
       `
-      SELECT repository_id, tag_group, image_name, tag, scan_id, scan_date FROM (
+      SELECT repository_id, tag_group, image_name, tag, scan_id, scan_date, suppression_aware FROM (
         SELECT i.repository_id AS repository_id, i.tag_group AS tag_group, i.name AS image_name, i.tag AS tag,
-               sr.id AS scan_id, sr.scan_date AS scan_date,
+               sr.id AS scan_id, sr.scan_date AS scan_date, sr.suppression_aware AS suppression_aware,
                ROW_NUMBER() OVER (PARTITION BY i.repository_id, i.tag_group ORDER BY sr.scan_date DESC, sr.id DESC) AS rn
         FROM scan_results sr JOIN images i ON i.id = sr.image_id
       ) WHERE rn = 1
@@ -125,6 +128,20 @@ function loadPresence(db: Database, scanIds: number[]): Map<string, Presence> {
   return map;
 }
 
+/** repository_id -> latest scan time (ms) of any scan that has suppressed_findings rows. */
+function loadSuppressedScanTimes(db: Database): Map<number, number> {
+  const map = new Map<number, number>();
+  const rows = db
+    .query<{ repository_id: number; scan_date: string }>(
+      `SELECT i.repository_id AS repository_id, MAX(sr.scan_date) AS scan_date
+       FROM suppressed_findings sf JOIN scan_results sr ON sr.id = sf.scan_result_id JOIN images i ON i.id = sr.image_id
+       GROUP BY i.repository_id`,
+    )
+    .all();
+  for (const r of rows) map.set(r.repository_id, toMs(r.scan_date));
+  return map;
+}
+
 function lastSeenVersion(db: Database, repositoryId: number, tagGroup: string, cveId: string): string | null {
   const row = db
     .query<{ installed_version: string | null }>(
@@ -151,6 +168,7 @@ function computeRuleRepos(
   latestByRepo: Map<number, LatestScan[]>,
   presence: Map<string, Presence>,
   excludedRepoIds: Set<number>,
+  suppressedScanMs: Map<number, number>,
 ): RuleRepoStatus[] {
   const scoped = rule.repository_id === null ? repos : repos.filter((r) => r.id === rule.repository_id);
   const createdMs = toMs(rule.created_at);
@@ -188,6 +206,10 @@ function computeRuleRepos(
         status = "still_present";
       } else if (toMs(s.scan_date) < createdMs) {
         status = "no_scan";
+      } else if (!(s.suppression_aware === 1 || (suppressedScanMs.get(repo.id) ?? Number.NEGATIVE_INFINITY) >= createdMs)) {
+        // The scan was not suppression-aware: Trivy hides ignored findings unless run with
+        // --show-suppressed, so absence here does not prove the CVE is fixed.
+        status = "unknown";
       } else {
         status = "fixed";
         lastSeen = lastSeenVersion(db, repo.id, s.tag_group, rule.cve_id);
@@ -206,13 +228,14 @@ function computeRuleRepos(
 
     const present = groups.find((g) => g.status === "still_present");
     const fixed = groups.find((g) => g.status === "fixed");
+    const unknown = groups.find((g) => g.status === "unknown");
     return {
       ...base,
-      status: present ? "still_present" : fixed ? "fixed" : "no_scan",
+      status: present ? "still_present" : unknown ? "unknown" : fixed ? "fixed" : "no_scan",
       suppressed: present?.suppressed ?? false,
       installed_version: present?.installed_version ?? null,
       fixed_version: present?.fixed_version ?? null,
-      last_seen_version: !present && fixed ? fixed.last_seen_version : null,
+      last_seen_version: !present && !unknown && fixed ? fixed.last_seen_version : null,
       tag_groups: groups,
     };
   });
@@ -240,19 +263,20 @@ function loadContext(db: Database) {
     set.add(e.repository_id);
     exclusions.set(e.ignore_id, set);
   }
-  return { repos, latestByRepo, presence, exclusions };
+  return { repos, latestByRepo, presence, exclusions, suppressedScanMs: loadSuppressedScanTimes(db) };
 }
 
 export function getRuleRepos(db: Database, ruleId: number): RuleRepoStatus[] | null {
   const rule = listTrivyIgnores(db).find((r) => r.id === ruleId);
   if (!rule) return null;
   const ctx = loadContext(db);
-  return computeRuleRepos(db, rule, ctx.repos, ctx.latestByRepo, ctx.presence, ctx.exclusions.get(rule.id) ?? new Set());
+  return computeRuleRepos(db, rule, ctx.repos, ctx.latestByRepo, ctx.presence, ctx.exclusions.get(rule.id) ?? new Set(), ctx.suppressedScanMs);
 }
 
 function buildHint(summary: RuleSummary, safe: boolean, partly: boolean, rule: TrivyIgnoreRow, expiring: boolean): string {
   if (safe) return "Fixed everywhere. Safe to remove.";
   if (partly) return `${summary.fixed} repo${summary.fixed === 1 ? "" : "s"} fixed. Stop ignoring there.`;
+  if (summary.unknown > 0) return "Scan without --show-suppressed: cannot confirm fix.";
   if (summary.total > 0 && summary.no_scan === summary.total) return "No scan since the rule was created.";
   if (expiring) return `Expires ${rule.expires_at?.slice(0, 10)}. Renew or remove.`;
   return "";
@@ -277,8 +301,8 @@ export function listRulesOverview(db: Database): RuleOverview[] {
 
   return rules.map((rule) => {
     const excluded = ctx.exclusions.get(rule.id) ?? new Set<number>();
-    const repos = computeRuleRepos(db, rule, ctx.repos, ctx.latestByRepo, ctx.presence, excluded);
-    const summary: RuleSummary = { total: 0, still_present: 0, fixed: 0, no_scan: 0 };
+    const repos = computeRuleRepos(db, rule, ctx.repos, ctx.latestByRepo, ctx.presence, excluded, ctx.suppressedScanMs);
+    const summary: RuleSummary = { total: 0, still_present: 0, fixed: 0, no_scan: 0, unknown: 0 };
     for (const r of repos) {
       if (r.excluded || r.status === null) continue;
       summary.total += 1;
