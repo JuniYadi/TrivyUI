@@ -456,13 +456,13 @@ describe("GET /api/stats", () => {
 
     expect(dayTwoPoint).toBeDefined();
     expect(dayOnePoint).toBeDefined();
+    // Open-state per day (latest scan per group on or before that day), stacked by severity.
     expect(dayTwoPoint?.vulnerabilities_detected).toBe(2);
-    expect(dayTwoPoint?.packages_scanned).toBe(2);
-    expect(dayTwoPoint?.packages_resolved).toBe(0);
+    expect(dayTwoPoint).toMatchObject({ total: 2, critical: 0, high: 1, medium: 1, low: 0 });
 
+    // api:latest was rescanned clean, worker:latest has one LOW.
     expect(dayOnePoint?.vulnerabilities_detected).toBe(1);
-    expect(dayOnePoint?.packages_scanned).toBe(5);
-    expect(dayOnePoint?.packages_resolved).toBe(1);
+    expect(dayOnePoint).toMatchObject({ total: 1, high: 0, medium: 0, low: 1 });
 
     expect(body.data.daily_trends.some((point) => point.vulnerabilities_detected === 0)).toBe(true);
   });
@@ -514,5 +514,79 @@ describe("GET /api/stats", () => {
     expect(body.data.by_severity.HIGH).toBe(2);
     expect(body.data.top_repositories[0]?.name).toBe("ghcr.io/acme/app");
     expect(body.data.top_repositories[0]?.vulnerability_count).toBe(2);
+  });
+
+  test("returns KPIs, fix-first list, repos by risk and non-zero package coverage without a package inventory", async () => {
+    const db = createTestDb();
+    const earlier = isoDateDaysAgo(2);
+    const later = isoDateDaysAgo(1);
+
+    // No Packages inventory (Trivy run without --list-all-pkgs).
+    importTrivyPayload(
+      db,
+      {
+        ArtifactName: "ghcr.io/acme/api:1.0",
+        Metadata: { Source: "ci", CreatedAt: earlier },
+        Results: [
+          {
+            Vulnerabilities: [
+              { VulnerabilityID: "CVE-K-1", Severity: "CRITICAL", PkgName: "busybox", InstalledVersion: "1.0", FixedVersion: "2.0", CVSS: { nvd: { V3Score: 8.4 } } },
+            ],
+          },
+        ],
+      },
+      "{}"
+    );
+    importTrivyPayload(
+      db,
+      {
+        ArtifactName: "ghcr.io/acme/api:1.0",
+        Metadata: { Source: "ci", CreatedAt: later },
+        Results: [
+          {
+            Vulnerabilities: [
+              { VulnerabilityID: "CVE-K-1", Severity: "CRITICAL", PkgName: "busybox", InstalledVersion: "1.0", FixedVersion: "2.0", CVSS: { nvd: { V3Score: 8.4 } } },
+              { VulnerabilityID: "CVE-K-2", Severity: "CRITICAL", PkgName: "openssl", InstalledVersion: "3.0", FixedVersion: "3.1", CVSS: { nvd: { V3Score: 9.8 } } },
+              { VulnerabilityID: "CVE-K-3", Severity: "HIGH", PkgName: "glibc", InstalledVersion: "2.3" },
+              { VulnerabilityID: "CVE-K-4", Severity: "CRITICAL", PkgName: "nofix", InstalledVersion: "1" },
+            ],
+          },
+        ],
+      },
+      "{}"
+    );
+    db.query("INSERT INTO trivy_ignores (cve_id, scope, expires_at) VALUES ('CVE-X', 'all_tags', ?1)").run(
+      new Date(Date.now() + 2 * 86400_000).toISOString()
+    );
+    db.query("INSERT INTO trivy_ignores (cve_id, scope, expires_at) VALUES ('CVE-Y', 'all_tags', NULL)").run();
+    db.query("INSERT INTO trivy_ignores (cve_id, scope, expires_at) VALUES ('CVE-Z', 'all_tags', ?1)").run(
+      new Date(Date.now() - 86400_000).toISOString()
+    );
+
+    const response = createStatsHandler(db)();
+    const { data } = (await response.json()) as { data: any };
+
+    expect(data.kpis).toMatchObject({
+      open: 4,
+      open_change: 3,
+      critical: 3,
+      critical_repositories: 1,
+      high: 1,
+      high_fixable: 0,
+      fixable_now: 2,
+      ignored: 2,
+      ignored_expiring_soon: 1,
+    });
+    expect(data.fix_first.map((item: any) => item.cve_id)).toEqual(["CVE-K-2", "CVE-K-1"]);
+    expect(data.fix_first[0]).toMatchObject({ package_name: "openssl", installed_version: "3.0", fixed_version: "3.1", score: 9.8 });
+    expect(data.repos_by_risk).toHaveLength(1);
+    expect(data.repos_by_risk[0]).toMatchObject({ name: "ghcr.io/acme", open: 4, latest_tag: "1.0" });
+    expect(data.repos_by_risk[0].by_severity).toMatchObject({ critical: 3, high: 1 });
+
+    expect(data.has_package_inventory).toBe(false);
+    expect(data.total_packages_scanned).toBe(4);
+    expect(data.total_vulnerable_packages).toBe(4);
+    expect(data.total_clean_packages).toBe(0);
+    expect(data.recent_scans[0].vulnerable_package_count).toBe(4);
   });
 });
