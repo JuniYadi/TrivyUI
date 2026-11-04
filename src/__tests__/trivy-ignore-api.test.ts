@@ -472,3 +472,17 @@ describe("trivy ignore API auth integration", () => {
     expect(generated.status).toBe(200);
   });
 });
+
+describe("trivy ignore generate handler failures", () => {
+  test("returns 500 INTERNAL_SERVER_ERROR on unexpected errors", async () => {
+    const db = createTestDb();
+    const generateHandler = createTrivyIgnoreGenerateHandler(db);
+    db.close();
+
+    const response = await generateHandler(new Request("http://localhost/api/trivy-ignore/generate", { method: "GET" }));
+    const body = (await response.json()) as { error: { code: string } };
+
+    expect(response.status).toBe(500);
+    expect(body.error.code).toBe("INTERNAL_SERVER_ERROR");
+  });
+});
