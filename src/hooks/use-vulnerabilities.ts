@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type { Severity, VulnerabilityDetailResponse, VulnerabilityListResponse, VulnerabilitySortField } from "../services/types";
+import { onListPopState, replaceListUrl } from "./list-url-sync";
 
 export type VulnerabilityListMode = "cve" | "finding";
 
@@ -198,11 +199,6 @@ export async function fetchVulnerabilityDetail(id: number, fetcher: typeof fetch
   return payload.data;
 }
 
-function buildUrl(query: VulnerabilityQueryParams): string {
-  const qs = toQueryString(query);
-  return `/vulnerabilities?${qs}`;
-}
-
 export function useVulnerabilities() {
   const [query, setQuery] = useState<VulnerabilityQueryParams>(() => parseVulnerabilityParams());
   const [data, setData] = useState<VulnerabilityListResult | null>(null);
@@ -229,21 +225,10 @@ export function useVulnerabilities() {
   }, [load, query]);
 
   useEffect(() => {
-    const nextUrl = buildUrl(query);
-    const currentUrl = `${window.location.pathname}${window.location.search}`;
-    if (currentUrl !== nextUrl) {
-      window.history.pushState({}, "", nextUrl);
-    }
+    replaceListUrl("/vulnerabilities", toQueryString(query));
   }, [query]);
 
-  useEffect(() => {
-    const onPopState = () => {
-      setQuery(parseVulnerabilityParams());
-    };
-
-    window.addEventListener("popstate", onPopState);
-    return () => window.removeEventListener("popstate", onPopState);
-  }, []);
+  useEffect(() => onListPopState("/vulnerabilities", () => setQuery(parseVulnerabilityParams())), []);
 
   const setFilters = useCallback((updater: (prev: VulnerabilityQueryParams) => VulnerabilityQueryParams) => {
     setQuery((prev) => updater(prev));
