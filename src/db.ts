@@ -310,31 +310,6 @@ export function initFullSchema(db: TrivyUiDb): void {
 }
 
 function evolveTrivyIgnoreSchemaSqlite(db: TrivyUiDb): void {
-  if (!tableExists(db, "trivy_ignores")) {
-    db.exec(`
-      CREATE TABLE IF NOT EXISTS trivy_ignores (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        cve_id TEXT NOT NULL,
-        repository_id INTEGER REFERENCES repositories(id) ON DELETE CASCADE,
-        scope TEXT NOT NULL DEFAULT 'all_tags' CHECK(scope IN ('all_tags', 'selected_tags')),
-        reason TEXT,
-        expires_at DATETIME,
-        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-      )
-    `);
-  }
-
-  if (!tableExists(db, "trivy_ignore_tags")) {
-    db.exec(`
-      CREATE TABLE IF NOT EXISTS trivy_ignore_tags (
-        ignore_id INTEGER NOT NULL,
-        tag_group TEXT NOT NULL,
-        PRIMARY KEY (ignore_id, tag_group),
-        FOREIGN KEY (ignore_id) REFERENCES trivy_ignores(id) ON DELETE CASCADE
-      )
-    `);
-  }
-
   db.exec("CREATE INDEX IF NOT EXISTS idx_trivy_ignores_cve_id ON trivy_ignores(cve_id);");
   db.exec("CREATE INDEX IF NOT EXISTS idx_trivy_ignores_repository_id ON trivy_ignores(repository_id);");
   db.exec("CREATE INDEX IF NOT EXISTS idx_trivy_ignores_expires_at ON trivy_ignores(expires_at);");
@@ -359,29 +334,6 @@ function evolveImagesSchemaSqlite(db: TrivyUiDb): void {
 }
 
 function evolveVulnerabilityCatalogSchemaSqlite(db: TrivyUiDb): void {
-  if (!tableExists(db, "vulnerability_catalog")) {
-    db.exec(`
-      CREATE TABLE IF NOT EXISTS vulnerability_catalog (
-        vuln_id TEXT PRIMARY KEY,
-        vuln_type TEXT NOT NULL CHECK(vuln_type IN ('CVE', 'GHSA')),
-        verification_status TEXT NOT NULL CHECK(verification_status IN ('verified', 'invalid', 'unverified')),
-        source TEXT,
-        aliases_json TEXT NOT NULL DEFAULT '[]',
-        severity TEXT,
-        cvss REAL,
-        summary TEXT,
-        description TEXT,
-        references_json TEXT NOT NULL DEFAULT '[]',
-        published_at DATETIME,
-        modified_at DATETIME,
-        fetched_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-        last_error TEXT,
-        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
-      )
-    `);
-  }
-
   db.exec("CREATE INDEX IF NOT EXISTS idx_vulnerability_catalog_status ON vulnerability_catalog(verification_status);");
   db.exec("CREATE INDEX IF NOT EXISTS idx_vulnerability_catalog_fetched_at ON vulnerability_catalog(fetched_at);");
 }
@@ -435,14 +387,6 @@ function backfillImageTagGroups(db: TrivyUiDb): void {
 function hasSqliteColumn(db: TrivyUiDb, table: string, column: string): boolean {
   const rows = db.query(`PRAGMA table_info(${table})`).all() as Array<{ name: string }>;
   return rows.some((row) => row.name === column);
-}
-
-function tableExists(db: TrivyUiDb, tableName: string): boolean {
-  const rows = db.query("SELECT name FROM sqlite_master WHERE type = 'table' AND name = ?1").all(tableName) as Array<{
-    name: string;
-  }>;
-
-  return rows.length > 0;
 }
 
 export function getHealthMessage(db: TrivyUiDb): string {
