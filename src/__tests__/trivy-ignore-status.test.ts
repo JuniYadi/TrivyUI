@@ -25,7 +25,7 @@ const CVE = "CVE-2025-29927";
  * suppressed findings live in Results[].ExperimentalModifiedFindings[] as
  * { Type, Status, Statement, Source, Finding: DetectedVulnerability }.
  */
-function scanPayload(image: string, createdAt: string, opts: { present: boolean; version?: string; suppressed?: boolean }) {
+function scanPayload(image: string, createdAt: string, opts: { present: boolean; version?: string; suppressed?: boolean; aware?: boolean }) {
   const finding = {
     VulnerabilityID: CVE,
     PkgName: "next",
@@ -46,6 +46,9 @@ function scanPayload(image: string, createdAt: string, opts: { present: boolean;
     ];
   } else if (opts.present) {
     result.Vulnerabilities = [finding];
+  }
+  if (opts.aware && !result.ExperimentalModifiedFindings) {
+    result.ExperimentalModifiedFindings = []; // --show-suppressed ran, nothing suppressed
   }
   return { ArtifactName: image, Metadata: { Source: "ci", CreatedAt: createdAt }, Results: [result] };
 }
@@ -96,17 +99,17 @@ describe("rule status per repository", () => {
   test("no scan since rule creation, then Fixed vs Still present", () => {
     const { db, ruleId } = setup();
     let [rule] = listRulesOverview(db);
-    expect(rule!.summary).toEqual({ total: 5, still_present: 5, fixed: 0, no_scan: 0 });
+    expect(rule!.summary).toEqual({ total: 5, still_present: 5, fixed: 0, no_scan: 0, unknown: 0 });
 
     // rescans after rule creation using --show-suppressed
     for (let i = 2; i <= 5; i++) {
       upload(db, scanPayload(`ghcr.io/acme/app${i}:prod-2`, "2026-03-01T00:00:00Z", { present: true, suppressed: true }));
     }
     // app1 upgraded: CVE gone
-    upload(db, scanPayload("ghcr.io/acme/app1:prod-2", "2026-03-01T00:00:00Z", { present: false, version: "14.2.30" }));
+    upload(db, scanPayload("ghcr.io/acme/app1:prod-2", "2026-03-01T00:00:00Z", { present: false, version: "14.2.30", aware: true }));
 
     [rule] = listRulesOverview(db);
-    expect(rule!.summary).toEqual({ total: 5, still_present: 4, fixed: 1, no_scan: 0 });
+    expect(rule!.summary).toEqual({ total: 5, still_present: 4, fixed: 1, no_scan: 0, unknown: 0 });
     expect(rule!.partly_fixed).toBe(true);
     expect(rule!.safe_to_remove).toBe(false);
 
@@ -118,6 +121,30 @@ describe("rule status per repository", () => {
     expect(app2.status).toBe("still_present");
     expect(app2.suppressed).toBe(true);
     expect(app2.installed_version).toBe("14.2.0");
+  });
+
+  test("scan without --show-suppressed is unknown, not fixed", () => {
+    const { db, ruleId } = setup();
+    // rescans after rule creation WITHOUT --show-suppressed: the CVE is simply absent
+    upload(db, scanPayload("ghcr.io/acme/app1:prod-2", "2026-03-01T00:00:00Z", { present: false, version: "14.2.30" }));
+    const app1 = getRuleRepos(db, ruleId)!.find((r) => r.repository_name.endsWith("app1"))!;
+    expect(app1.status).toBe("unknown");
+    expect(app1.last_seen_version).toBeNull();
+
+    const [rule] = listRulesOverview(db);
+    expect(rule!.summary.unknown).toBe(1);
+    expect(rule!.summary.fixed).toBe(0);
+    expect(rule!.safe_to_remove).toBe(false);
+    expect(rule!.hint).toContain("--show-suppressed");
+
+    // a suppression-aware rescan (key present, even empty) confirms the fix
+    upload(db, scanPayload("ghcr.io/acme/app1:prod-3", "2026-03-02T00:00:00Z", { present: false, version: "14.2.30", aware: true }));
+    expect(getRuleRepos(db, ruleId)!.find((r) => r.repository_name.endsWith("app1"))!.status).toBe("fixed");
+  });
+
+  test("parser flags suppression_aware when the key is present, even if empty", () => {
+    expect(parseTrivyResult(scanPayload("a/b:1", "2026-01-01T00:00:00Z", { present: false, aware: true })).suppression_aware).toBe(true);
+    expect(parseTrivyResult(scanPayload("a/b:1", "2026-01-01T00:00:00Z", { present: false })).suppression_aware).toBe(false);
   });
 
   test("stopping the ignore for the fixed repo only changes its generated file", async () => {
@@ -156,7 +183,7 @@ describe("rule status per repository", () => {
   test("fixed everywhere is safe_to_remove; bulk delete removes rules", async () => {
     const { db, ruleId } = setup();
     for (let i = 1; i <= 5; i++) {
-      upload(db, scanPayload(`ghcr.io/acme/app${i}:prod-2`, "2026-03-01T00:00:00Z", { present: false, version: "14.2.30" }));
+      upload(db, scanPayload(`ghcr.io/acme/app${i}:prod-2`, "2026-03-01T00:00:00Z", { present: false, version: "14.2.30", aware: true }));
     }
     const rule = listRulesOverview(db)[0]!;
     expect(rule.safe_to_remove).toBe(true);
