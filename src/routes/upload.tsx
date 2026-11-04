@@ -154,7 +154,7 @@ export function CiSnippetCard({ origin }: { origin: string }) {
   const snippet = buildCiSnippet(origin);
 
   return (
-    <Card>
+    <Card className="min-w-0">
       <details open>
         <summary className="flex min-h-11 cursor-pointer items-center text-sm font-semibold">Upload via API / CI</summary>
         <p className="mt-1 text-sm text-fg2">
@@ -456,7 +456,7 @@ export function UploadPage() {
         <RecentUploads items={recent} loaded={recentLoaded} />
       </div>
 
-      <div className="mt-4 grid gap-4">
+      <div className="mt-4 grid min-w-0 grid-cols-[minmax(0,1fr)] gap-4">
         <CiSnippetCard origin={origin} />
 
         {IS_DEV && (
