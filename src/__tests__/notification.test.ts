@@ -1,6 +1,15 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { initDb } from "../db";
-import { buildEmailContent, sendNotification } from "../services/notification";
+import {
+  buildEmailContent,
+  getNotificationSettings,
+  getSmtpStatus,
+  parseMinSeverity,
+  sendNotification,
+  sendNotificationAsync,
+  shouldSendNotification,
+  updateNotificationSettings,
+} from "../services/notification";
 import type { UploadSummary } from "../routes/api/_shared";
 
 const ENV_KEYS = [
@@ -258,5 +267,112 @@ describe("notification service", () => {
     expect(sentSubject).toContain(summary.parsed_at);
     expect(sentText).toContain("CVE-2026-1111");
     expect(sentText).toContain("openssl");
+  });
+});
+
+describe("notification settings and helpers", () => {
+  test("updateNotificationSettings persists values and overrides env", () => {
+    if (!db) throw new Error("db not initialized");
+    process.env.NOTIFY_ENABLED = "false";
+    const updated = updateNotificationSettings(db, { enabled: true, minSeverity: "CRITICAL" });
+    expect(updated).toEqual({ enabled: true, minSeverity: "CRITICAL" });
+    expect(getNotificationSettings(db)).toEqual({ enabled: true, minSeverity: "CRITICAL" });
+  });
+
+  test("getNotificationSettings parses env boolean variants and falls back", () => {
+    if (!db) throw new Error("db not initialized");
+    for (const [raw, expected] of [["YES", true], ["on", true], ["0", false], ["off", false], ["maybe", false]] as const) {
+      process.env.NOTIFY_ENABLED = raw;
+      expect(getNotificationSettings(db).enabled).toBe(expected);
+    }
+  });
+
+  test("parseMinSeverity falls back to default for invalid input", () => {
+    expect(parseMinSeverity(" medium ")).toBe("MEDIUM");
+    expect(parseMinSeverity("bogus")).toBe(parseMinSeverity(null));
+  });
+
+  test("shouldSendNotification respects threshold and rejects unknown severity", () => {
+    const summary = buildSummary(1);
+    summary.severity_breakdown = { CRITICAL: 0, HIGH: 0, MEDIUM: 1, LOW: 0, UNKNOWN: 0 };
+    expect(shouldSendNotification(summary, "HIGH")).toBe(false);
+    expect(shouldSendNotification(summary, "MEDIUM")).toBe(true);
+    expect(shouldSendNotification(summary, "NOPE" as never)).toBe(false);
+  });
+
+  test("getSmtpStatus reports configuration without secrets", () => {
+    expect(getSmtpStatus().configured).toBe(false);
+    process.env.SMTP_HOST = "smtp.example.com";
+    process.env.SMTP_PORT = "587";
+    process.env.SMTP_FROM = "a@example.com";
+    process.env.SMTP_TO = "x@example.com, y@example.com";
+    process.env.SMTP_PASS = "secret";
+    const status = getSmtpStatus();
+    expect(status).toEqual({ configured: true, host: "smtp.example.com", port: 587, secure: false, from: "a@example.com", recipient_count: 2 });
+  });
+});
+
+describe("sendNotification skip and template paths", () => {
+  function configure() {
+    process.env.NOTIFY_ENABLED = "true";
+    process.env.NOTIFY_MIN_SEVERITY = "HIGH";
+    process.env.SMTP_HOST = "smtp.example.com";
+    process.env.SMTP_PORT = "587";
+    process.env.SMTP_FROM = "trivyui@example.com";
+    process.env.SMTP_TO = "devops@example.com";
+  }
+  const count = () => (db!.query("SELECT COUNT(*) AS c FROM notifications").get() as { c: number }).c;
+
+  test("does nothing when disabled, below threshold or without recipients", async () => {
+    if (!db) throw new Error("db not initialized");
+    const summary = buildSummary(seedScanResult(db));
+    const transport = (() => ({ sendMail: async () => {} })) as never;
+
+    await sendNotification(db, summary, transport);
+    configure();
+    const low = { ...summary, severity_breakdown: { CRITICAL: 0, HIGH: 0, MEDIUM: 3, LOW: 0, UNKNOWN: 0 } };
+    await sendNotification(db, low, transport);
+    delete process.env.SMTP_TO;
+    await sendNotification(db, summary, transport);
+
+    expect(count()).toBe(0);
+  });
+
+  test("records a failure when sendMail throws a non-Error value", async () => {
+    if (!db) throw new Error("db not initialized");
+    configure();
+    process.env.SMTP_USER = "u";
+    const summary = buildSummary(seedScanResult(db));
+    await sendNotification(db, summary, (() => ({ sendMail: async () => { throw "boom"; } })) as never);
+    const row = db.query("SELECT status, error_message FROM notifications").get() as { status: string; error_message: string };
+    expect(row).toEqual({ status: "failed", error_message: "SMTP send failed" });
+  });
+
+  test("renders the stored email template when enabled", async () => {
+    if (!db) throw new Error("db not initialized");
+    configure();
+    const summary = buildSummary(seedScanResult(db));
+    db.query("UPDATE email_templates SET subject = ?1, html_body = ?2, text_body = ?3, enabled = 1 WHERE template_key = 'repo_vuln_alert'")
+      .run("Custom {{repository}}", "<p>{{repository}}</p>", "text {{repository}}");
+    let sent: { subject: string; html: string } | null = null;
+    await sendNotification(db, summary, (() => ({ sendMail: async (m: { subject: string; html: string }) => { sent = m; } })) as never);
+    expect(sent!.subject).toContain("Custom");
+  });
+
+  test("sendNotificationAsync logs instead of throwing on unexpected errors", async () => {
+    if (!db) throw new Error("db not initialized");
+    const summary = buildSummary(1);
+    const closed = initDb(":memory:");
+    closed.close();
+    const original = console.error;
+    const logged: unknown[][] = [];
+    console.error = (...args: unknown[]) => { logged.push(args); };
+    try {
+      sendNotificationAsync(closed, summary);
+      await new Promise((r) => setTimeout(r, 20));
+    } finally {
+      console.error = original;
+    }
+    expect(logged.length).toBe(1);
   });
 });

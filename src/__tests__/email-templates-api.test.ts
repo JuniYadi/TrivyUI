@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { initDb } from "../db";
 import { createEmailTemplatesHandler } from "../routes/api/email-templates";
+import { updateEmailTemplate } from "../services/email-templates";
 
 describe("email templates api", () => {
   test("GET list returns seeded repo_vuln_alert template", async () => {
@@ -98,6 +99,61 @@ describe("email templates api", () => {
     expect(body.success).toBe(false);
     expect(body.error.code).toBe("NOT_FOUND");
 
+    db.close();
+  });
+});
+
+describe("email templates api validation", () => {
+  const put = (handler: ReturnType<typeof createEmailTemplatesHandler>, payload: unknown, path = "/api/email-templates/repo_vuln_alert") =>
+    handler(new Request(`http://localhost${path}`, { method: "PUT", body: JSON.stringify(payload) }));
+  const valid = { subject: "s", html_body: "<p>h</p>", enabled: true };
+
+  test("rejects PUT without template key", async () => {
+    const db = initDb(":memory:");
+    const response = await put(createEmailTemplatesHandler(db), valid, "/api/email-templates");
+    expect(response.status).toBe(405);
+    db.close();
+  });
+
+  test.each([
+    ["subject", { ...valid, subject: 1 }],
+    ["html_body", { ...valid, html_body: null }],
+    ["text_body", { ...valid, text_body: 5 }],
+    ["enabled", { ...valid, enabled: "yes" }],
+  ])("rejects invalid %s", async (field, payload) => {
+    const db = initDb(":memory:");
+    const response = await put(createEmailTemplatesHandler(db), payload);
+    const body = (await response.json()) as { error: { code: string; message: string } };
+    expect(response.status).toBe(400);
+    expect(body.error.message).toContain(field);
+    db.close();
+  });
+
+  test("rejects unsupported methods", async () => {
+    const db = initDb(":memory:");
+    const response = await createEmailTemplatesHandler(db)(new Request("http://localhost/api/email-templates", { method: "DELETE" }));
+    expect(response.status).toBe(405);
+    db.close();
+  });
+});
+
+describe("email templates service validation", () => {
+  const base = { subject: "s", html_body: "<p>h</p>", enabled: true };
+  test.each([
+    ["blank subject", { ...base, subject: "  " }, "'subject' is required"],
+    ["blank html_body", { ...base, html_body: "" }, "'html_body' is required"],
+    ["long subject", { ...base, subject: "x".repeat(256) }, "<= 255"],
+    ["huge html_body", { ...base, html_body: "x".repeat(100001) }, "too large"],
+    ["huge text_body", { ...base, text_body: "x".repeat(100001) }, "'text_body' is too large"],
+  ])("rejects %s", (_name, input, message) => {
+    const db = initDb(":memory:");
+    expect(() => updateEmailTemplate(db, "repo_vuln_alert", input)).toThrow(message);
+    db.close();
+  });
+
+  test("throws not found for unknown template key", () => {
+    const db = initDb(":memory:");
+    expect(() => updateEmailTemplate(db, "missing", base)).toThrow("not found");
     db.close();
   });
 });

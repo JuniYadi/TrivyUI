@@ -1,128 +1,37 @@
 import type { Database } from "bun:sqlite";
+import type { Severity, SeverityBreakdown } from "../../services/types";
+import {
+  countsByScan,
+  emptyScanCounts,
+  groupScans,
+  listScanRefs,
+  packageCountsByScan,
+  queryFixFirst,
+  queryIgnoredCounts,
+  queryPackageCoverage,
+  type ScanCounts,
+  type ScanRef,
+} from "../../services/dashboard-queries";
 import type {
-  DashboardDailyTrend,
-  DashboardStats,
-  DashboardTopRepository,
-  Severity,
-  SeverityBreakdown,
-} from "../../services/types";
-import { withOpenVulnerabilityState } from "../../services/vuln-state-sql";
+  DashboardDailyTrendV2,
+  DashboardStatsV2,
+  RepoRisk,
+  SeverityCounts,
+} from "../../services/dashboard-types";
 import { buildSuccessResponse, sendError } from "./_shared";
 
-const SEVERITIES: Severity[] = ["CRITICAL", "HIGH", "MEDIUM", "LOW", "UNKNOWN"];
 const DAILY_TREND_DAYS = 30;
-
-const VULNERABILITY_STATE_CTE = `
-  WITH ranked_group_scans AS (
-    SELECT
-      sr.id AS scan_result_id,
-      i.repository_id,
-      i.tag_group,
-      ROW_NUMBER() OVER (
-        PARTITION BY i.repository_id, i.tag_group
-        ORDER BY datetime(sr.scan_date) DESC, sr.id DESC
-      ) AS row_num
-    FROM scan_results sr
-    JOIN images i ON i.id = sr.image_id
-  ),
-  latest_group_scans AS (
-    SELECT scan_result_id, repository_id, tag_group
-    FROM ranked_group_scans
-    WHERE row_num = 1
-  ),
-  latest_keys AS (
-    SELECT lgs.repository_id, lgs.tag_group, v.cve_id
-    FROM latest_group_scans lgs
-    JOIN vulnerabilities v ON v.scan_result_id = lgs.scan_result_id
-    GROUP BY lgs.repository_id, lgs.tag_group, v.cve_id
-  ),
-  vulnerability_rows AS (
-    SELECT
-      v.cve_id,
-      v.package_name,
-      v.installed_version,
-      sr.scan_date AS scanned_at,
-      i.repository_id,
-      i.tag_group
-    FROM vulnerabilities v
-    JOIN scan_results sr ON sr.id = v.scan_result_id
-    JOIN images i ON i.id = sr.image_id
-  ),
-  resolved_state AS (
-    WITH last_seen AS (
-      SELECT
-        vr.repository_id,
-        vr.tag_group,
-        vr.cve_id,
-        MAX(datetime(vr.scanned_at)) AS last_seen
-      FROM vulnerability_rows vr
-      GROUP BY vr.repository_id, vr.tag_group, vr.cve_id
-    )
-    SELECT
-      ls.repository_id,
-      ls.tag_group,
-      ls.cve_id,
-      MIN(datetime(sr.scan_date)) AS resolved_at
-    FROM last_seen ls
-    JOIN images i
-      ON i.repository_id = ls.repository_id
-     AND i.tag_group = ls.tag_group
-    JOIN scan_results sr ON sr.image_id = i.id
-    LEFT JOIN vulnerabilities v
-      ON v.scan_result_id = sr.id
-     AND v.cve_id = ls.cve_id
-    LEFT JOIN latest_keys lk
-      ON lk.repository_id = ls.repository_id
-     AND lk.tag_group = ls.tag_group
-     AND lk.cve_id = ls.cve_id
-    WHERE datetime(sr.scan_date) > ls.last_seen
-      AND v.cve_id IS NULL
-      AND lk.cve_id IS NULL
-    GROUP BY ls.repository_id, ls.tag_group, ls.cve_id
-  ),
-  vulnerability_states AS (
-    SELECT
-      vr.*,
-      CASE WHEN lk.cve_id IS NULL THEN 'done' ELSE 'open' END AS state,
-      CASE WHEN lk.cve_id IS NULL THEN rs.resolved_at ELSE NULL END AS resolved_at
-    FROM vulnerability_rows vr
-    LEFT JOIN latest_keys lk
-      ON lk.repository_id = vr.repository_id
-     AND lk.tag_group = vr.tag_group
-     AND lk.cve_id = vr.cve_id
-    LEFT JOIN resolved_state rs
-      ON rs.repository_id = vr.repository_id
-     AND rs.tag_group = vr.tag_group
-     AND rs.cve_id = vr.cve_id
-  )
-`;
-
-interface RecentScanRow {
-  id: number;
-  repository: string;
-  image: string;
-  vulnerability_count: number;
-  critical_count: number;
-  package_count: number;
-  vulnerable_package_count: number;
-  scanned_at: string;
-}
-
-interface DailyTrendRow {
-  day: string;
-  count: number;
-}
+const RECENT_SCAN_LIMIT = 10;
+const REPOS_BY_RISK_LIMIT = 8;
+const TOP_REPOSITORIES_LIMIT = 10;
 
 function toUtcDay(date: Date): string {
   return date.toISOString().slice(0, 10);
 }
 
-function buildDailyTrendDates(days: number): string[] {
+export function buildDailyTrendDates(days: number, now = new Date()): string[] {
   const dates: string[] = [];
-  const utcToday = new Date();
-  const startOfTodayUtc = new Date(
-    Date.UTC(utcToday.getUTCFullYear(), utcToday.getUTCMonth(), utcToday.getUTCDate())
-  );
+  const startOfTodayUtc = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
 
   for (let offset = days - 1; offset >= 0; offset -= 1) {
     const point = new Date(startOfTodayUtc);
@@ -133,239 +42,243 @@ function buildDailyTrendDates(days: number): string[] {
   return dates;
 }
 
-function buildDailyTrends(vulnRows: DailyTrendRow[], packageRows: DailyTrendRow[], resolvedRows: DailyTrendRow[]): DashboardDailyTrend[] {
-  const index = new Map<string, DashboardDailyTrend>();
+function toIso(sqliteUtc: string | null | undefined): string | null {
+  return sqliteUtc ? `${sqliteUtc.replace(" ", "T")}Z` : null;
+}
 
-  for (const day of buildDailyTrendDates(DAILY_TREND_DAYS)) {
-    index.set(day, {
-      date: day,
-      vulnerabilities_detected: 0,
-      packages_scanned: 0,
-      packages_resolved: 0,
-    });
+/** Latest scan of each group, plus the scan before it (when present). */
+export function pickLatestAndPrevious(groups: Map<string, ScanRef[]>) {
+  const latest: ScanRef[] = [];
+  const previous: ScanRef[] = [];
+  for (const list of groups.values()) {
+    latest.push(list[0]!);
+    if (list[1]) {
+      previous.push(list[1]);
+    }
   }
+  return { latest, previous };
+}
 
-  for (const row of vulnRows) {
-    const bucket = index.get(row.day);
-    if (bucket) {
-      bucket.vulnerabilities_detected = Number(row.count ?? 0);
+/**
+ * Open vulnerabilities per day: for each day, each group contributes the state of its
+ * latest scan on or before the end of that day.
+ */
+export function buildDailyTrends(
+  groups: Map<string, ScanRef[]>,
+  counts: Map<number, ScanCounts>,
+  days: string[]
+): { trends: DashboardDailyTrendV2[]; neededScanIds: number[] } {
+  const trends = days.map<DashboardDailyTrendV2>((date) => ({
+    date,
+    vulnerabilities_detected: 0,
+    packages_scanned: 0,
+    packages_resolved: 0,
+    critical: 0,
+    high: 0,
+    medium: 0,
+    low: 0,
+    unknown: 0,
+    total: 0,
+  }));
+  const needed = new Set<number>();
+
+  for (const list of groups.values()) {
+    for (const trend of trends) {
+      const asOf = list.find((scan) => scan.scanned_at.slice(0, 10) <= trend.date);
+      if (!asOf) {
+        continue;
+      }
+      needed.add(asOf.id);
+      const c = counts.get(asOf.id);
+      if (c) {
+        trend.critical += c.critical;
+        trend.high += c.high;
+        trend.medium += c.medium;
+        trend.low += c.low;
+        trend.unknown += c.unknown;
+        trend.total += c.total;
+      }
     }
   }
 
-  for (const row of packageRows) {
-    const bucket = index.get(row.day);
-    if (bucket) {
-      bucket.packages_scanned = Number(row.count ?? 0);
-    }
+  for (const trend of trends) {
+    trend.vulnerabilities_detected = trend.total;
   }
 
-  for (const row of resolvedRows) {
-    const bucket = index.get(row.day);
-    if (bucket) {
-      bucket.packages_resolved = Number(row.count ?? 0);
+  return { trends, neededScanIds: [...needed] };
+}
+
+/** Ids of the scans whose counts the dashboard needs (computed before querying counts). */
+function neededDailyIds(groups: Map<string, ScanRef[]>, days: string[]): number[] {
+  return buildDailyTrends(groups, new Map(), days).neededScanIds;
+}
+
+export function buildDashboardStats(db: Database): DashboardStatsV2 {
+  const scans = listScanRefs(db);
+  const groups = groupScans(scans);
+  const { latest, previous } = pickLatestAndPrevious(groups);
+  const days = buildDailyTrendDates(DAILY_TREND_DAYS);
+  const recent = scans.slice(0, RECENT_SCAN_LIMIT);
+
+  const ids = new Set<number>([
+    ...latest.map((s) => s.id),
+    ...previous.map((s) => s.id),
+    ...recent.map((s) => s.id),
+    ...neededDailyIds(groups, days),
+  ]);
+  const counts = countsByScan(db, [...ids]);
+  const countOf = (id: number) => counts.get(id) ?? emptyScanCounts();
+
+  // Current state (latest scan per repo+tag group).
+  const by_severity: SeverityBreakdown = { CRITICAL: 0, HIGH: 0, MEDIUM: 0, LOW: 0, UNKNOWN: 0 };
+  let open = 0;
+  let fixable = 0;
+  const repoMap = new Map<number, RepoRisk & { latestAt: string }>();
+  for (const scan of latest) {
+    const c = countOf(scan.id);
+    open += c.total;
+    fixable += c.fixable;
+    by_severity.CRITICAL += c.critical;
+    by_severity.HIGH += c.high;
+    by_severity.MEDIUM += c.medium;
+    by_severity.LOW += c.low;
+    by_severity.UNKNOWN += c.unknown;
+
+    const repo =
+      repoMap.get(scan.repository_id) ??
+      ({
+        id: scan.repository_id,
+        name: scan.repository,
+        open: 0,
+        by_severity: { critical: 0, high: 0, medium: 0, low: 0, unknown: 0 },
+        latest_tag: null,
+        scanned_at: null,
+        latestAt: "",
+      } as RepoRisk & { latestAt: string });
+    repo.open += c.total;
+    for (const key of ["critical", "high", "medium", "low", "unknown"] as Array<keyof SeverityCounts>) {
+      repo.by_severity[key] += c[key];
     }
+    if (scan.scanned_at > repo.latestAt) {
+      repo.latestAt = scan.scanned_at;
+      repo.scanned_at = toIso(scan.scanned_at);
+      repo.latest_tag = scan.tag || scan.tag_group;
+    }
+    repoMap.set(scan.repository_id, repo);
+  }
+  const highFixable = queryHighFixable(db, latest.map((s) => s.id));
+
+  let openChange: number | null = null;
+  if (previous.length > 0) {
+    const prevOpen = previous.reduce((sum, scan) => sum + countOf(scan.id).total, 0);
+    const latestOfGrouped = [...groups.values()]
+      .filter((list) => list.length > 1)
+      .reduce((sum, list) => sum + countOf(list[0]!.id).total, 0);
+    openChange = latestOfGrouped - prevOpen;
   }
 
-  return [...index.values()];
+  const risky = [...repoMap.values()].filter((repo) => repo.open > 0);
+  const byRisk = [...risky].sort(
+    (a, b) =>
+      b.by_severity.critical - a.by_severity.critical ||
+      b.by_severity.high - a.by_severity.high ||
+      b.open - a.open ||
+      a.name.localeCompare(b.name)
+  );
+  const toRisk = ({ latestAt: _latestAt, ...repo }: RepoRisk & { latestAt: string }): RepoRisk => repo;
+  const topByCount = [...risky].sort(
+    (a, b) => b.open - a.open || b.by_severity.critical - a.by_severity.critical || a.name.localeCompare(b.name)
+  );
+
+  const coverage = queryPackageCoverage(db, latest);
+  const totalPackagesScanned = coverage.scanned;
+  const totalVulnerablePackages = coverage.vulnerable;
+  const totalCleanPackages = Math.max(0, totalPackagesScanned - totalVulnerablePackages);
+  const cleanPackageRate =
+    coverage.has_inventory && totalPackagesScanned > 0
+      ? Number(((totalCleanPackages / totalPackagesScanned) * 100).toFixed(2))
+      : 0;
+
+  const recentPackages = packageCountsByScan(db, recent.map((s) => s.id));
+  const ignored = queryIgnoredCounts(db);
+
+  const imagesRow = db.query("SELECT COUNT(*) as count FROM images").get() as { count: number };
+  const reposRow = db.query("SELECT COUNT(*) as count FROM repositories").get() as { count: number };
+
+  const { trends } = buildDailyTrends(groups, counts, days);
+
+  return {
+    total_vulnerabilities: open,
+    total_packages_scanned: totalPackagesScanned,
+    total_vulnerable_packages: totalVulnerablePackages,
+    total_clean_packages: totalCleanPackages,
+    clean_package_rate: cleanPackageRate,
+    total_repositories: Number(reposRow.count ?? 0),
+    total_images: Number(imagesRow.count ?? 0),
+    has_package_inventory: coverage.has_inventory,
+    last_scan_at: toIso(scans[0]?.scanned_at),
+    by_severity,
+    kpis: {
+      open,
+      open_change: openChange,
+      critical: by_severity.CRITICAL,
+      critical_repositories: risky.filter((repo) => repo.by_severity.critical > 0).length,
+      high: by_severity.HIGH,
+      high_fixable: highFixable,
+      fixable_now: fixable,
+      ignored: ignored.ignored,
+      ignored_expiring_soon: ignored.expiring_soon,
+    },
+    fix_first: queryFixFirst(db, latest.map((s) => s.id)).map((row) => ({
+      ...row,
+      score: row.score === null ? null : Number(row.score),
+    })),
+    repos_by_risk: byRisk.slice(0, REPOS_BY_RISK_LIMIT).map(toRisk),
+    top_repositories: topByCount.slice(0, TOP_REPOSITORIES_LIMIT).map((repo) => ({
+      id: repo.id,
+      name: repo.name,
+      vulnerability_count: repo.open,
+      critical_count: repo.by_severity.critical,
+    })),
+    recent_scans: recent.map((scan) => {
+      const c = countOf(scan.id);
+      const pk = recentPackages.get(scan.id) ?? { package_count: 0, vulnerable_package_count: 0 };
+      return {
+        id: scan.id,
+        repository: scan.repository,
+        image: scan.image,
+        vulnerability_count: c.total,
+        critical_count: c.critical,
+        package_count: pk.package_count,
+        vulnerable_package_count: pk.vulnerable_package_count,
+        clean_package_count: Math.max(0, pk.package_count - pk.vulnerable_package_count),
+        scanned_at: toIso(scan.scanned_at) ?? scan.scanned_at,
+      };
+    }),
+    daily_trends: trends,
+  };
+}
+
+function queryHighFixable(db: Database, latestIds: number[]): number {
+  if (latestIds.length === 0) {
+    return 0;
+  }
+  const row = db
+    .query(
+      `SELECT COUNT(*) AS c FROM (
+         SELECT DISTINCT v.scan_result_id, v.cve_id FROM vulnerabilities v
+         WHERE v.scan_result_id IN (SELECT value FROM json_each(?1))
+           AND v.severity = 'HIGH' AND v.fixed_version IS NOT NULL AND v.fixed_version <> ''
+       )`
+    )
+    .get(JSON.stringify(latestIds)) as { c: number };
+  return Number(row.c ?? 0);
 }
 
 export function createStatsHandler(db: Database) {
   return function statsHandler(): Response {
     try {
-      const totalRow = db
-        .query(
-          withOpenVulnerabilityState(`
-          SELECT COUNT(DISTINCT ov.repository_id || ':' || ov.tag_group || ':' || ov.cve_id) as count
-          FROM open_vulnerabilities ov
-          `)
-        )
-        .get() as { count: number };
-      const repositoriesRow = db
-        .query("SELECT COUNT(*) as count FROM repositories")
-        .get() as { count: number };
-      const imagesRow = db.query("SELECT COUNT(*) as count FROM images").get() as { count: number };
-      const packagesRow = db
-        .query(
-          withOpenVulnerabilityState(`
-          SELECT COUNT(DISTINCT lgs.repository_id || ':' || sp.package_name || ':' || COALESCE(sp.installed_version, '')) as count
-          FROM latest_group_scans lgs
-          JOIN scan_packages sp ON sp.scan_result_id = lgs.scan_result_id
-          `)
-        )
-        .get() as { count: number };
-      const vulnerablePackagesRow = db
-        .query(
-          withOpenVulnerabilityState(`
-          SELECT COUNT(DISTINCT ov.repository_id || ':' || ov.package_name || ':' || COALESCE(ov.installed_version, '')) as count
-          FROM open_vulnerabilities ov
-          `)
-        )
-        .get() as { count: number };
-
-      const bySeverityRows = db
-        .query(
-          withOpenVulnerabilityState(`
-          SELECT ov.severity as severity, COUNT(DISTINCT ov.repository_id || ':' || ov.tag_group || ':' || ov.cve_id) as count
-          FROM open_vulnerabilities ov
-          GROUP BY ov.severity
-          `)
-        )
-        .all() as Array<{ severity: string; count: number }>;
-
-      const by_severity: SeverityBreakdown = {
-        CRITICAL: 0,
-        HIGH: 0,
-        MEDIUM: 0,
-        LOW: 0,
-        UNKNOWN: 0,
-      };
-
-      for (const row of bySeverityRows) {
-        if (SEVERITIES.includes(row.severity as Severity)) {
-          by_severity[row.severity as Severity] = Number(row.count ?? 0);
-        }
-      }
-
-      const top_repositories = db
-        .query(
-          withOpenVulnerabilityState(`
-          SELECT
-            r.id as id,
-            r.name as name,
-            COUNT(DISTINCT ov.repository_id || ':' || ov.tag_group || ':' || ov.cve_id) as vulnerability_count,
-            COUNT(DISTINCT CASE WHEN ov.severity = 'CRITICAL' THEN ov.repository_id || ':' || ov.tag_group || ':' || ov.cve_id END) as critical_count
-          FROM repositories r
-          JOIN open_vulnerabilities ov ON ov.repository_id = r.id
-          GROUP BY r.id, r.name
-          HAVING COUNT(DISTINCT ov.repository_id || ':' || ov.tag_group || ':' || ov.cve_id) > 0
-          ORDER BY vulnerability_count DESC, critical_count DESC, r.name ASC
-          LIMIT 10
-          `)
-        )
-        .all() as DashboardTopRepository[];
-
-      const recent_scans = db
-        .query(
-          `
-          SELECT
-            sr.id as id,
-            r.name as repository,
-            i.name as image,
-            COUNT(DISTINCT v.cve_id) as vulnerability_count,
-            COUNT(DISTINCT CASE WHEN v.severity = 'CRITICAL' THEN v.cve_id END) as critical_count,
-            (
-              SELECT COUNT(*)
-              FROM scan_packages sp
-              WHERE sp.scan_result_id = sr.id
-            ) as package_count,
-            (
-              SELECT COUNT(DISTINCT v2.package_name || ':' || COALESCE(v2.installed_version, ''))
-              FROM vulnerabilities v2
-              WHERE v2.scan_result_id = sr.id
-            ) as vulnerable_package_count,
-            sr.scan_date as scanned_at
-          FROM scan_results sr
-          JOIN images i ON i.id = sr.image_id
-          JOIN repositories r ON r.id = i.repository_id
-          LEFT JOIN vulnerabilities v ON v.scan_result_id = sr.id
-          GROUP BY sr.id, r.name, i.name, sr.scan_date
-          ORDER BY datetime(sr.scan_date) DESC, sr.id DESC
-          LIMIT 10
-          `
-        )
-        .all() as RecentScanRow[];
-
-      const dailyVulnerabilityRows = db
-        .query(
-          `
-          SELECT
-            date(sr.scan_date) as day,
-            COUNT(*) as count
-          FROM scan_results sr
-          JOIN vulnerabilities v ON v.scan_result_id = sr.id
-          WHERE date(sr.scan_date) >= date('now', '-29 days')
-          GROUP BY date(sr.scan_date)
-          `
-        )
-        .all() as DailyTrendRow[];
-
-      const dailyPackageRows = db
-        .query(
-          `
-          SELECT
-            date(sr.scan_date) as day,
-            COUNT(DISTINCT i.repository_id || ':' || sp.package_name || ':' || COALESCE(sp.installed_version, '')) as count
-          FROM scan_results sr
-          JOIN images i ON i.id = sr.image_id
-          JOIN scan_packages sp ON sp.scan_result_id = sr.id
-          WHERE date(sr.scan_date) >= date('now', '-29 days')
-          GROUP BY date(sr.scan_date)
-          `
-        )
-        .all() as DailyTrendRow[];
-
-      const dailyResolvedRows = db
-        .query(
-          `${VULNERABILITY_STATE_CTE}
-          SELECT
-            date(vs.resolved_at) as day,
-            COUNT(DISTINCT vs.repository_id || ':' || vs.tag_group || ':' || vs.package_name || ':' || COALESCE(vs.installed_version, '')) as count
-          FROM vulnerability_states vs
-          WHERE vs.state = 'done'
-            AND vs.resolved_at IS NOT NULL
-            AND date(vs.resolved_at) >= date('now', '-29 days')
-          GROUP BY date(vs.resolved_at)
-          `
-        )
-        .all() as DailyTrendRow[];
-
-      const daily_trends = buildDailyTrends(
-        dailyVulnerabilityRows,
-        dailyPackageRows,
-        dailyResolvedRows
-      );
-
-      const totalPackagesScanned = Number(packagesRow.count ?? 0);
-      const totalVulnerablePackages = Number(vulnerablePackagesRow.count ?? 0);
-      const totalCleanPackages = Math.max(0, totalPackagesScanned - totalVulnerablePackages);
-      const cleanPackageRate =
-        totalPackagesScanned > 0
-          ? Number(((totalCleanPackages / totalPackagesScanned) * 100).toFixed(2))
-          : 0;
-
-      const data: DashboardStats = {
-        total_vulnerabilities: Number(totalRow.count ?? 0),
-        total_packages_scanned: totalPackagesScanned,
-        total_vulnerable_packages: totalVulnerablePackages,
-        total_clean_packages: totalCleanPackages,
-        clean_package_rate: cleanPackageRate,
-        total_repositories: Number(repositoriesRow.count ?? 0),
-        total_images: Number(imagesRow.count ?? 0),
-        by_severity,
-        top_repositories: top_repositories.map((repo) => ({
-          id: Number(repo.id),
-          name: repo.name,
-          vulnerability_count: Number(repo.vulnerability_count ?? 0),
-          critical_count: Number(repo.critical_count ?? 0),
-        })),
-        recent_scans: recent_scans.map((scan) => ({
-          id: Number(scan.id),
-          repository: scan.repository,
-          image: scan.image,
-          vulnerability_count: Number(scan.vulnerability_count ?? 0),
-          critical_count: Number(scan.critical_count ?? 0),
-          package_count: Number(scan.package_count ?? 0),
-          vulnerable_package_count: Number(scan.vulnerable_package_count ?? 0),
-          clean_package_count: Math.max(
-            0,
-            Number(scan.package_count ?? 0) - Number(scan.vulnerable_package_count ?? 0)
-          ),
-          scanned_at: scan.scanned_at,
-        })),
-        daily_trends,
-      };
-
-      return buildSuccessResponse(data);
+      return buildSuccessResponse(buildDashboardStats(db));
     } catch {
       return sendError(500, "INTERNAL_SERVER_ERROR", "Failed to load dashboard stats");
     }

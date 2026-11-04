@@ -1,397 +1,267 @@
 import type { Database } from "bun:sqlite";
-import type {
-  ImageDetailResponse,
-  ImageListResponse,
-  ImageSortField,
-  Severity,
-  SeverityBreakdown,
-  VulnerabilityWithRelations,
-} from "../../services/types";
+import {
+  digestFromImageName,
+  emptyCounts,
+  loadRepositoryStats,
+  loadScanCounts,
+  loadScanMetadata,
+  loadTimelines,
+  shortDigest,
+  splitRegistry,
+  type ScanCounts,
+  type SeverityKey,
+  SEVERITY_KEYS,
+  type TimelineImage,
+  type TimelineScan,
+} from "../../services/repo-state";
+import type { ImageSortField } from "../../services/types";
 import { buildSuccessResponse, sendError } from "./_shared";
 
 const ALLOWED_SORT_FIELDS: ImageSortField[] = ["name", "repository", "vulnerability_count", "critical_count", "last_scanned_at"];
-const ALLOWED_SEVERITIES: Severity[] = ["CRITICAL", "HIGH", "MEDIUM", "LOW", "UNKNOWN"];
-type VulnerabilityStateFilter = "open" | "done" | "all";
+const ALLOWED_LIMITS = [10, 25, 50, 100];
+/** Tags listed per repository on /images; the rest are reachable from the repository page. */
+const MAX_TAGS_PER_REPOSITORY = 25;
 
-function parseStateFilter(url: URL): VulnerabilityStateFilter {
-  const raw = (url.searchParams.get("state") || "open").toLowerCase();
-  if (raw === "done" || raw === "all") {
-    return raw;
-  }
-
-  return "open";
-}
-
-const VULNERABILITY_STATE_CTE = `
-  WITH ranked_group_scans AS (
-    SELECT sr.id AS scan_result_id, i.repository_id, i.tag_group,
-      ROW_NUMBER() OVER (PARTITION BY i.repository_id, i.tag_group ORDER BY datetime(sr.scan_date) DESC, sr.id DESC) AS row_num
-    FROM scan_results sr
-    JOIN images i ON i.id = sr.image_id
-  ),
-  latest_group_scans AS (
-    SELECT scan_result_id, repository_id, tag_group
-    FROM ranked_group_scans
-    WHERE row_num = 1
-  ),
-  latest_keys AS (
-    SELECT lgs.repository_id, lgs.tag_group, v.cve_id
-    FROM latest_group_scans lgs
-    JOIN vulnerabilities v ON v.scan_result_id = lgs.scan_result_id
-    GROUP BY lgs.repository_id, lgs.tag_group, v.cve_id
-  ),
-  vulnerability_rows AS (
-    SELECT v.id, v.scan_result_id, v.cve_id, v.severity, v.package_name, v.installed_version, v.fixed_version, v.title,
-      v.description, v.score, v.created_at, sr.scan_date AS scanned_at, i.repository_id, i.tag_group,
-      r.name AS repository_name, i.id AS image_id, i.name AS image_name
-    FROM vulnerabilities v
-    JOIN scan_results sr ON sr.id = v.scan_result_id
-    JOIN images i ON i.id = sr.image_id
-    JOIN repositories r ON r.id = i.repository_id
-  ),
-  resolved_state AS (
-    SELECT vr.repository_id, vr.tag_group, vr.cve_id, MAX(datetime(vr.scanned_at)) AS resolved_at
-    FROM vulnerability_rows vr
-    LEFT JOIN latest_keys lk ON lk.repository_id = vr.repository_id AND lk.tag_group = vr.tag_group AND lk.cve_id = vr.cve_id
-    WHERE lk.cve_id IS NULL
-    GROUP BY vr.repository_id, vr.tag_group, vr.cve_id
-  ),
-  vulnerability_states AS (
-    SELECT vr.*, CASE WHEN lk.cve_id IS NULL THEN 'done' ELSE 'open' END AS state,
-      CASE WHEN lk.cve_id IS NULL THEN rs.resolved_at ELSE NULL END AS resolved_at
-    FROM vulnerability_rows vr
-    LEFT JOIN latest_keys lk ON lk.repository_id = vr.repository_id AND lk.tag_group = vr.tag_group AND lk.cve_id = vr.cve_id
-    LEFT JOIN resolved_state rs ON rs.repository_id = vr.repository_id AND rs.tag_group = vr.tag_group AND rs.cve_id = vr.cve_id
-  )
-`;
-
-function parsePositiveInt(value: string | null, fallback: number): number {
-  if (!value) {
-    return fallback;
-  }
-
-  const parsed = Number.parseInt(value, 10);
-  if (!Number.isFinite(parsed)) {
-    return Number.NaN;
-  }
-
-  return parsed;
-}
-
-function parsePageAndLimit(url: URL): { page: number; limit: number } {
-  const rawPage = parsePositiveInt(url.searchParams.get("page"), 1);
-  const rawLimit = parsePositiveInt(url.searchParams.get("limit"), 10);
-
-  const page = Number.isFinite(rawPage) && rawPage >= 1 ? rawPage : 1;
-  const limit = Number.isFinite(rawLimit) && rawLimit >= 1 && rawLimit <= 100 ? rawLimit : 10;
-
-  return { page, limit };
-}
-
-function getDetailId(pathname: string): number | null {
-  const match = pathname.match(/^\/api\/images\/(\d+)$/);
-  if (!match) {
-    return null;
-  }
-
-  const id = Number.parseInt(match[1] || "", 10);
-  return Number.isFinite(id) ? id : null;
-}
-
-function buildListOrderBy(sort: ImageSortField, order: "asc" | "desc"): string {
-  const direction = order === "asc" ? "ASC" : "DESC";
-
-  const map: Record<ImageSortField, string> = {
-    name: "i.name",
-    repository: "r.name",
-    vulnerability_count: "vulnerability_count",
-    critical_count: "critical_count",
-    last_scanned_at: "MAX(datetime(i.last_scanned_at))",
-  };
-
-  return `${map[sort]} ${direction}, i.id DESC`;
-}
-
-interface ImageListRow {
-  id: number;
-  name: string;
-  repository_id: number;
-  repository_name: string;
-  vulnerability_count: number;
-  critical_count: number;
-  last_scanned_at: string | null;
-  tag_group: string;
-}
-
-interface SeverityRow {
-  severity: Severity;
-  count: number;
-}
-
-interface VulnerabilityRow {
-  id: number;
-  scan_result_id: number;
-  cve_id: string;
-  severity: Severity;
-  package_name: string;
-  installed_version: string | null;
-  fixed_version: string | null;
-  title: string | null;
-  description: string | null;
-  score: number | null;
-  created_at: string;
-  repository_id: number;
-  repository_name: string;
-  image_id: number;
-  image_name: string;
-  scanned_at: string;
-  tag_group: string;
-  state: "open" | "done";
-  resolved_at: string | null;
-}
-
-function buildSeverityBreakdown(rows: SeverityRow[]): SeverityBreakdown {
-  const by_severity: SeverityBreakdown = {
-    CRITICAL: 0,
-    HIGH: 0,
-    MEDIUM: 0,
-    LOW: 0,
-    UNKNOWN: 0,
-  };
-
-  for (const row of rows) {
-    if (ALLOWED_SEVERITIES.includes(row.severity)) {
-      by_severity[row.severity] = Number(row.count ?? 0);
-    }
-  }
-
-  return by_severity;
-}
-
-function toVulnerabilityWithRelations(row: VulnerabilityRow): VulnerabilityWithRelations {
+function parsePageAndLimit(url: URL, defaultLimit: number): { page: number; limit: number } {
+  const rawPage = Number.parseInt(url.searchParams.get("page") || "1", 10);
+  const rawLimit = Number.parseInt(url.searchParams.get("limit") || String(defaultLimit), 10);
   return {
-    id: Number(row.id),
-    scan_result_id: Number(row.scan_result_id),
-    cve_id: row.cve_id,
-    severity: row.severity,
-    package_name: row.package_name,
-    installed_version: row.installed_version,
-    fixed_version: row.fixed_version,
-    title: row.title,
-    description: row.description,
-    score: row.score === null ? null : Number(row.score),
-    created_at: row.created_at,
-    repository: {
-      id: Number(row.repository_id),
-      name: row.repository_name,
-    },
-    image: {
-      id: Number(row.image_id),
-      name: row.image_name,
-    },
-    scanned_at: row.scanned_at,
-    tag_group: row.tag_group,
-    state: row.state,
-    resolved_at: row.resolved_at,
+    page: Number.isFinite(rawPage) && rawPage >= 1 ? rawPage : 1,
+    limit: ALLOWED_LIMITS.includes(rawLimit) ? rawLimit : defaultLimit,
   };
+}
+
+function tagLabel(image: TimelineImage | undefined): string | null {
+  return image ? (image.tag ?? image.name) : null;
 }
 
 function handleImageList(db: Database, request: Request): Response {
   const url = new URL(request.url);
 
-  const sortParam = (url.searchParams.get("sort") || "vulnerability_count") as ImageSortField;
-  if (!ALLOWED_SORT_FIELDS.includes(sortParam)) {
+  const sort = (url.searchParams.get("sort") || "vulnerability_count") as ImageSortField;
+  if (!ALLOWED_SORT_FIELDS.includes(sort)) {
     return sendError(400, "INVALID_SORT_FIELD", "Invalid sort field");
   }
 
-  const orderRaw = (url.searchParams.get("order") || "desc").toLowerCase();
-  const order = orderRaw === "asc" ? "asc" : "desc";
+  const direction = (url.searchParams.get("order") || "desc").toLowerCase() === "asc" ? 1 : -1;
+  const { page, limit } = parsePageAndLimit(url, 10);
+  const search = (url.searchParams.get("search")?.trim() || "").toLowerCase();
 
-  const { page, limit } = parsePageAndLimit(url);
-  const state = parseStateFilter(url);
-  const search = url.searchParams.get("search")?.trim() || "";
-  const offset = (page - 1) * limit;
-
-  const whereClauses: string[] = [];
-  const whereArgs: Array<string> = [];
+  let repos = loadRepositoryStats(db);
   if (search) {
-    whereClauses.push("(LOWER(i.name) LIKE LOWER(?) OR LOWER(r.name) LIKE LOWER(?))");
-    whereArgs.push(`%${search}%`, `%${search}%`);
+    const matchingByImage = new Set(
+      (db.query("SELECT DISTINCT repository_id AS rid FROM images WHERE LOWER(name) LIKE ?").all(`%${search}%`) as Array<{ rid: number }>).map((row) =>
+        Number(row.rid),
+      ),
+    );
+    repos = repos.filter((repo) => repo.name.toLowerCase().includes(search) || matchingByImage.has(repo.id));
   }
 
-  const whereSql = whereClauses.length > 0 ? `WHERE ${whereClauses.join(" AND ")}` : "";
+  repos.sort((a, b) => {
+    let cmp: number;
+    if (sort === "name" || sort === "repository") {
+      cmp = a.name.toLowerCase().localeCompare(b.name.toLowerCase());
+    } else if (sort === "critical_count") {
+      cmp = a.critical - b.critical;
+    } else if (sort === "last_scanned_at") {
+      cmp = (a.last_scanned_at ?? "").localeCompare(b.last_scanned_at ?? "");
+    } else {
+      cmp = a.open - b.open;
+    }
+    return cmp * direction || b.id - a.id;
+  });
 
-  const totalSql = `
-    SELECT COUNT(*) AS total
-    FROM images i
-    JOIN repositories r ON r.id = i.repository_id
-    ${whereSql}
-  `;
-  const totalRow = db.query(totalSql).get(...whereArgs) as { total: number } | null;
-  const totalItems = Number(totalRow?.total ?? 0);
-  const totalPages = totalItems === 0 ? 0 : Math.ceil(totalItems / limit);
+  const totalRepos = repos.length;
+  const totalPages = totalRepos === 0 ? 0 : Math.ceil(totalRepos / limit);
+  const pageRepos = repos.slice((page - 1) * limit, page * limit);
 
-  const orderBy = buildListOrderBy(sortParam, order);
+  const timelines = loadTimelines(
+    db,
+    pageRepos.map((repo) => repo.id),
+  );
 
-  const listSql = `
-    SELECT
-      i.id,
-      i.name,
-      i.tag_group,
-      r.id AS repository_id,
-      r.name AS repository_name,
-      COUNT(DISTINCT CASE WHEN (? = 'all' OR vs.state = ?) THEN vs.cve_id END) AS vulnerability_count,
-      COUNT(DISTINCT CASE WHEN (? = 'all' OR vs.state = ?) AND vs.severity = 'CRITICAL' THEN vs.cve_id END) AS critical_count,
-      MAX(i.last_scanned_at) AS last_scanned_at
-    FROM images i
-    JOIN repositories r ON r.id = i.repository_id
-    LEFT JOIN vulnerability_states vs ON vs.repository_id = i.repository_id AND vs.tag_group = i.tag_group
-    ${whereSql}
-    GROUP BY i.id, i.name, i.tag_group, r.id, r.name
-    ORDER BY ${orderBy}
-    LIMIT ? OFFSET ?
-  `;
+  // Rows to show per repository, newest first (by latest scan), plus "previous tag in the same group".
+  type Row = { image: TimelineImage; previous: TimelineImage | undefined; isLatest: boolean };
+  const rowsByRepo = new Map<number, { rows: Row[]; total: number }>();
+  const scanIds: number[] = [];
+  for (const repo of pageRepos) {
+    const timeline = timelines.get(repo.id)!;
+    const rows: Row[] = [];
+    for (const group of timeline.groups) {
+      group.images.forEach((image, index) => rows.push({ image, previous: group.images[index + 1], isLatest: index === 0 }));
+    }
+    rows.sort((a, b) => (b.image.scans[0]?.time ?? 0) - (a.image.scans[0]?.time ?? 0) || b.image.id - a.image.id);
+    const shown = rows.slice(0, MAX_TAGS_PER_REPOSITORY);
+    for (const row of shown) {
+      scanIds.push(row.image.scans[0]!.id);
+      if (row.previous) {
+        scanIds.push(row.previous.scans[0]!.id);
+      }
+    }
+    rowsByRepo.set(repo.id, { rows: shown, total: timeline.images.length });
+  }
 
-  const rows = db
-    .query(`${VULNERABILITY_STATE_CTE} ${listSql}`)
-    .all(state, state, state, state, ...whereArgs, limit, offset) as ImageListRow[];
+  const counts = loadScanCounts(db, scanIds);
+  const metadataIds = [...rowsByRepo.values()].flatMap(({ rows }) => rows.filter((row) => row.isLatest).map((row) => row.image.scans[0]!.id));
+  const metadata = loadScanMetadata(db, metadataIds);
 
-  const data: ImageListResponse = {
-    items: rows.map((row) => ({
-      id: Number(row.id),
-      name: row.name,
-      repository: {
-        id: Number(row.repository_id),
-        name: row.repository_name,
-      },
-      tag_group: row.tag_group,
-      vulnerability_count: Number(row.vulnerability_count ?? 0),
-      critical_count: Number(row.critical_count ?? 0),
-      last_scanned_at: row.last_scanned_at,
-    })),
-    pagination: {
-      page,
-      limit,
-      total_items: totalItems,
-      total_pages: totalPages,
+  return buildSuccessResponse({
+    groups: pageRepos.map((repo) => {
+      const { rows, total } = rowsByRepo.get(repo.id)!;
+      return {
+        repository: { id: repo.id, name: repo.name, registry: repo.registry },
+        tag_count: total,
+        open: repo.open,
+        critical: repo.critical,
+        last_scanned_at: repo.last_scanned_at,
+        images: rows.map((row) => {
+          const scan = row.image.scans[0]!;
+          const own = counts.get(scan.id)!;
+          const prev = row.previous ? counts.get(row.previous.scans[0]!.id) : undefined;
+          const digest = digestFromImageName(row.image.name) ?? metadata.get(scan.id)?.digest ?? null;
+          return {
+            id: row.image.id,
+            name: row.image.name,
+            tag: row.image.tag,
+            tag_group: row.image.tag_group,
+            is_latest: row.isLatest,
+            by_severity: own.by_severity,
+            open: own.open,
+            critical: own.by_severity.CRITICAL,
+            change: prev
+              ? {
+                  total: own.open - prev.open,
+                  critical: own.by_severity.CRITICAL - prev.by_severity.CRITICAL,
+                  previous_tag: tagLabel(row.previous),
+                }
+              : null,
+            digest: shortDigest(digest),
+            last_scanned_at: scan.scan_date,
+          };
+        }),
+      };
+    }),
+    summary: {
+      repositories: totalRepos,
+      images: repos.reduce((sum, repo) => sum + repo.tag_count, 0),
     },
-  };
-
-  return buildSuccessResponse(data);
+    pagination: { page, limit, total_items: totalRepos, total_pages: totalPages },
+  });
 }
 
-function handleImageDetail(db: Database, id: number): Response {
+const SEVERITY_ORDER_SQL = "CASE severity WHEN 'CRITICAL' THEN 0 WHEN 'HIGH' THEN 1 WHEN 'MEDIUM' THEN 2 WHEN 'LOW' THEN 3 ELSE 4 END";
+
+function handleImageDetail(db: Database, id: number, url: URL): Response {
   const image = db
     .query(
-      `
-      SELECT
-        i.id,
-        i.name,
-        i.tag_group,
-        i.last_scanned_at,
-        COALESCE(
-          (
-            SELECT MIN(sr2.scan_date)
-            FROM scan_results sr2
-            WHERE sr2.image_id = i.id
-          ),
-          i.last_scanned_at
-        ) AS created_at,
-        r.id AS repository_id,
-        r.name AS repository_name
-      FROM images i
-      JOIN repositories r ON r.id = i.repository_id
-      WHERE i.id = ?
-      LIMIT 1
-      `,
+      `SELECT i.id, i.name, i.tag, i.tag_group, i.last_scanned_at, i.repository_id, r.name AS repository_name
+       FROM images i JOIN repositories r ON r.id = i.repository_id WHERE i.id = ? LIMIT 1`,
     )
     .get(id) as
-    | {
-        id: number;
-        name: string;
-        tag_group: string;
-        last_scanned_at: string | null;
-        created_at: string;
-        repository_id: number;
-        repository_name: string;
-      }
+    | { id: number; name: string; tag: string | null; tag_group: string; last_scanned_at: string | null; repository_id: number; repository_name: string }
     | null;
 
   if (!image) {
     return sendError(404, "IMAGE_NOT_FOUND", "Image not found");
   }
 
-  const severityRows = db
-    .query(
-      `${VULNERABILITY_STATE_CTE}
-      SELECT v.severity AS severity, COUNT(v.id) AS count
-      FROM vulnerability_states v
-      WHERE v.image_id = ? AND v.state = 'open'
-      GROUP BY v.severity
-      `,
-    )
-    .all(id) as SeverityRow[];
+  const timeline = loadTimelines(db, [image.repository_id]).get(image.repository_id)!;
+  const group = timeline.groups.find((candidate) => candidate.name === image.tag_group);
+  const self = timeline.images.find((candidate) => candidate.id === image.id);
+  const latestScan: TimelineScan | undefined = self?.scans[0];
+  const firstScan = self?.scans[self.scans.length - 1];
+  const groupIndex = group?.images.findIndex((candidate) => candidate.id === image.id) ?? -1;
+  const previousImage = groupIndex >= 0 ? group?.images[groupIndex + 1] : undefined;
 
-  const vulnerabilities = db
-    .query(
-      `${VULNERABILITY_STATE_CTE}
-      SELECT
-        v.id,
-        v.scan_result_id,
-        v.cve_id,
-        v.severity,
-        v.package_name,
-        v.installed_version,
-        v.fixed_version,
-        v.title,
-        v.description,
-        v.score,
-        v.created_at,
-        v.repository_id,
-        v.repository_name,
-        v.image_id,
-        v.image_name,
-        v.scanned_at,
-        v.tag_group,
-        v.state,
-        v.resolved_at
-      FROM vulnerability_states v
-      WHERE v.image_id = ?
-      ORDER BY datetime(v.scanned_at) DESC, v.id DESC
-      `,
-    )
-    .all(id) as VulnerabilityRow[];
+  const scanIds = [latestScan?.id, previousImage?.scans[0]?.id].filter((value): value is number => typeof value === "number");
+  const counts = loadScanCounts(db, scanIds);
+  const own: ScanCounts = (latestScan && counts.get(latestScan.id)) || { by_severity: emptyCounts(), open: 0, fixable: 0 };
+  const prev = previousImage ? counts.get(previousImage.scans[0]!.id) : undefined;
+  const meta = latestScan ? loadScanMetadata(db, [latestScan.id]).get(latestScan.id) : undefined;
 
-  const data: ImageDetailResponse = {
-    id: Number(image.id),
+  const { page, limit } = parsePageAndLimit(url, 25);
+  const where: string[] = ["scan_result_id = ?"];
+  const args: Array<string | number> = [latestScan?.id ?? -1];
+  const search = url.searchParams.get("search")?.trim();
+  if (search) {
+    where.push("(LOWER(cve_id) LIKE ? OR LOWER(package_name) LIKE ?)");
+    args.push(`%${search.toLowerCase()}%`, `%${search.toLowerCase()}%`);
+  }
+  const severity = (url.searchParams.get("severity") || "").toUpperCase();
+  if (SEVERITY_KEYS.includes(severity as SeverityKey)) {
+    where.push("severity = ?");
+    args.push(severity);
+  }
+  if (url.searchParams.get("fixable") === "1") {
+    where.push("fixed_version IS NOT NULL AND fixed_version <> ''");
+  }
+  const whereSql = where.join(" AND ");
+
+  const totals = db
+    .query(`SELECT COUNT(*) AS total, COUNT(DISTINCT package_name || char(0) || COALESCE(installed_version, '')) AS packages FROM vulnerabilities WHERE ${whereSql}`)
+    .get(...args) as { total: number; packages: number };
+  const totalItems = Number(totals.total);
+
+  const rows = db
+    .query(
+      `SELECT id, cve_id, severity, package_name, installed_version, fixed_version, score,
+         MIN(sevrank) OVER (PARTITION BY package_name, COALESCE(installed_version, '')) AS pkgrank
+       FROM (SELECT *, ${SEVERITY_ORDER_SQL} AS sevrank FROM vulnerabilities WHERE ${whereSql})
+       ORDER BY pkgrank, package_name, COALESCE(installed_version, ''), sevrank, cve_id, id
+       LIMIT ? OFFSET ?`,
+    )
+    .all(...args, limit, (page - 1) * limit) as Array<{
+    id: number;
+    cve_id: string;
+    severity: string;
+    package_name: string;
+    installed_version: string | null;
+    fixed_version: string | null;
+    score: number | null;
+  }>;
+
+  const { registry } = splitRegistry(image.repository_name);
+
+  return buildSuccessResponse({
+    id: image.id,
     name: image.name,
-    repository: {
-      id: Number(image.repository_id),
-      name: image.repository_name,
-    },
-    created_at: image.created_at,
-    last_scanned_at: image.last_scanned_at,
-    by_severity: buildSeverityBreakdown(severityRows),
-    vulnerabilities: vulnerabilities.map((row) => toVulnerabilityWithRelations(row)),
-  };
-
-  return buildSuccessResponse(data);
+    tag: image.tag,
+    tag_group: image.tag_group,
+    is_latest: groupIndex === 0,
+    repository: { id: image.repository_id, name: image.repository_name, registry },
+    created_at: firstScan?.scan_date ?? image.last_scanned_at,
+    last_scanned_at: latestScan?.scan_date ?? image.last_scanned_at,
+    os: meta?.os ?? null,
+    digest: meta?.digest ?? digestFromImageName(image.name),
+    by_severity: own.by_severity,
+    open: own.open,
+    fixable: own.fixable,
+    change: prev ? { open: own.open - prev.open, critical: own.by_severity.CRITICAL - prev.by_severity.CRITICAL, previous_tag: tagLabel(previousImage) } : null,
+    total_packages: Number(totals.packages),
+    items: rows.map((row) => ({
+      id: Number(row.id),
+      cve_id: row.cve_id,
+      severity: row.severity,
+      package_name: row.package_name,
+      installed_version: row.installed_version,
+      fixed_version: row.fixed_version,
+      score: row.score === null ? null : Number(row.score),
+    })),
+    pagination: { page, limit, total_items: totalItems, total_pages: totalItems === 0 ? 0 : Math.ceil(totalItems / limit) },
+  });
 }
 
 export function createImagesHandler(db: Database) {
   return function imagesHandler(request: Request): Response {
     try {
       const url = new URL(request.url);
-      const detailId = getDetailId(url.pathname);
-
-      if (detailId !== null) {
-        return handleImageDetail(db, detailId);
+      const detail = url.pathname.match(/^\/api\/images\/(\d+)$/);
+      if (detail) {
+        return handleImageDetail(db, Number(detail[1]), url);
       }
-
       if (url.pathname === "/api/images") {
         return handleImageList(db, request);
       }
-
       return sendError(404, "NOT_FOUND", "Endpoint not found");
     } catch {
       return sendError(500, "INTERNAL_SERVER_ERROR", "Failed to load images");

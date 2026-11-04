@@ -1,5 +1,8 @@
 import { useCallback, useEffect, useState } from "react";
 import type { TrivyIgnoreRow } from "../services/trivy-ignore";
+import type { RuleOverview, RuleRepoStatus } from "../services/trivy-ignore-status";
+
+export type { RuleOverview, RuleRepoStatus };
 
 export const TRIVY_IGNORE_API_KEY_STORAGE_KEY = "trivyui_trivy_ignore_api_key";
 
@@ -151,8 +154,51 @@ export async function deleteTrivyIgnoreRecord(fetcher: typeof fetch = fetch, id:
   }
 }
 
+export async function fetchRulesOverview(fetcher: typeof fetch = fetch, apiKey?: string): Promise<RuleOverview[]> {
+  const response = await fetcher("/api/trivy-ignores/overview", { headers: buildTrivyIgnoreAuthHeaders(apiKey) });
+  return parseResponse<RuleOverview[]>(response, "Failed to load trivy ignores");
+}
+
+export async function fetchRuleRepos(fetcher: typeof fetch = fetch, ruleId: number, apiKey?: string): Promise<RuleRepoStatus[]> {
+  const response = await fetcher(`/api/trivy-ignores/${ruleId}/repos`, { headers: buildTrivyIgnoreAuthHeaders(apiKey) });
+  return parseResponse<RuleRepoStatus[]>(response, "Failed to load rule repositories");
+}
+
+export async function fetchIgnorePreview(fetcher: typeof fetch = fetch, repo: string, tag: string, apiKey?: string): Promise<string> {
+  const params = new URLSearchParams({ repo, tag });
+  const response = await fetcher(`/api/trivy-ignores/preview?${params}`, { headers: buildTrivyIgnoreAuthHeaders(apiKey) });
+  return (await parseResponse<{ text: string }>(response, "Failed to load preview")).text;
+}
+
+async function postJson<T>(fetcher: typeof fetch, path: string, body: unknown, fallback: string, apiKey?: string): Promise<T> {
+  const response = await fetcher(path, {
+    method: "POST",
+    headers: { "content-type": "application/json", ...buildTrivyIgnoreAuthHeaders(apiKey) },
+    body: JSON.stringify(body),
+  });
+  return parseResponse<T>(response, fallback);
+}
+
+export function stopIgnoringRecords(fetcher: typeof fetch, ruleIds: number[], repositoryIds: number[], apiKey?: string) {
+  return postJson<{ excluded: number; deleted: number }>(
+    fetcher,
+    "/api/trivy-ignores/stop-ignoring",
+    { rule_ids: ruleIds, repository_ids: repositoryIds },
+    "Failed to stop ignoring",
+    apiKey,
+  );
+}
+
+export function bulkDeleteRecords(fetcher: typeof fetch, ids: number[], apiKey?: string) {
+  return postJson<{ removed: number }>(fetcher, "/api/trivy-ignores/bulk-delete", { ids }, "Failed to delete rules", apiKey);
+}
+
+export function importIgnoreText(fetcher: typeof fetch, text: string, apiKey?: string) {
+  return postJson<{ created: number; skipped: number }>(fetcher, "/api/trivy-ignores/import", { text }, "Failed to import", apiKey);
+}
+
 export function useTrivyIgnores(repoFilter?: number | null, apiKey?: string) {
-  const [items, setItems] = useState<TrivyIgnoreRow[]>([]);
+  const [items, setItems] = useState<RuleOverview[]>([]);
   const [repositories, setRepositories] = useState<RepositoryItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -162,8 +208,10 @@ export function useTrivyIgnores(repoFilter?: number | null, apiKey?: string) {
     setError(null);
 
     try {
-      const [listRows, repoRows] = await Promise.all([fetchTrivyIgnores(fetch, repoFilter, apiKey), fetchRepositories(fetch, apiKey)]);
-      setItems(listRows);
+      const [listRows, repoRows] = await Promise.all([fetchRulesOverview(fetch, apiKey), fetchRepositories(fetch, apiKey)]);
+      setItems(
+        typeof repoFilter === "number" ? listRows.filter((row) => row.repository_id === null || row.repository_id === repoFilter) : listRows,
+      );
       setRepositories(repoRows);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to load trivy ignores");
@@ -189,6 +237,27 @@ export function useTrivyIgnores(repoFilter?: number | null, apiKey?: string) {
     await load();
   }, [load, apiKey]);
 
+  const removeMany = useCallback(async (ids: number[]) => {
+    const result = await bulkDeleteRecords(fetch, ids, apiKey);
+    await load();
+    return result;
+  }, [load, apiKey]);
+
+  const stopIgnoring = useCallback(async (ruleIds: number[], repositoryIds: number[]) => {
+    const result = await stopIgnoringRecords(fetch, ruleIds, repositoryIds, apiKey);
+    await load();
+    return result;
+  }, [load, apiKey]);
+
+  const importText = useCallback(async (text: string) => {
+    const result = await importIgnoreText(fetch, text, apiKey);
+    await load();
+    return result;
+  }, [load, apiKey]);
+
+  const loadRepos = useCallback((ruleId: number) => fetchRuleRepos(fetch, ruleId, apiKey), [apiKey]);
+  const loadPreview = useCallback((repo: string, tag: string) => fetchIgnorePreview(fetch, repo, tag, apiKey), [apiKey]);
+
   const retry = useCallback(async () => {
     await load();
   }, [load]);
@@ -200,6 +269,11 @@ export function useTrivyIgnores(repoFilter?: number | null, apiKey?: string) {
     error,
     create,
     remove,
+    removeMany,
+    stopIgnoring,
+    importText,
+    loadRepos,
+    loadPreview,
     retry,
   };
 }

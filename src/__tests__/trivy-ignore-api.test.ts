@@ -472,3 +472,84 @@ describe("trivy ignore API auth integration", () => {
     expect(generated.status).toBe(200);
   });
 });
+
+describe("trivy ignore generate handler failures", () => {
+  test("returns 500 INTERNAL_SERVER_ERROR on unexpected errors", async () => {
+    const db = createTestDb();
+    const generateHandler = createTrivyIgnoreGenerateHandler(db);
+    db.close();
+
+    const response = await generateHandler(new Request("http://localhost/api/trivy-ignore/generate", { method: "GET" }));
+    const body = (await response.json()) as { error: { code: string } };
+
+    expect(response.status).toBe(500);
+    expect(body.error.code).toBe("INTERNAL_SERVER_ERROR");
+  });
+});
+
+describe("trivy ignore management API extended routes", () => {
+  const json = (path: string, body: unknown, method = "POST") =>
+    new Request(`http://localhost${path}`, { method, headers: { "content-type": "application/json" }, body: typeof body === "string" ? body : JSON.stringify(body) });
+
+  test("uses cached verified catalog record without hitting upstream", async () => {
+    const db = createTestDb();
+    upsertVulnerabilityCatalogRecord(db, { vuln_id: "CVE-2026-2002", vuln_type: "CVE", verification_status: "verified" });
+    const handler = createTrivyIgnoreHandler(db, createUpstreamUnavailableFetcher());
+
+    const response = await handler(json("/api/trivy-ignores", { cve_id: "CVE-2026-2002", repository_id: null, scope: "all_tags" }));
+    const body = (await response.json()) as { data: { verification_status: string } };
+
+    expect(response.status).toBe(201);
+    expect(body.data.verification_status).toBe("verified");
+  });
+
+  test("GET overview returns rules", async () => {
+    const db = createTestDb();
+    const handler = createTrivyIgnoreHandler(db);
+    const response = await handler(new Request("http://localhost/api/trivy-ignores/overview"));
+    const body = (await response.json()) as { success: boolean; data: unknown[] };
+    expect(response.status).toBe(200);
+    expect(Array.isArray(body.data)).toBe(true);
+  });
+
+  test("GET :id/repos returns 404 for unknown rule and data for a known rule", async () => {
+    const db = createTestDb();
+    const handler = createTrivyIgnoreHandler(db, createUpstreamSuccessFetcher());
+
+    const missing = await handler(new Request("http://localhost/api/trivy-ignores/9999/repos"));
+    expect(missing.status).toBe(404);
+
+    const created = await handler(json("/api/trivy-ignores", { cve_id: "CVE-2026-3003", repository_id: null, scope: "all_tags" }));
+    const { data } = (await created.json()) as { data: { id: number } };
+    const ok = await handler(new Request(`http://localhost/api/trivy-ignores/${data.id}/repos`));
+    expect(ok.status).toBe(200);
+  });
+
+  test("POST stop-ignoring validates ids and returns counts", async () => {
+    const db = createTestDb();
+    const handler = createTrivyIgnoreHandler(db, createUpstreamSuccessFetcher());
+    const repoId = upsertRepository(db, "ghcr.io/acme/stop");
+    const created = await handler(json("/api/trivy-ignores", { cve_id: "CVE-2026-4004", repository_id: null, scope: "all_tags" }));
+    const { data } = (await created.json()) as { data: { id: number } };
+
+    const ok = await handler(json("/api/trivy-ignores/stop-ignoring", { rule_ids: [data.id], repository_ids: [repoId] }));
+    const okBody = (await ok.json()) as { data: { excluded: number; deleted: number } };
+    expect(ok.status).toBe(200);
+    expect(okBody.data.excluded).toBe(1);
+
+    const notArray = await handler(json("/api/trivy-ignores/stop-ignoring", { rule_ids: "x", repository_ids: [1] }));
+    expect(notArray.status).toBe(400);
+
+    const badId = await handler(json("/api/trivy-ignores/stop-ignoring", { rule_ids: [1], repository_ids: [0] }));
+    expect(badId.status).toBe(400);
+  });
+
+  test("POST bulk-delete rejects invalid JSON bodies", async () => {
+    const db = createTestDb();
+    const handler = createTrivyIgnoreHandler(db);
+    const response = await handler(json("/api/trivy-ignores/bulk-delete", "{not json"));
+    const body = (await response.json()) as { error: { code: string } };
+    expect(response.status).toBe(400);
+    expect(body.error.code).toBe("INVALID_REQUEST");
+  });
+});

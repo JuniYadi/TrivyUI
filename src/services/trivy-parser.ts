@@ -1,5 +1,6 @@
 import type {
   NormalizedPackage,
+  NormalizedSuppressedFinding,
   NormalizedVulnerability,
   ParseResult,
   Severity,
@@ -53,8 +54,14 @@ export function parseTrivyResult(input: unknown): ParseResult {
 
   const vulnerabilities: NormalizedVulnerability[] = [];
   const packages: NormalizedPackage[] = [];
+  const suppressed: NormalizedSuppressedFinding[] = [];
+  let suppressionAware = false;
 
   for (const result of results) {
+    suppressed.push(...extractSuppressedFindings(result));
+    if (Object.prototype.hasOwnProperty.call(result, "ExperimentalModifiedFindings")) {
+      suppressionAware = true;
+    }
     const inventoryPackages = extractInventoryPackages(result);
     for (const pkg of inventoryPackages) {
       const normalizedPackage = normalizePackage(result, pkg);
@@ -111,7 +118,42 @@ export function parseTrivyResult(input: unknown): ParseResult {
     schema_version: detectSchemaVersion(payload),
     vulnerabilities,
     packages,
+    suppressed,
+    suppression_aware: suppressionAware,
   };
+}
+
+/**
+ * `trivy --show-suppressed` (>= v0.50.0, experimental) adds
+ * `Result.ExperimentalModifiedFindings[]` = { Type, Status, Statement, Source, Finding }
+ * where Finding is a DetectedVulnerability when Type === "vulnerability".
+ * Source: pkg/types/finding.go and pkg/types/report.go in aquasecurity/trivy.
+ */
+function extractSuppressedFindings(result: TrivyResult): NormalizedSuppressedFinding[] {
+  const raw = (result as Record<string, unknown>).ExperimentalModifiedFindings;
+  if (!Array.isArray(raw)) {
+    return [];
+  }
+
+  const out: NormalizedSuppressedFinding[] = [];
+  for (const entry of raw) {
+    if (!isObject(entry)) continue;
+    const type = normalizedText(entry.Type);
+    if (type && type.toLowerCase() !== "vulnerability") continue;
+    const finding = entry.Finding;
+    if (!isObject(finding)) continue;
+
+    const normalized = normalizeVulnerability({}, finding as TrivyVulnerability);
+    if (!normalized) continue;
+
+    out.push({
+      ...normalized,
+      status: normalizedText(entry.Status),
+      statement: normalizedText(entry.Statement),
+      source: normalizedText(entry.Source),
+    });
+  }
+  return out;
 }
 
 function extractResults(payload: TrivyJson): TrivyResult[] {

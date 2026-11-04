@@ -1,42 +1,34 @@
 import { useCallback, useEffect, useState } from "react";
-import type { ImageDetailResponse } from "../services/types";
+import type { ImageDetailData } from "../services/repo-page-types";
+import { fetchApi } from "./api-fetch";
 
-interface ApiSuccess<T> {
-  success: true;
-  data: T;
+export interface ImageDetailQuery {
+  page: number;
+  limit: number;
+  search: string;
+  severity: string | null;
+  fixable: boolean;
 }
 
-interface ApiFailure {
-  success: false;
-  error?: {
-    code?: string;
-    message?: string;
-  };
+export const DEFAULT_IMAGE_DETAIL_QUERY: ImageDetailQuery = { page: 1, limit: 25, search: "", severity: null, fixable: false };
+
+export function imageDetailPath(id: number, query: ImageDetailQuery): string {
+  const params = new URLSearchParams({ page: String(query.page), limit: String(query.limit) });
+  if (query.search) params.set("search", query.search);
+  if (query.severity) params.set("severity", query.severity);
+  if (query.fixable) params.set("fixable", "1");
+  return `/api/images/${id}?${params}`;
 }
 
-type ApiResponse<T> = ApiSuccess<T> | ApiFailure;
-
-export async function fetchImageDetail(id: number, fetcher: typeof fetch = fetch): Promise<ImageDetailResponse> {
-  const response = await fetcher(`/api/images/${id}`);
-
-  let payload: ApiResponse<ImageDetailResponse> | null = null;
-  try {
-    payload = (await response.json()) as ApiResponse<ImageDetailResponse>;
-  } catch {
-    throw new Error("Failed to load image detail");
-  }
-
-  if (!response.ok || !payload || payload.success !== true) {
-    throw new Error(payload?.error?.message || "Failed to load image detail");
-  }
-
-  return payload.data;
+export function fetchImageDetail(id: number, query: ImageDetailQuery = DEFAULT_IMAGE_DETAIL_QUERY, fetcher: typeof fetch = fetch): Promise<ImageDetailData> {
+  return fetchApi<ImageDetailData>(imageDetailPath(id, query), "Failed to load image detail", fetcher);
 }
 
-export function useImageDetail(id: number | null) {
-  const [data, setData] = useState<ImageDetailResponse | null>(null);
+export function useImageDetail(id: number | null, query: ImageDetailQuery = DEFAULT_IMAGE_DETAIL_QUERY) {
+  const [data, setData] = useState<ImageDetailData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const queryKey = JSON.stringify(query);
 
   const load = useCallback(async () => {
     if (!id) {
@@ -50,15 +42,14 @@ export function useImageDetail(id: number | null) {
     setError(null);
 
     try {
-      const result = await fetchImageDetail(id);
-      setData(result);
+      setData(await fetchImageDetail(id, query));
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to load image detail");
       setData(null);
     } finally {
       setLoading(false);
     }
-  }, [id]);
+  }, [id, queryKey]);
 
   useEffect(() => {
     void load();

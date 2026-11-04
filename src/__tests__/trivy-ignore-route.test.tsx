@@ -3,12 +3,9 @@ import { readFileSync } from "node:fs";
 import { renderToStaticMarkup } from "react-dom/server";
 import {
   buildTrivyIgnoreGenerateCommand,
-  fetchTrivyIgnoreCveDetail,
-  pickTrivyIgnoreCveCandidate,
   TrivyIgnoreListPanel,
 } from "../routes/trivy-ignore";
 import type { TrivyIgnoreRow } from "../services/trivy-ignore";
-import type { VulnerabilityWithRelations } from "../services/types";
 
 const SAMPLE_ROW: TrivyIgnoreRow = {
   id: 1,
@@ -29,34 +26,6 @@ const SAMPLE_REPOSITORY_ROW: TrivyIgnoreRow = {
   repository_name: "ghcr.io/acme/platform-service",
 };
 
-const SAMPLE_VULNERABILITY: VulnerabilityWithRelations = {
-  id: 101,
-  scan_result_id: 201,
-  cve_id: "CVE-2026-1111",
-  severity: "HIGH",
-  package_name: "openssl",
-  installed_version: "1.0.0",
-  fixed_version: "1.0.1",
-  title: "Sample",
-  description: "Sample description",
-  score: 7.1,
-  created_at: "2026-05-08T12:00:00.000Z",
-  repository: {
-    id: 7,
-    name: "ghcr.io/acme/platform-service",
-  },
-  image: {
-    id: 301,
-    name: "ghcr.io/acme/platform-service:dev-1",
-    repository_id: 7,
-    repository_name: "ghcr.io/acme/platform-service",
-  },
-  scanned_at: "2026-05-08T12:00:00.000Z",
-  tag_group: "dev",
-  state: "open",
-  resolved_at: null,
-};
-
 describe("trivy ignore route list panel", () => {
   test("shows loading state", () => {
     const html = renderToStaticMarkup(
@@ -73,7 +42,6 @@ describe("trivy ignore route list panel", () => {
         onRetry={() => {}}
         onDelete={() => {}}
         onFetchDetail={() => {}}
-        onOpenCveDetail={() => {}}
       />,
     );
 
@@ -95,7 +63,6 @@ describe("trivy ignore route list panel", () => {
         onRetry={() => {}}
         onDelete={() => {}}
         onFetchDetail={() => {}}
-        onOpenCveDetail={() => {}}
       />,
     );
 
@@ -119,12 +86,12 @@ describe("trivy ignore route list panel", () => {
         onRetry={() => {}}
         onDelete={() => {}}
         onFetchDetail={() => {}}
-        onOpenCveDetail={() => {}}
       />,
     );
 
-    expect(html).toContain("No scan results yet");
-    expect(html).toContain("Go to Upload");
+    expect(html).toContain("No ignore rules yet");
+    expect(html).not.toContain("No scan results yet");
+    expect(html).not.toContain("Upload your first Trivy scan");
   });
 
   test("renders list rows for existing ignore rules", () => {
@@ -142,7 +109,6 @@ describe("trivy ignore route list panel", () => {
         onRetry={() => {}}
         onDelete={() => {}}
         onFetchDetail={() => {}}
-        onOpenCveDetail={() => {}}
       />,
     );
 
@@ -153,6 +119,43 @@ describe("trivy ignore route list panel", () => {
     expect(html).toContain("legacy");
     expect(html).toContain("/repositories/by-name/ghcr.io%2Facme%2Fplatform-service");
     expect(html).toContain("Delete");
+  });
+
+  test("renders per-repo status summary, hint, filters and bulk checkboxes", () => {
+    const row = {
+      ...SAMPLE_REPOSITORY_ROW,
+      package_name: "next",
+      summary: { total: 5, still_present: 4, fixed: 1, no_scan: 0 },
+      partly_fixed: true,
+      safe_to_remove: false,
+      expiring: false,
+      excluded_repository_ids: [],
+      hint: "1 repo fixed. Stop ignoring there.",
+    };
+    const html = renderToStaticMarkup(
+      <TrivyIgnoreListPanel
+        repoFilter=""
+        repositories={[]}
+        loading={false}
+        error={null}
+        items={[row]}
+        statusByVulnId={{}}
+        fetchingByVulnId={{}}
+        deletingId={null}
+        onRepoFilterChange={() => {}}
+        onRetry={() => {}}
+        onDelete={() => {}}
+        onFetchDetail={() => {}}
+      />,
+    );
+
+    expect(html).toContain("4 still present");
+    expect(html).toContain("1 fixed");
+    expect(html).toContain("1 repo fixed. Stop ignoring there.");
+    expect(html).toContain("Partly fixed");
+    expect(html).toContain("Safe to remove");
+    expect(html).toContain("Expiring");
+    expect(html).toContain('aria-label="Select CVE-2026-1111"');
   });
 
   test("builds generate command example with repo and tag context", () => {
@@ -193,82 +196,5 @@ describe("trivy ignore route list panel", () => {
     const source = readFileSync("src/routes/trivy-ignore.tsx", "utf-8");
     expect(source).toContain("{scope === \"selected_tags\" && (");
     expect(source).toContain("Tag patterns");
-  });
-});
-
-describe("trivy ignore CVE detail helpers", () => {
-  test("pickTrivyIgnoreCveCandidate prefers repository match", () => {
-    const another = {
-      ...SAMPLE_VULNERABILITY,
-      id: 102,
-      repository: { id: 8, name: "ghcr.io/acme/other" },
-      image: { ...SAMPLE_VULNERABILITY.image, repository_id: 8, repository_name: "ghcr.io/acme/other" },
-    };
-
-    const picked = pickTrivyIgnoreCveCandidate([another, SAMPLE_VULNERABILITY], "ghcr.io/acme/platform-service");
-
-    expect(picked?.id).toBe(101);
-  });
-
-  test("fetchTrivyIgnoreCveDetail falls back to cve-only search", async () => {
-    const requests: string[] = [];
-    const fetcher = (async (input: RequestInfo | URL) => {
-      const url = String(input);
-      requests.push(url);
-
-      if (url.includes("/api/vulnerabilities?") && url.includes("repository=")) {
-        return new Response(
-          JSON.stringify({
-            success: true,
-            data: {
-              items: [],
-              pagination: { page: 1, limit: 50, total_items: 0, total_pages: 0 },
-            },
-          }),
-        );
-      }
-
-      if (url.includes("/api/vulnerabilities?") && url.includes("cve_id=CVE-2026-1111")) {
-        return new Response(
-          JSON.stringify({
-            success: true,
-            data: {
-              items: [SAMPLE_VULNERABILITY],
-              pagination: { page: 1, limit: 50, total_items: 1, total_pages: 1 },
-            },
-          }),
-        );
-      }
-
-      if (url.endsWith("/api/vulnerabilities/101")) {
-        return new Response(JSON.stringify({ success: true, data: SAMPLE_VULNERABILITY }));
-      }
-
-      return new Response(JSON.stringify({ success: false, error: { message: "not found" } }), { status: 404 });
-    }) as typeof fetch;
-
-    const detail = await fetchTrivyIgnoreCveDetail("CVE-2026-1111", "ghcr.io/acme/missing", fetcher);
-
-    expect(detail.cve_id).toBe("CVE-2026-1111");
-    expect(requests[0]).toContain("repository=ghcr.io%2Facme%2Fmissing");
-    expect(requests[1]).toContain("cve_id=CVE-2026-1111");
-    expect(requests[2]).toContain("/api/vulnerabilities/101");
-  });
-
-  test("fetchTrivyIgnoreCveDetail throws if no candidate is found", async () => {
-    const fetcher = (async () =>
-      new Response(
-        JSON.stringify({
-          success: true,
-          data: {
-            items: [],
-            pagination: { page: 1, limit: 50, total_items: 0, total_pages: 0 },
-          },
-        }),
-      )) as typeof fetch;
-
-    await expect(fetchTrivyIgnoreCveDetail("CVE-2026-9999", undefined, fetcher)).rejects.toThrow(
-      "No vulnerability detail found for this vulnerability ID.",
-    );
   });
 });

@@ -1,6 +1,7 @@
 import type { Database } from "bun:sqlite";
 import {
   getNotificationSettings,
+  getSmtpStatus,
   parseMinSeverity,
   updateNotificationSettings,
   type NotificationMinSeverity,
@@ -10,6 +11,7 @@ import { ApiError, buildSuccessResponse, sendError, toApiError } from "./_shared
 interface NotificationSettingsPayload {
   enabled: boolean;
   min_severity: NotificationMinSeverity;
+  smtp?: ReturnType<typeof getSmtpStatus>;
 }
 
 export function createNotificationSettingsHandler(db: Database) {
@@ -20,6 +22,7 @@ export function createNotificationSettingsHandler(db: Database) {
         return buildSuccessResponse<NotificationSettingsPayload>({
           enabled: settings.enabled,
           min_severity: settings.minSeverity,
+          smtp: getSmtpStatus(),
         });
       }
 

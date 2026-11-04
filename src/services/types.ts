@@ -101,6 +101,13 @@ export interface NormalizedVulnerability {
   score: number | null;
 }
 
+export interface NormalizedSuppressedFinding extends NormalizedVulnerability {
+  /** Trivy FindingStatus, e.g. "ignored" (.trivyignore) or a VEX status. */
+  status: string | null;
+  statement: string | null;
+  source: string | null;
+}
+
 export interface NormalizedPackage {
   result_class: string | null;
   result_type: string | null;
@@ -120,6 +127,10 @@ export interface ParseResult {
   schema_version: string;
   vulnerabilities: NormalizedVulnerability[];
   packages: NormalizedPackage[];
+  /** Findings from Result.ExperimentalModifiedFindings (trivy --show-suppressed). */
+  suppressed: NormalizedSuppressedFinding[];
+  /** true when any Result carried the ExperimentalModifiedFindings key (scan ran with --show-suppressed). */
+  suppression_aware: boolean;
 }
 
 export interface Repository {

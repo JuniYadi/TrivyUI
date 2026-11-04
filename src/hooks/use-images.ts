@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
-import type { ImageListResponse, ImageSortField } from "../services/types";
+import type { ImageListResponse } from "../services/repo-page-types";
+import type { ImageSortField } from "../services/types";
+import { fetchApi, parseLimit, parsePage } from "./api-fetch";
 
 export interface ImageQueryParams {
   page: number;
@@ -9,43 +11,22 @@ export interface ImageQueryParams {
   search?: string;
 }
 
-interface ApiSuccess<T> {
-  success: true;
-  data: T;
-}
-
-interface ApiFailure {
-  success: false;
-  error?: {
-    code?: string;
-    message?: string;
-  };
-}
-
-type ApiResponse<T> = ApiSuccess<T> | ApiFailure;
-
-const ALLOWED_LIMITS = [10, 25, 50, 100] as const;
-
 function isSortField(value: string): value is ImageSortField {
   return ["name", "repository", "vulnerability_count", "critical_count", "last_scanned_at"].includes(value);
 }
 
 export function parseImageParams(search = window.location.search): ImageQueryParams {
   const params = new URLSearchParams(search);
-
-  const page = Number.parseInt(params.get("page") || "1", 10);
-  const limit = Number.parseInt(params.get("limit") || "10", 10);
   const sortRaw = params.get("sort") || "vulnerability_count";
-  const orderRaw = (params.get("order") || "desc").toLowerCase();
-  const searchRaw = params.get("search")?.trim();
 
   const parsed: ImageQueryParams = {
-    page: Number.isFinite(page) && page > 0 ? page : 1,
-    limit: ALLOWED_LIMITS.includes(limit as (typeof ALLOWED_LIMITS)[number]) ? limit : 10,
+    page: parsePage(params.get("page")),
+    limit: parseLimit(params.get("limit"), 10),
     sort: isSortField(sortRaw) ? sortRaw : "vulnerability_count",
-    order: orderRaw === "asc" ? "asc" : "desc",
+    order: (params.get("order") || "desc").toLowerCase() === "asc" ? "asc" : "desc",
   };
 
+  const searchRaw = params.get("search")?.trim();
   if (searchRaw) {
     parsed.search = searchRaw;
   }
@@ -65,26 +46,8 @@ function toQueryString(query: ImageQueryParams): string {
   return params.toString();
 }
 
-export async function fetchImages(query: ImageQueryParams, fetcher: typeof fetch = fetch): Promise<ImageListResponse> {
-  const response = await fetcher(`/api/images?${toQueryString(query)}`);
-
-  let payload: ApiResponse<ImageListResponse> | null = null;
-  try {
-    payload = (await response.json()) as ApiResponse<ImageListResponse>;
-  } catch {
-    throw new Error("Failed to load images");
-  }
-
-  if (!response.ok || !payload || payload.success !== true) {
-    throw new Error(payload?.error?.message || "Failed to load images");
-  }
-
-  return payload.data;
-}
-
-function buildUrl(query: ImageQueryParams): string {
-  const qs = toQueryString(query);
-  return `/images?${qs}`;
+export function fetchImages(query: ImageQueryParams, fetcher: typeof fetch = fetch): Promise<ImageListResponse> {
+  return fetchApi<ImageListResponse>(`/api/images?${toQueryString(query)}`, "Failed to load images", fetcher);
 }
 
 export function useImages() {
@@ -98,8 +61,7 @@ export function useImages() {
     setError(null);
 
     try {
-      const result = await fetchImages(nextQuery);
-      setData(result);
+      setData(await fetchImages(nextQuery));
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to load images");
       setData(null);
@@ -113,7 +75,7 @@ export function useImages() {
   }, [load, query]);
 
   useEffect(() => {
-    const nextUrl = buildUrl(query);
+    const nextUrl = `/images?${toQueryString(query)}`;
     const currentUrl = `${window.location.pathname}${window.location.search}`;
     if (currentUrl !== nextUrl) {
       window.history.pushState({}, "", nextUrl);
@@ -121,10 +83,7 @@ export function useImages() {
   }, [query]);
 
   useEffect(() => {
-    const onPopState = () => {
-      setQuery(parseImageParams());
-    };
-
+    const onPopState = () => setQuery(parseImageParams());
     window.addEventListener("popstate", onPopState);
     return () => window.removeEventListener("popstate", onPopState);
   }, []);
@@ -137,12 +96,5 @@ export function useImages() {
     await load(query);
   }, [load, query]);
 
-  return {
-    query,
-    data,
-    loading,
-    error,
-    retry,
-    setFilters,
-  };
+  return { query, data, loading, error, retry, setFilters };
 }

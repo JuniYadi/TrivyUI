@@ -1,4 +1,5 @@
 import type { Database } from "bun:sqlite";
+import { ensureTrivyIgnoreSchema } from "./trivy-ignore-schema";
 
 export type TrivyIgnoreScope = "all_tags" | "selected_tags";
 
@@ -125,76 +126,165 @@ export function deleteTrivyIgnore(db: Database, id: number): boolean {
   return Number(result.changes ?? 0) > 0;
 }
 
-export function generateTrivyIgnoreText(db: Database, repoName?: string | null, tag?: string | null): string {
+interface ResolvedIgnore {
+  active: Set<string>;
+  /** CVE ids of global rules switched off for the requested repository */
+  excluded: Set<string>;
+}
+
+function resolveIgnores(db: Database, repoName?: string | null, tag?: string | null): ResolvedIgnore {
+  ensureTrivyIgnoreSchema(db);
   const now = new Date().toISOString();
   const activeDateClause = "(ti.expires_at IS NULL OR ti.expires_at >= ?1)";
 
-  const result = new Set<string>();
+  const active = new Set<string>();
+  const excluded = new Set<string>();
+
+  const trimmedRepo = typeof repoName === "string" ? repoName.trim() : "";
+  const repositoryRow = trimmedRepo
+    ? db.query<{ id: number }>("SELECT id FROM repositories WHERE name = ?1").get(trimmedRepo)
+    : null;
+  const repoId = repositoryRow ? Number(repositoryRow.id) : null;
 
   const globalRows = db
-    .query<{ cve_id: string }>(
-      `SELECT DISTINCT cve_id FROM trivy_ignores ti WHERE ti.repository_id IS NULL AND ${activeDateClause} ORDER BY ti.cve_id`,
+    .query<{ cve_id: string; id: number; skipped: number }>(
+      `SELECT ti.cve_id, ti.id,
+        EXISTS (SELECT 1 FROM trivy_ignore_exclusions e WHERE e.ignore_id = ti.id AND e.repository_id = ?2) AS skipped
+       FROM trivy_ignores ti WHERE ti.repository_id IS NULL AND ${activeDateClause} ORDER BY ti.cve_id`,
     )
-    .all(now);
+    .all(now, repoId);
 
   for (const row of globalRows) {
-    result.add(row.cve_id);
-  }
-
-  if (!repoName || typeof repoName !== "string" || repoName.trim().length === 0) {
-    return toIgnoreText(result);
-  }
-
-  const repositoryRow = db.query<{ id: number }>("SELECT id FROM repositories WHERE name = ?1").get(repoName.trim());
-  if (!repositoryRow) {
-    return toIgnoreText(result);
-  }
-
-  const repoId = Number(repositoryRow.id);
-
-  const repoAllTags = db
-    .query<{ cve_id: string }>(
-      `
-      SELECT DISTINCT cve_id
-      FROM trivy_ignores ti
-      WHERE ti.repository_id = ?2
-        AND ti.scope = 'all_tags'
-        AND ${activeDateClause}
-      ORDER BY ti.cve_id
-    `,
-    )
-    .all(now, repoId);
-
-  for (const row of repoAllTags) {
-    result.add(row.cve_id);
-  }
-
-  if (!tag || typeof tag !== "string" || tag.trim().length === 0) {
-    return toIgnoreText(result);
-  }
-
-  const selectedRows = db
-    .query<{ cve_id: string; tag_group: string }>(
-      `
-      SELECT DISTINCT ti.cve_id, t.tag_group
-      FROM trivy_ignores ti
-      JOIN trivy_ignore_tags t ON t.ignore_id = ti.id
-      WHERE ti.repository_id = ?2
-        AND ti.scope = 'selected_tags'
-        AND ${activeDateClause}
-      ORDER BY ti.cve_id, t.tag_group
-    `,
-    )
-    .all(now, repoId);
-
-  const normalizedTag = tag.trim();
-  for (const row of selectedRows) {
-    if (globMatch(normalizedTag, row.tag_group)) {
-      result.add(row.cve_id);
+    if (row.skipped) {
+      excluded.add(row.cve_id);
+    } else {
+      active.add(row.cve_id);
     }
   }
 
-  return toIgnoreText(result);
+  if (repoId !== null) {
+    const repoAllTags = db
+      .query<{ cve_id: string }>(
+        `SELECT DISTINCT cve_id FROM trivy_ignores ti
+         WHERE ti.repository_id = ?2 AND ti.scope = 'all_tags' AND ${activeDateClause} ORDER BY ti.cve_id`,
+      )
+      .all(now, repoId);
+    for (const row of repoAllTags) {
+      active.add(row.cve_id);
+    }
+
+    if (typeof tag === "string" && tag.trim().length > 0) {
+      const selectedRows = db
+        .query<{ cve_id: string; tag_group: string }>(
+          `SELECT DISTINCT ti.cve_id, t.tag_group FROM trivy_ignores ti
+           JOIN trivy_ignore_tags t ON t.ignore_id = ti.id
+           WHERE ti.repository_id = ?2 AND ti.scope = 'selected_tags' AND ${activeDateClause}
+           ORDER BY ti.cve_id, t.tag_group`,
+        )
+        .all(now, repoId);
+      const normalizedTag = tag.trim();
+      for (const row of selectedRows) {
+        if (globMatch(normalizedTag, row.tag_group)) {
+          active.add(row.cve_id);
+        }
+      }
+    }
+  }
+
+  for (const cve of active) {
+    excluded.delete(cve);
+  }
+  return { active, excluded };
+}
+
+export function generateTrivyIgnoreText(db: Database, repoName?: string | null, tag?: string | null): string {
+  return toIgnoreText(resolveIgnores(db, repoName, tag).active);
+}
+
+/** Same content as the generate endpoint, plus comments explaining excluded lines (preview only). */
+export function previewTrivyIgnoreText(db: Database, repoName?: string | null, tag?: string | null): string {
+  const { active, excluded } = resolveIgnores(db, repoName, tag);
+  const lines = [`# .trivyignore for ${repoName ?? "all repositories"}${tag ? `:${tag}` : ""}`];
+  for (const cve of [...excluded].sort()) {
+    lines.push(`# ${cve} not listed: global rule disabled for this repository`);
+  }
+  lines.push(...active);
+  return `${lines.join("\n")}\n`;
+}
+
+export function deleteTrivyIgnores(db: Database, ids: number[]): number {
+  let removed = 0;
+  db.transaction(() => {
+    for (const id of ids) {
+      if (deleteTrivyIgnore(db, id)) removed += 1;
+    }
+  })();
+  return removed;
+}
+
+/**
+ * Stop ignoring selected rules for selected repositories.
+ * Global rule -> recorded as an exclusion ("all repos except X").
+ * Repository rule for a selected repo -> deleted.
+ */
+export function stopIgnoringForRepos(
+  db: Database,
+  ruleIds: number[],
+  repositoryIds: number[],
+): { excluded: number; deleted: number } {
+  ensureTrivyIgnoreSchema(db);
+  const rules = listTrivyIgnores(db).filter((r) => ruleIds.includes(r.id));
+  let excluded = 0;
+  let deleted = 0;
+  db.transaction(() => {
+    for (const rule of rules) {
+      if (rule.repository_id === null) {
+        for (const repoId of repositoryIds) {
+          const res = db
+            .query("INSERT OR IGNORE INTO trivy_ignore_exclusions (ignore_id, repository_id) VALUES (?1, ?2)")
+            .run(rule.id, repoId);
+          excluded += Number(res.changes ?? 0);
+        }
+      } else if (repositoryIds.includes(rule.repository_id) && deleteTrivyIgnore(db, rule.id)) {
+        deleted += 1;
+      }
+    }
+  })();
+  return { excluded, deleted };
+}
+
+/** Import .trivyignore text as global rules. Supports `# comments` and Trivy's `ID exp:YYYY-MM-DD`. */
+export function importTrivyIgnoreText(db: Database, text: string): { created: number; skipped: number } {
+  ensureTrivyIgnoreSchema(db);
+  let created = 0;
+  let skipped = 0;
+  const existing = new Set(
+    listTrivyIgnores(db)
+      .filter((r) => r.repository_id === null)
+      .map((r) => r.cve_id.toLowerCase()),
+  );
+
+  for (const rawLine of String(text ?? "").split(/\r?\n/)) {
+    const line = rawLine.replace(/#.*$/, "").trim();
+    if (!line) continue;
+    const [id, ...rest] = line.split(/\s+/);
+    if (!id || !/^[A-Za-z0-9][A-Za-z0-9._:/-]*$/.test(id) || existing.has(id.toLowerCase())) {
+      skipped += 1;
+      continue;
+    }
+    const exp = rest.find((t) => t.startsWith("exp:"))?.slice(4) ?? null;
+    const expiresAt = exp && Number.isFinite(Date.parse(exp)) ? exp : null;
+    createTrivyIgnore(db, {
+      cve_id: id,
+      repository_id: null,
+      scope: "all_tags",
+      reason: "Imported from .trivyignore",
+      expires_at: expiresAt,
+    });
+    existing.add(id.toLowerCase());
+    created += 1;
+  }
+  return { created, skipped };
 }
 
 function toIgnoreText(values: Set<string>): string {
@@ -203,7 +293,7 @@ function toIgnoreText(values: Set<string>): string {
 }
 
 function globMatch(value: string, pattern: string): boolean {
-  const escaped = pattern.replace(/[.+^${}()|[\]\\]/g, "\\$");
+  const escaped = pattern.replace(/[.+^${}()|[\]\\]/g, "\\$&");
   const regex = new RegExp(`^${escaped.replace(/\*/g, ".*")}$`);
   return regex.test(value);
 }

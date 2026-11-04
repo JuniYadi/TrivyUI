@@ -1,34 +1,18 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { AppShell } from "../components/app-shell";
-import { CveDetailDrawer, type CveDetailDrawerData } from "../components/cve-detail-drawer";
-import { EmptyState } from "../components/empty-state";
 import { ErrorBanner } from "../components/error-banner";
-import { useTrivyIgnores, validateResponseErrorMessage } from "../hooks/use-trivy-ignores";
+import { Button } from "../components/ui/button";
+import { Card } from "../components/ui/card";
+import { Mono } from "../components/ui/mono";
+import { navigate } from "../lib/navigation";
+import { useTrivyIgnores, validateResponseErrorMessage, type RuleOverview, type RuleRepoStatus } from "../hooks/use-trivy-ignores";
 import {
   fetchVulnerabilityCatalog,
   fetchVulnerabilityCatalogFromUpstream,
-  type VulnerabilityCatalogResponse,
   type VulnerabilityCatalogStatus,
 } from "../hooks/use-vulnerability-catalog";
-import { fetchVulnerabilityDetail } from "../hooks/use-vulnerabilities";
 import type { TrivyIgnoreRow } from "../services/trivy-ignore";
-import type { VulnerabilityListResponse, VulnerabilityWithRelations } from "../services/types";
 import { formatRepositoryName } from "../utils/format-repository-name";
-
-interface ApiSuccess<T> {
-  success: true;
-  data: T;
-}
-
-interface ApiFailure {
-  success: false;
-  error?: {
-    code?: string;
-    message?: string;
-  };
-}
-
-type ApiResponse<T> = ApiSuccess<T> | ApiFailure;
 
 function ScopeLabel(scope: TrivyIgnoreRow["scope"]): string {
   return scope === "selected_tags" ? "Selected tags" : "All tags";
@@ -66,133 +50,40 @@ function toRepositoryUrl(repositoryName: string): string {
   return `/repositories/by-name/${encodeURIComponent(repositoryName)}`;
 }
 
-export function pickTrivyIgnoreCveCandidate(items: VulnerabilityWithRelations[], repositoryName?: string | null): VulnerabilityWithRelations | null {
-  const normalizedRepo = repositoryName?.trim().toLowerCase();
-  if (normalizedRepo) {
-    const exactMatch = items.find((item) => item.repository.name.trim().toLowerCase() === normalizedRepo);
-    if (exactMatch) {
-      return exactMatch;
-    }
-  }
-
-  return items[0] || null;
-}
-
-function toDrawerDataFromVulnerability(item: VulnerabilityWithRelations): CveDetailDrawerData {
-  return {
-    cve_id: item.cve_id,
-    severity: item.severity,
-    package_name: item.package_name,
-    installed_version: item.installed_version,
-    fixed_version: item.fixed_version,
-    score: item.score,
-    repository: item.repository,
-    image: item.image,
-    title: item.title,
-    description: item.description,
-    source_label: "scan",
-  };
-}
-
-function toDrawerDataFromCatalog(item: VulnerabilityCatalogResponse): CveDetailDrawerData {
-  const aliasesList = Array.isArray(item.aliases) ? item.aliases : [];
-  const referencesList = Array.isArray(item.references) ? item.references : [];
-  const aliases = aliasesList.length > 0 ? `Aliases: ${aliasesList.join(", ")}` : "";
-  const refs = referencesList.length > 0 ? referencesList.map((ref) => `- ${ref}`).join("\n") : "";
-  const fallbackDescription = [item.description, aliases, refs].filter((chunk) => Boolean(chunk)).join("\n\n");
-
-  return {
-    cve_id: item.vuln_id,
-    severity: item.severity,
-    package_name: null,
-    installed_version: null,
-    fixed_version: null,
-    score: item.cvss,
-    repository: null,
-    image: null,
-    title: item.summary,
-    description: fallbackDescription || item.last_error || "No description available",
-    source_label: item.source,
-    verification_status: item.verification_status,
-  };
-}
-
-async function fetchVulnerabilityMatches(
-  cveId: string,
-  repositoryName?: string | null,
-  fetcher: typeof fetch = fetch,
-): Promise<VulnerabilityWithRelations[]> {
-  const params = new URLSearchParams({
-    cve_id: cveId,
-    state: "all",
-    page: "1",
-    limit: "50",
-    sort: "scanned_at",
-    order: "desc",
-  });
-
-  if (repositoryName?.trim()) {
-    params.set("repository", repositoryName.trim());
-  }
-
-  const response = await fetcher(`/api/vulnerabilities?${params.toString()}`);
-
-  let payload: ApiResponse<VulnerabilityListResponse> | null = null;
-  try {
-    payload = (await response.json()) as ApiResponse<VulnerabilityListResponse>;
-  } catch {
-    throw new Error("Failed to load vulnerability detail");
-  }
-
-  if (!response.ok || !payload || payload.success !== true) {
-    throw new Error(payload?.error?.message || "Failed to load vulnerability detail");
-  }
-
-  return payload.data.items;
-}
-
-export async function fetchTrivyIgnoreCveDetail(
-  cveId: string,
-  repositoryName?: string | null,
-  fetcher: typeof fetch = fetch,
-): Promise<CveDetailDrawerData> {
-  const normalizedVuln = cveId.trim();
-  if (!normalizedVuln) {
-    throw new Error("Vulnerability ID is required");
-  }
-
-  const scopedItems = repositoryName?.trim() ? await fetchVulnerabilityMatches(normalizedVuln, repositoryName, fetcher) : [];
-  let candidate = pickTrivyIgnoreCveCandidate(scopedItems, repositoryName);
-
-  if (!candidate) {
-    const fallbackItems = await fetchVulnerabilityMatches(normalizedVuln, undefined, fetcher);
-    candidate = pickTrivyIgnoreCveCandidate(fallbackItems);
-  }
-
-  if (candidate) {
-    const detail = await fetchVulnerabilityDetail(candidate.id, fetcher);
-    return toDrawerDataFromVulnerability(detail);
-  }
-
-  try {
-    const catalogDetail = await fetchVulnerabilityCatalog(normalizedVuln, fetcher);
-    if (
-      catalogDetail.verification_status !== "verified" &&
-      catalogDetail.verification_status !== "invalid" &&
-      catalogDetail.verification_status !== "unverified"
-    ) {
-      throw new Error("No vulnerability detail found for this vulnerability ID.");
-    }
-
-    return toDrawerDataFromCatalog(catalogDetail);
-  } catch {
-    throw new Error("No vulnerability detail found for this vulnerability ID.");
-  }
-}
-
 interface TrivyIgnoreRepository {
   id: number;
   name: string;
+}
+
+export type IgnoreListItem = TrivyIgnoreRow & Partial<RuleOverview>;
+type StatusFilter = "all" | "partly_fixed" | "safe_to_remove" | "expiring";
+type ScopeFilter = "any" | "global" | "repo" | "tags";
+
+function scopeKind(row: TrivyIgnoreRow): "global" | "repo" | "tags" {
+  if (row.repository_id === null) return "global";
+  return row.scope === "selected_tags" ? "tags" : "repo";
+}
+
+const SCOPE_PILL: Record<"global" | "repo" | "tags", { label: string; className: string }> = {
+  global: { label: "GLOBAL", className: "bg-purple-500/15 text-purple-400" },
+  repo: { label: "REPO", className: "bg-accent/15 text-link" },
+  tags: { label: "TAG GROUPS", className: "bg-warning/15 text-warning" },
+};
+
+const REPO_STATUS_LABEL: Record<string, string> = {
+  still_present: "Still present",
+  fixed: "Fixed: gone from latest scan",
+  no_scan: "No scan since rule was created",
+  unknown: "Scan without --show-suppressed",
+};
+
+const UNKNOWN_STATUS_TIP =
+  "Trivy hides ignored findings unless the scan runs with --show-suppressed, so a missing CVE does not prove it is fixed. Add --show-suppressed to your CI trivy command (see Generate file example below).";
+
+function tagOf(imageName: string): string {
+  const slash = imageName.lastIndexOf("/");
+  const colon = imageName.lastIndexOf(":");
+  return colon > slash ? imageName.slice(colon + 1) : "latest";
 }
 
 interface TrivyIgnoreListPanelProps {
@@ -200,7 +91,7 @@ interface TrivyIgnoreListPanelProps {
   repositories: TrivyIgnoreRepository[];
   loading: boolean;
   error: string | null;
-  items: TrivyIgnoreRow[];
+  items: IgnoreListItem[];
   statusByVulnId: Record<string, VulnerabilityCatalogStatus>;
   fetchingByVulnId: Record<string, boolean>;
   deletingId: number | null;
@@ -208,7 +99,121 @@ interface TrivyIgnoreListPanelProps {
   onRetry: () => void;
   onDelete: (id: number) => void;
   onFetchDetail: (row: TrivyIgnoreRow) => void;
-  onOpenCveDetail: (row: TrivyIgnoreRow) => void;
+  onBulkDelete?: (ids: number[]) => Promise<void> | void;
+  onStopIgnoring?: (ruleIds: number[], repositoryIds: number[]) => Promise<void> | void;
+  loadRepos?: (ruleId: number) => Promise<RuleRepoStatus[]>;
+  onPreviewTarget?: (repo: string, tag: string) => void;
+  onAddRule?: () => void;
+}
+
+function RuleRepos({
+  rule,
+  loadRepos,
+  onStopIgnoring,
+  onPreviewTarget,
+}: {
+  rule: IgnoreListItem;
+  loadRepos?: (ruleId: number) => Promise<RuleRepoStatus[]>;
+  onStopIgnoring?: (ruleIds: number[], repositoryIds: number[]) => Promise<void> | void;
+  onPreviewTarget?: (repo: string, tag: string) => void;
+}) {
+  const [repos, setRepos] = useState<RuleRepoStatus[] | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [picked, setPicked] = useState<number[]>([]);
+  const [busy, setBusy] = useState(false);
+
+  async function reload() {
+    if (!loadRepos) return;
+    try {
+      setRepos(await loadRepos(rule.id));
+      setError(null);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to load repositories");
+    }
+  }
+
+  useEffect(() => {
+    void reload();
+  }, [rule.id, rule.excluded_repository_ids?.length]);
+
+  if (error) return <p className="m-0 px-4 py-3 text-sm text-red-500">{error}</p>;
+  if (!repos) return <p className="m-0 px-4 py-3 text-sm text-muted">Loading repositories...</p>;
+
+  const active = repos.filter((r) => !r.excluded);
+  const excluded = repos.filter((r) => r.excluded);
+
+  async function stop(ids: number[]) {
+    if (!onStopIgnoring || ids.length === 0) return;
+    setBusy(true);
+    try {
+      await onStopIgnoring([rule.id], ids);
+      setPicked([]);
+      await reload();
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="border-t border-rowline bg-bg/40 px-3 py-3 sm:px-4" data-testid="rule-repos">
+      <ul className="m-0 list-none p-0">
+        {active.map((repo) => {
+          const group = repo.tag_groups[0];
+          const version = repo.status === "fixed" ? repo.last_seen_version : repo.installed_version;
+          return (
+            <li key={repo.repository_id} className="flex flex-wrap items-center gap-x-3 gap-y-1 border-b border-rowline py-1 last:border-0">
+              <label className="flex min-h-11 min-w-11 cursor-pointer items-center justify-center">
+                <input
+                  type="checkbox"
+                  aria-label={`Select ${repo.repository_name}`}
+                  checked={picked.includes(repo.repository_id)}
+                  onChange={(e) =>
+                    setPicked((prev) => (e.target.checked ? [...prev, repo.repository_id] : prev.filter((id) => id !== repo.repository_id)))
+                  }
+                />
+              </label>
+              <a
+                href={toRepositoryUrl(repo.repository_name)}
+                className="min-w-0 flex-1 basis-40 truncate text-link hover:underline"
+                title={repo.repository_name}
+                onClick={() => group && onPreviewTarget?.(repo.repository_name, tagOf(group.image_name))}
+              >
+                {formatRepositoryName(repo.repository_name, 28)}
+              </a>
+              <Mono className="text-xs text-muted">{group ? tagOf(group.image_name) : "-"}</Mono>
+              <Mono className={`text-xs ${repo.status === "fixed" ? "text-success" : ""}`}>{version ?? "-"}</Mono>
+              <span
+                title={repo.status === "unknown" ? UNKNOWN_STATUS_TIP : undefined}
+                className={`text-sm ${repo.status === "unknown" ? "text-muted" : repo.status === "fixed" ? "text-success" : repo.status === "still_present" ? "text-warning" : "text-fg2"}`}
+              >
+                {repo.status === "fixed" && repo.last_seen_version ? `Fixed (was ${repo.last_seen_version})` : REPO_STATUS_LABEL[repo.status ?? "no_scan"]}
+                {repo.status === "still_present" && repo.suppressed ? " (suppressed)" : ""}
+              </span>
+              {onStopIgnoring && (
+                <Button className="ml-auto min-h-11" disabled={busy} onClick={() => void stop([repo.repository_id])}>
+                  Stop ignoring
+                </Button>
+              )}
+            </li>
+          );
+        })}
+        {active.length === 0 && <li className="py-2 text-sm text-muted">No repositories use this rule.</li>}
+      </ul>
+      {excluded.length > 0 && (
+        <p className="mb-0 mt-2 text-xs text-muted">Not ignored in: {excluded.map((r) => r.repository_name).join(", ")}</p>
+      )}
+      {onStopIgnoring && picked.length > 0 && (
+        <div className="mt-3 text-sm">
+          <p className="m-0 text-fg2">
+            {picked.length} {picked.length === 1 ? "repo" : "repos"} selected. A global rule becomes "all repos except" them; a repository rule is removed. The next scan reports the CVE again if it is still there.
+          </p>
+          <Button variant="primary" className="mt-2 min-h-11" disabled={busy} onClick={() => void stop(picked)}>
+            Stop ignoring in {picked.length} {picked.length === 1 ? "repo" : "repos"}
+          </Button>
+        </div>
+      )}
+    </div>
+  );
 }
 
 export function TrivyIgnoreListPanel({
@@ -224,137 +229,374 @@ export function TrivyIgnoreListPanel({
   onRetry,
   onDelete,
   onFetchDetail,
-  onOpenCveDetail,
+  onBulkDelete,
+  onStopIgnoring,
+  loadRepos,
+  onPreviewTarget,
+  onAddRule,
 }: TrivyIgnoreListPanelProps) {
+  const [search, setSearch] = useState("");
+  const [scopeFilter, setScopeFilter] = useState<ScopeFilter>("any");
+  const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
+  const [selected, setSelected] = useState<number[]>([]);
+  const [expanded, setExpanded] = useState<number | null>(null);
+  const [removeRepoId, setRemoveRepoId] = useState("");
+  const [bulkBusy, setBulkBusy] = useState(false);
+
+  const counts = useMemo(
+    () => ({
+      all: items.length,
+      partly_fixed: items.filter((r) => r.partly_fixed).length,
+      safe_to_remove: items.filter((r) => r.safe_to_remove).length,
+      expiring: items.filter((r) => r.expiring).length,
+    }),
+    [items],
+  );
+
+  const visible = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    return items.filter((row) => {
+      if (scopeFilter !== "any" && scopeKind(row) !== scopeFilter) return false;
+      if (statusFilter !== "all" && !row[statusFilter]) return false;
+      if (!q) return true;
+      return [row.cve_id, row.package_name ?? "", row.reason ?? ""].some((v) => v.toLowerCase().includes(q));
+    });
+  }, [items, search, scopeFilter, statusFilter]);
+
   const hasRows = items.length > 0;
+  const selectedRows = items.filter((r) => selected.includes(r.id));
+  const allSelected = visible.length > 0 && visible.every((r) => selected.includes(r.id));
+
+  async function bulkDelete() {
+    if (!onBulkDelete || selected.length === 0) return;
+    if (typeof window !== "undefined" && !window.confirm(`Delete ${selected.length} rule${selected.length === 1 ? "" : "s"}?`)) return;
+    setBulkBusy(true);
+    try {
+      await onBulkDelete(selected);
+      setSelected([]);
+    } finally {
+      setBulkBusy(false);
+    }
+  }
+
+  async function bulkRemoveFromRepo() {
+    const repoId = Number(removeRepoId);
+    if (!onStopIgnoring || !Number.isInteger(repoId) || repoId <= 0) return;
+    setBulkBusy(true);
+    try {
+      await onStopIgnoring(selected, [repoId]);
+      setSelected([]);
+      setRemoveRepoId("");
+    } finally {
+      setBulkBusy(false);
+    }
+  }
+
+  const chip = (key: StatusFilter, label: string, count: number, tone = "") => (
+    <button
+      key={key}
+      type="button"
+      aria-pressed={statusFilter === key}
+      onClick={() => setStatusFilter(key)}
+      className={`min-h-11 rounded-lg border px-3 text-sm font-medium ${statusFilter === key ? "border-accent bg-accent/15 text-fg" : `border-line bg-card ${tone || "text-fg2"} hover:border-accent`}`}
+    >
+      {label} {count}
+    </button>
+  );
+
+  const selectClass = "min-h-11 rounded-lg border border-line bg-card px-3 text-sm text-fg focus:border-accent focus:outline-none";
 
   return (
-    <section className="mt-4 rounded-xl border border-slate-700 bg-slate-900/90 p-4 shadow-inner">
-      <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-        <h2 className="text-base font-semibold">Ignore list</h2>
-        <label className="grid gap-1">
-          <span className="text-xs font-semibold uppercase tracking-wide text-slate-400">Repository filter</span>
-          <select
-            value={repoFilter}
-            onChange={(event) => onRepoFilterChange(event.target.value)}
-            className="rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-slate-200 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/50"
-          >
-            <option value="">All repositories</option>
-            {repositories.map((repo) => (
-              <option key={repo.id} value={repo.id}>
-                {repo.name}
-              </option>
-            ))}
-          </select>
-        </label>
+    <section className="min-w-0" aria-label="Ignore rules">
+      <div className="mb-3 flex flex-wrap items-center gap-2">
+        <input
+          type="search"
+          aria-label="Search rules"
+          placeholder="CVE, package or reason"
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          className="min-h-11 min-w-0 flex-1 basis-56 rounded-lg border border-line bg-card px-3 text-sm placeholder:text-muted focus:border-accent focus:outline-none"
+        />
+        <select aria-label="Repository filter" value={repoFilter} onChange={(e) => onRepoFilterChange(e.target.value)} className={selectClass}>
+          <option value="">Repository: all</option>
+          {repositories.map((repo) => (
+            <option key={repo.id} value={repo.id}>
+              {repo.name}
+            </option>
+          ))}
+        </select>
+        <select aria-label="Scope filter" value={scopeFilter} onChange={(e) => setScopeFilter(e.target.value as ScopeFilter)} className={selectClass}>
+          <option value="any">Scope: any</option>
+          <option value="global">Global</option>
+          <option value="repo">Repository</option>
+          <option value="tags">Tag groups</option>
+        </select>
+      </div>
+      <div className="mb-3 flex flex-wrap gap-2" role="group" aria-label="Status filter">
+        {chip("all", "All", counts.all)}
+        {chip("partly_fixed", "Partly fixed", counts.partly_fixed)}
+        {chip("safe_to_remove", "Safe to remove", counts.safe_to_remove, "text-success")}
+        {chip("expiring", "Expiring", counts.expiring, "text-warning")}
       </div>
 
-      {loading && !error && <p className="py-4 text-sm text-slate-400">Loading ignore rules...</p>}
+      {loading && !error && <p className="py-4 text-sm text-muted">Loading ignore rules...</p>}
       {error && <ErrorBanner message={error} onRetry={onRetry} />}
-      {!loading && !error && !hasRows && <EmptyState />}
-      {!loading && !error && hasRows && (
-        <section className="overflow-x-auto rounded-lg border border-slate-700 bg-slate-950/60">
-          <table className="w-full min-w-[1360px] table-fixed border-collapse text-sm">
-            <thead>
-              <tr className="border-b border-slate-700 text-left text-slate-300">
-                <th className="w-[150px] px-3 py-2">Vulnerability ID</th>
-                <th className="w-[210px] px-3 py-2">Repository</th>
-                <th className="w-[220px] px-3 py-2">Scope / Tags</th>
-                <th className="w-[180px] px-3 py-2">Reason</th>
-                <th className="w-[120px] px-3 py-2 whitespace-nowrap">Verification</th>
-                <th className="w-[160px] px-3 py-2 whitespace-nowrap">Expires</th>
-                <th className="w-[170px] px-3 py-2 whitespace-nowrap">Created</th>
-                <th className="w-[170px] px-3 py-2">Action</th>
-              </tr>
-            </thead>
-            <tbody>
-              {items.map((row) => {
-                const status = statusByVulnId[row.cve_id] || "missing";
-                const statusClass =
-                  status === "verified"
-                    ? "border-emerald-600/50 bg-emerald-950/30 text-emerald-200"
-                    : status === "unverified"
-                      ? "border-amber-600/50 bg-amber-950/30 text-amber-200"
-                      : status === "invalid"
-                        ? "border-rose-600/50 bg-rose-950/30 text-rose-200"
-                        : "border-slate-600/50 bg-slate-900/70 text-slate-300";
+      {!loading && !error && !hasRows && (
+        <Card className="border-dashed text-center">
+          <h2 className="mt-0 text-lg font-semibold">No ignore rules yet</h2>
+          <p className="text-fg2">Ignore a CVE from a vulnerability, add a rule, or import an existing .trivyignore file.</p>
+          {onAddRule && (
+            <Button variant="primary" className="min-h-11" onClick={onAddRule}>
+              New rule
+            </Button>
+          )}
+        </Card>
+      )}
+      {!loading && !error && hasRows && visible.length === 0 && <p className="py-4 text-sm text-muted">No rules match these filters.</p>}
 
-                return (
-                  <tr key={row.id} className="border-b border-slate-800 last:border-0">
-                    <td className="px-3 py-2">
-                      <button
-                        type="button"
-                        className="max-w-full truncate font-semibold text-blue-300 hover:text-blue-200 hover:underline"
-                        title={row.cve_id}
-                        onClick={() => onOpenCveDetail(row)}
-                      >
-                        {row.cve_id}
-                      </button>
-                    </td>
-                    <td className="px-3 py-2">
-                      {row.repository_id === null || !row.repository_name ? (
-                        <span className="block max-w-full truncate" title={repositoryLabel(row)}>
-                          {repositoryLabel(row)}
-                        </span>
-                      ) : (
+      {!loading && !error && visible.length > 0 && (
+        <Card className="overflow-hidden p-0">
+          {selected.length > 0 && (
+            <div className="flex flex-wrap items-center gap-2 border-b border-line bg-accent/10 px-3 py-2" role="region" aria-label="Bulk actions">
+              <span className="text-sm font-semibold">
+                {selected.length} {selected.length === 1 ? "rule" : "rules"} selected
+              </span>
+              {selectedRows.length > 0 && selectedRows.every((r) => r.safe_to_remove) && <span className="text-sm text-muted">fixed everywhere</span>}
+              <div className="ml-auto flex flex-wrap items-center gap-2">
+                {onStopIgnoring && (
+                  <>
+                    <select aria-label="Repository to remove from" value={removeRepoId} onChange={(e) => setRemoveRepoId(e.target.value)} className={selectClass}>
+                      <option value="">Remove from a repository...</option>
+                      {repositories.map((repo) => (
+                        <option key={repo.id} value={repo.id}>
+                          {repo.name}
+                        </option>
+                      ))}
+                    </select>
+                    <Button className="min-h-11" disabled={!removeRepoId || bulkBusy} onClick={() => void bulkRemoveFromRepo()}>
+                      Remove
+                    </Button>
+                  </>
+                )}
+                {onBulkDelete && (
+                  <Button
+                    className="min-h-11 border-red-500/50 bg-red-500/10 text-red-500 hover:border-red-500"
+                    disabled={bulkBusy}
+                    onClick={() => void bulkDelete()}
+                  >
+                    Delete {selected.length} {selected.length === 1 ? "rule" : "rules"}
+                  </Button>
+                )}
+              </div>
+            </div>
+          )}
+
+          <div className="overflow-x-auto">
+          <div className="min-w-[1120px]">
+          <div className="flex items-center gap-3 border-b border-line px-3 text-xs font-semibold uppercase tracking-wide text-muted">
+            <label className="flex min-h-11 min-w-11 cursor-pointer items-center justify-center">
+              <input
+                type="checkbox"
+                aria-label="Select all rules"
+                checked={allSelected}
+                onChange={(e) => setSelected(e.target.checked ? visible.map((r) => r.id) : [])}
+              />
+            </label>
+            <span className="min-w-0 flex-[1.3] basis-80">Rule</span>
+            <span className="min-w-0 flex-1 basis-44">Applies to</span>
+            <span className="min-w-0 flex-[1.3] basis-52">Status in latest scans</span>
+            <span className="w-24 shrink-0">Expires</span>
+            <span className="w-48 shrink-0" aria-hidden="true" />
+          </div>
+
+          <ul className="m-0 list-none p-0">
+            {visible.map((row) => {
+              const status = statusByVulnId[row.cve_id] || "missing";
+              const kind = scopeKind(row);
+              const pill = SCOPE_PILL[kind];
+              const open = expanded === row.id;
+              const summary = row.summary;
+              return (
+                <li key={row.id} className="border-b border-rowline last:border-0">
+                  <div className="flex items-start gap-3 px-3 py-2">
+                    <label className="flex min-h-11 min-w-11 cursor-pointer items-center justify-center">
+                      <input
+                        type="checkbox"
+                        aria-label={`Select ${row.cve_id}`}
+                        checked={selected.includes(row.id)}
+                        onChange={(e) => setSelected((prev) => (e.target.checked ? [...prev, row.id] : prev.filter((id) => id !== row.id)))}
+                      />
+                    </label>
+                    <div className="min-w-0 flex-[1.3] basis-80">
+                      <div className="flex items-center gap-1">
+                        <button
+                          type="button"
+                          aria-expanded={open}
+                          aria-label={open ? "Collapse repositories" : "Expand repositories"}
+                          className="inline-flex min-h-11 min-w-8 shrink-0 items-center justify-center text-fg2"
+                          onClick={() => setExpanded(open ? null : row.id)}
+                        >
+                          {open ? "▾" : "▸"}
+                        </button>
                         <a
-                          className="block max-w-full truncate text-blue-400 hover:text-blue-300 hover:underline"
-                          href={toRepositoryUrl(row.repository_name)}
-                          title={row.repository_name}
+                          href={`/vulnerabilities/${encodeURIComponent(row.cve_id)}`}
+                          className="min-w-0 truncate font-mono font-semibold text-link hover:underline"
+                          title={row.cve_id}
                         >
-                          {formatRepositoryName(row.repository_name, 28)}
+                          {row.cve_id}
                         </a>
-                      )}
-                    </td>
-                    <td className="px-3 py-2">
-                      <div className="truncate" title={ScopeLabel(row.scope)}>{ScopeLabel(row.scope)}</div>
+                        <span className="ml-1 shrink-0 rounded border border-line px-1.5 text-[11px] uppercase text-muted">{status}</span>
+                      </div>
+                      {row.package_name && <p className="m-0 pl-8 text-sm font-semibold">{row.package_name}</p>}
+                      <p className="m-0 truncate pl-8 text-sm text-fg2" title={row.reason || "-"}>
+                        {row.reason ? `"${row.reason}"` : "-"}
+                      </p>
+                    </div>
+                    <div className="min-w-0 flex-1 basis-44">
+                      <span className={`rounded px-1.5 py-0.5 text-[11px] font-bold ${pill.className}`}>{pill.label}</span>
+                      <div className="mt-1 text-sm">
+                        {row.repository_id === null || !row.repository_name ? (
+                          <span title={repositoryLabel(row)}>
+                            {repositoryLabel(row)}
+                            {summary ? ` (${summary.total} repos)` : ""}
+                          </span>
+                        ) : (
+                          <a className="text-link hover:underline" href={toRepositoryUrl(row.repository_name)} title={row.repository_name}>
+                            {formatRepositoryName(row.repository_name, 28)}
+                          </a>
+                        )}
+                        <span className="text-fg2"> · {ScopeLabel(row.scope)}</span>
+                      </div>
                       {row.scope === "selected_tags" && (
-                        <div
-                          className="mt-1 truncate text-xs text-slate-400"
-                          title={(row.tag_groups || []).join(", ") || "-"}
-                        >
+                        <div className="truncate text-xs text-muted" title={(row.tag_groups || []).join(", ") || "-"}>
                           {(row.tag_groups || []).join(", ") || "-"}
                         </div>
                       )}
-                    </td>
-                    <td className="px-3 py-2">
-                      <span className="block truncate" title={row.reason || "-"}>
-                        {row.reason || "-"}
-                      </span>
-                    </td>
-                    <td className="px-3 py-2 whitespace-nowrap">
-                      <span className={`inline-flex rounded-full border px-2 py-0.5 text-xs font-semibold uppercase ${statusClass}`}>{status}</span>
-                    </td>
-                    <td className="px-3 py-2 whitespace-nowrap">{formatDate(row.expires_at)}</td>
-                    <td className="px-3 py-2 whitespace-nowrap">{formatDate(row.created_at)}</td>
-                    <td className="px-3 py-2">
-                      <div className="flex flex-wrap gap-2">
-                        <button
-                          type="button"
-                          className="rounded border border-slate-700 px-2 py-1 text-xs hover:bg-slate-800 disabled:opacity-50"
-                          onClick={() => onFetchDetail(row)}
-                          disabled={fetchingByVulnId[row.cve_id] === true}
-                        >
-                          {fetchingByVulnId[row.cve_id] ? "Fetching..." : "Fetch detail"}
-                        </button>
-                        <button
-                          type="button"
-                          className="rounded border border-rose-700/70 bg-rose-950/30 px-2 py-1 text-xs text-rose-200 hover:bg-rose-900/40 disabled:opacity-50"
-                          onClick={() => onDelete(row.id)}
-                          disabled={deletingId === row.id}
-                        >
-                          {deletingId === row.id ? "Deleting..." : "Delete"}
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </section>
+                    </div>
+                    <div className="min-w-0 flex-[1.3] basis-52">
+                      {summary ? (
+                        <>
+                          <div className="flex flex-wrap gap-1 text-xs font-semibold">
+                            <span className="rounded bg-warning/15 px-2 py-0.5 text-warning">{summary.still_present} still present</span>
+                            <span className="rounded bg-success/15 px-2 py-0.5 text-success">{summary.fixed} fixed</span>
+                            {summary.no_scan > 0 && <span className="rounded bg-line px-2 py-0.5 text-fg2">{summary.no_scan} no scan</span>}
+                            {summary.unknown > 0 && (
+                              <span className="rounded bg-line px-2 py-0.5 text-muted" title={UNKNOWN_STATUS_TIP}>
+                                {summary.unknown} unknown
+                              </span>
+                            )}
+                          </div>
+                          {row.hint && <p className={`m-0 mt-1 text-xs ${row.safe_to_remove ? "text-success" : "text-fg2"}`}>{row.hint}</p>}
+                        </>
+                      ) : (
+                        <span className="text-sm text-muted">-</span>
+                      )}
+                    </div>
+                    <div className="w-24 shrink-0 text-sm text-fg2">
+                      {row.expires_at ? <span className={row.expiring ? "text-warning" : ""}>{formatDate(row.expires_at)}</span> : "no expiry"}
+                    </div>
+                    <div className="flex w-48 shrink-0 gap-2">
+                      <Button className="min-h-11" onClick={() => onFetchDetail(row)} disabled={fetchingByVulnId[row.cve_id] === true}>
+                        {fetchingByVulnId[row.cve_id] ? "Fetching..." : "Fetch detail"}
+                      </Button>
+                      <Button
+                        className="min-h-11 border-red-500/50 text-red-500 hover:border-red-500"
+                        onClick={() => onDelete(row.id)}
+                        disabled={deletingId === row.id}
+                      >
+                        {deletingId === row.id ? "Deleting..." : "Delete"}
+                      </Button>
+                    </div>
+                  </div>
+                  {open && <RuleRepos rule={row} loadRepos={loadRepos} onStopIgnoring={onStopIgnoring} onPreviewTarget={onPreviewTarget} />}
+                </li>
+              );
+            })}
+          </ul>
+          </div>
+          </div>
+        </Card>
       )}
     </section>
+  );
+}
+
+export function IgnorePreviewCard({
+  repositories,
+  loadPreview,
+  target,
+}: {
+  repositories: TrivyIgnoreRepository[];
+  loadPreview: (repo: string, tag: string) => Promise<string>;
+  target: { repo: string; tag: string } | null;
+}) {
+  const [repo, setRepo] = useState("");
+  const [tag, setTag] = useState("");
+  const [text, setText] = useState("");
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (target) {
+      setRepo(target.repo);
+      setTag(target.tag);
+    }
+  }, [target]);
+
+  useEffect(() => {
+    if (!repo) {
+      setText("");
+      return;
+    }
+    let cancelled = false;
+    loadPreview(repo, tag.trim())
+      .then((value) => {
+        if (!cancelled) {
+          setText(value);
+          setError(null);
+        }
+      })
+      .catch((err) => {
+        if (!cancelled) setError(err instanceof Error ? err.message : "Failed to load preview");
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [repo, tag, loadPreview]);
+
+  return (
+    <Card>
+      <div className="flex items-center justify-between gap-2">
+        <h2 className="m-0 text-base font-semibold">.trivyignore preview</h2>
+        <Button className="min-h-11" disabled={!text} onClick={() => void navigator.clipboard?.writeText(text)}>
+          Copy
+        </Button>
+      </div>
+      <p className="mb-2 mt-1 text-xs text-muted">File CI receives for a repository and tag.</p>
+      <select
+        aria-label="Preview repository"
+        value={repo}
+        onChange={(e) => setRepo(e.target.value)}
+        className="min-h-11 w-full rounded-lg border border-line bg-card px-3 text-sm text-fg focus:border-accent focus:outline-none"
+      >
+        <option value="">Select repository</option>
+        {repositories.map((r) => (
+          <option key={r.id} value={r.name}>
+            {r.name}
+          </option>
+        ))}
+      </select>
+      <input
+        aria-label="Preview tag"
+        placeholder="tag, e.g. prod-1"
+        value={tag}
+        onChange={(e) => setTag(e.target.value)}
+        className="mt-2 min-h-11 w-full rounded-lg border border-line bg-card px-3 font-mono text-sm placeholder:text-muted focus:border-accent focus:outline-none"
+      />
+      {error && <p className="mb-0 mt-2 text-sm text-red-500">{error}</p>}
+      <pre className="mb-0 mt-3 max-h-80 overflow-auto whitespace-pre-wrap break-all rounded-lg border border-line bg-bg p-3 font-mono text-xs">
+        {repo ? text || "(empty)" : "Select a repository to preview the generated file."}
+      </pre>
+    </Card>
   );
 }
 
@@ -368,14 +610,14 @@ export function TrivyIgnorePage() {
   const [tagInput, setTagInput] = useState("");
   const [tagGroups, setTagGroups] = useState<string[]>([]);
   const [showAdvanced, setShowAdvanced] = useState(false);
+  const [showForm, setShowForm] = useState(false);
+  const [showImport, setShowImport] = useState(false);
+  const [importValue, setImportValue] = useState("");
+  const [previewTarget, setPreviewTarget] = useState<{ repo: string; tag: string } | null>(null);
   const [busyCreating, setBusyCreating] = useState(false);
   const [submitError, setSubmitError] = useState("");
   const [formMessage, setFormMessage] = useState("");
   const [deletingId, setDeletingId] = useState<number | null>(null);
-  const [drawerOpen, setDrawerOpen] = useState(false);
-  const [detailLoading, setDetailLoading] = useState(false);
-  const [detailError, setDetailError] = useState<string | null>(null);
-  const [detail, setDetail] = useState<CveDetailDrawerData | null>(null);
   const [statusByVulnId, setStatusByVulnId] = useState<Record<string, VulnerabilityCatalogStatus>>({});
   const [fetchingByVulnId, setFetchingByVulnId] = useState<Record<string, boolean>>({});
   const latestRequestId = useRef(0);
@@ -385,7 +627,8 @@ export function TrivyIgnorePage() {
     return Number.isInteger(parsed) && parsed > 0 ? parsed : null;
   }, [repoFilter]);
 
-  const { items, repositories, loading, error, create, remove, retry } = useTrivyIgnores(repoFilterId);
+  const { items, repositories, loading, error, create, remove, removeMany, stopIgnoring, importText, loadRepos, loadPreview, retry } =
+    useTrivyIgnores(repoFilterId);
 
   useEffect(() => {
     if (items.length === 0) {
@@ -548,28 +791,36 @@ export function TrivyIgnorePage() {
     }
   }
 
-  async function handleOpenCveDetail(row: TrivyIgnoreRow) {
-    setDrawerOpen(true);
-    setDetailLoading(true);
-    setDetailError(null);
-    setDetail(null);
-
-    latestRequestId.current += 1;
-    const requestId = latestRequestId.current;
-
+  async function handleBulkDelete(ids: number[]) {
     try {
-      const resolvedDetail = await fetchTrivyIgnoreCveDetail(row.cve_id, row.repository_name);
-      if (requestId === latestRequestId.current) {
-        setDetail(resolvedDetail);
-      }
+      const result = await removeMany(ids);
+      setFormMessage(`Removed ${result.removed} rule${result.removed === 1 ? "" : "s"}.`);
     } catch (err) {
-      if (requestId === latestRequestId.current) {
-        setDetailError(validateResponseErrorMessage(err, "Failed to load vulnerability detail"));
-      }
+      setSubmitError(validateResponseErrorMessage(err, "Failed to delete ignore rules"));
+    }
+  }
+
+  async function handleStopIgnoring(ruleIds: number[], repositoryIds: number[]) {
+    try {
+      const result = await stopIgnoring(ruleIds, repositoryIds);
+      setFormMessage(`Stopped ignoring: ${result.excluded} exclusion${result.excluded === 1 ? "" : "s"} added, ${result.deleted} rule${result.deleted === 1 ? "" : "s"} removed.`);
+    } catch (err) {
+      setSubmitError(validateResponseErrorMessage(err, "Failed to stop ignoring"));
+    }
+  }
+
+  async function handleImport() {
+    setSubmitError("");
+    setBusyCreating(true);
+    try {
+      const result = await importText(importValue);
+      setFormMessage(`Imported ${result.created} rule${result.created === 1 ? "" : "s"}, skipped ${result.skipped}.`);
+      setImportValue("");
+      setShowImport(false);
+    } catch (err) {
+      setSubmitError(validateResponseErrorMessage(err, "Failed to import .trivyignore"));
     } finally {
-      if (requestId === latestRequestId.current) {
-        setDetailLoading(false);
-      }
+      setBusyCreating(false);
     }
   }
 
@@ -580,212 +831,215 @@ export function TrivyIgnorePage() {
     );
   }, [repoFilterId, selectedRepoName]);
 
+  const inputClass =
+    "min-h-11 w-full rounded-lg border border-line bg-bg px-3 text-sm placeholder:text-muted focus:border-accent focus:outline-none";
+  const labelClass = "text-xs font-semibold uppercase tracking-wide text-muted";
+
+  const safeCount = items.filter((r) => r.safe_to_remove).length;
+  const expiringCount = items.filter((r) => r.expiring).length;
+  const globalCount = items.filter((r) => r.repository_id === null).length;
+
   return (
-    <AppShell activeRoute="/trivy-ignore" title="Trivy Ignore" subtitle="Create and manage CVE/GHSA ignore rules for scans.">
-      <section className="grid w-full gap-4 rounded-xl border border-slate-700 bg-slate-900/90 p-4 shadow-inner md:grid-cols-2 xl:grid-cols-3">
-        <header className="space-y-1 border-b border-slate-800/80 pb-3 md:col-span-2 xl:col-span-3">
-          <h2 className="text-xl font-semibold text-slate-100">Create Ignore Rule</h2>
-          <p className="text-sm text-slate-400">Fast rule creation for CVE or GHSA and repository scope.</p>
-        </header>
+    <AppShell
+      activeRoute="/trivy-ignore"
+      title="Ignore rules"
+      meta={
+        <>
+          {items.length} {items.length === 1 ? "rule" : "rules"} · {globalCount} global
+          <span className="text-success"> · {safeCount} safe to remove</span>
+          <span className="text-warning"> · {expiringCount} expiring this week</span>
+        </>
+      }
+      actions={
+        <>
+          <Button className="min-h-11" onClick={() => setShowImport((prev) => !prev)}>
+            Import .trivyignore
+          </Button>
+          <Button variant="primary" className="min-h-11" onClick={() => setShowForm((prev) => !prev)}>
+            New rule
+          </Button>
+        </>
+      }
+    >
+      <div className="mb-4 rounded-xl border border-accent/40 bg-accent/10 px-4 py-3 text-sm">
+        <p className="m-0 font-semibold">Ignored CVEs stay visible to TrivyUI</p>
+        <p className="m-0 mt-1 text-fg2">
+          CI scans upload suppressed findings too, so every rule shows where the CVE is still present and where it is already fixed. Status is from each repository's latest scan.
+        </p>
+        <a href="/upload" className="mt-1 inline-flex min-h-11 items-center text-link" onClick={(e) => { e.preventDefault(); navigate("/upload"); }}>
+          CI setup with --show-suppressed →
+        </a>
+      </div>
 
-        <label className="grid gap-1">
-          <span className="text-xs font-semibold uppercase tracking-wide text-slate-400">Vulnerability ID (CVE / GHSA)</span>
+      {formMessage && (
+        <div className="mb-4 rounded-lg border border-success/40 bg-success/10 px-3 py-2 text-sm text-success" role="status">
+          {formMessage}
+        </div>
+      )}
+      {submitError && (
+        <div className="mb-4">
+          <ErrorBanner message={submitError} onRetry={() => setSubmitError("")} />
+        </div>
+      )}
+
+      {showImport && (
+        <Card className="mb-4 grid gap-2">
+          <h2 className="m-0 text-base font-semibold">Import .trivyignore</h2>
+          <p className="m-0 text-sm text-fg2">Paste file content or choose a file. Each ID becomes a global rule; lines starting with # are ignored.</p>
           <input
-            className="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-slate-200 placeholder-slate-500 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/50"
-            value={cveId}
-            onChange={(event) => setCveId(event.target.value)}
-            placeholder="e.g. CVE-2026-0001 or GHSA-xxxx-yyyy-zzzz"
+            type="file"
+            aria-label="Choose .trivyignore file"
+            className="min-h-11 text-sm"
+            onChange={(event) => {
+              const file = event.target.files?.[0];
+              if (file) void file.text().then(setImportValue);
+            }}
           />
-        </label>
-
-        <label className="grid gap-1">
-          <span className="text-xs font-semibold uppercase tracking-wide text-slate-400">Repository</span>
-          <select
-            className="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-slate-200 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/50"
-            value={repositoryId}
-            onChange={(event) => setRepositoryId(event.target.value)}
-          >
-            <option value="">Global</option>
-            {repositories.map((repo) => (
-              <option key={repo.id} value={repo.id}>
-                {repo.name}
-              </option>
-            ))}
-          </select>
-        </label>
-
-        <label className="grid gap-1">
-          <span className="text-xs font-semibold uppercase tracking-wide text-slate-400">Scope</span>
-          <div
-            role="radiogroup"
-            aria-label="Scope"
-            className="grid grid-cols-2 gap-2 rounded-lg border border-slate-700 bg-slate-950 p-1"
-          >
-            <button
-              type="button"
-              role="radio"
-              aria-checked={scope === "all_tags"}
-              className={`rounded-md px-3 py-1.5 text-sm font-medium transition ${
-                scope === "all_tags"
-                  ? "bg-blue-600 text-white"
-                  : "text-slate-300 hover:bg-slate-800 hover:text-slate-100"
-              }`}
-              onClick={() => setScope("all_tags")}
-            >
-              All tags
-            </button>
-            <button
-              type="button"
-              role="radio"
-              aria-checked={scope === "selected_tags"}
-              className={`rounded-md px-3 py-1.5 text-sm font-medium transition ${
-                scope === "selected_tags"
-                  ? "bg-blue-600 text-white"
-                  : "text-slate-300 hover:bg-slate-800 hover:text-slate-100"
-              }`}
-              onClick={() => setScope("selected_tags")}
-            >
-              Selected tags
-            </button>
+          <textarea
+            aria-label=".trivyignore content"
+            className="min-h-[8rem] w-full rounded-lg border border-line bg-bg px-3 py-2 font-mono text-sm focus:border-accent focus:outline-none"
+            placeholder={"# comment\nCVE-2024-1111\nGHSA-xxxx-yyyy-zzzz"}
+            value={importValue}
+            onChange={(event) => setImportValue(event.target.value)}
+            spellCheck={false}
+          />
+          <div className="flex justify-end gap-2">
+            <Button variant="quiet" className="min-h-11" onClick={() => setShowImport(false)}>
+              Cancel
+            </Button>
+            <Button variant="primary" className="min-h-11" disabled={!importValue.trim() || busyCreating} onClick={() => void handleImport()}>
+              Import
+            </Button>
           </div>
-        </label>
+        </Card>
+      )}
 
-        {scope === "selected_tags" && (
-          <label className="grid gap-1 md:col-span-2 xl:col-span-2">
-            <span className="text-xs font-semibold uppercase tracking-wide text-slate-400">Tag patterns</span>
-            <div className="flex gap-2">
-              <input
-                className="flex-1 rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-slate-200 placeholder-slate-500 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/50"
-                value={tagInput}
-                onChange={(event) => setTagInput(event.target.value)}
-                placeholder="e.g. dev-*"
-              />
-              <button type="button" className="rounded-lg border border-blue-700 bg-blue-900 px-3 py-2 text-sm" onClick={addTagGroup}>
-                Add
-              </button>
-            </div>
-            {tagGroups.length > 0 && (
-              <ul className="mt-1 flex flex-wrap gap-2">
-                {tagGroups.map((tag) => (
-                  <li key={tag} className="rounded-full border border-slate-700 bg-slate-950 px-2 py-1 text-xs">
-                    <span>{tag}</span>
-                    <button
-                      type="button"
-                      className="ml-2 text-slate-300 hover:text-slate-100"
-                      onClick={() => removeTagGroup(tag)}
-                    >
-                      ✕
-                    </button>
-                  </li>
-                ))}
-              </ul>
-            )}
+      {showForm && (
+        <Card className="mb-4 grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+          <header className="space-y-1 md:col-span-2 xl:col-span-3">
+            <h2 className="m-0 text-lg font-semibold">New ignore rule</h2>
+            <p className="m-0 text-sm text-fg2">Fast rule creation for CVE or GHSA and repository scope.</p>
+          </header>
+
+          <label className="grid gap-1">
+            <span className={labelClass}>Vulnerability ID (CVE / GHSA)</span>
+            <input className={inputClass} value={cveId} onChange={(event) => setCveId(event.target.value)} placeholder="e.g. CVE-2026-0001 or GHSA-xxxx-yyyy-zzzz" />
           </label>
-        )}
 
-        <div className="md:col-span-2 xl:col-span-3">
-          <button
-            type="button"
-            className="rounded-md border border-slate-700 bg-slate-950 px-3 py-1.5 text-xs font-semibold uppercase tracking-wide text-slate-300 transition hover:border-slate-500 hover:text-slate-100"
-            aria-expanded={showAdvanced}
-            onClick={() => setShowAdvanced((prev) => !prev)}
-          >
-            Advanced options {showAdvanced ? "▾" : "▸"}
-          </button>
-        </div>
+          <label className="grid gap-1">
+            <span className={labelClass}>Repository</span>
+            <select className={inputClass} value={repositoryId} onChange={(event) => setRepositoryId(event.target.value)}>
+              <option value="">Global</option>
+              {repositories.map((repo) => (
+                <option key={repo.id} value={repo.id}>
+                  {repo.name}
+                </option>
+              ))}
+            </select>
+          </label>
 
-        {showAdvanced && (
-          <>
-            <label className="grid gap-1 md:col-span-1 xl:col-span-2">
-              <span className="text-xs font-semibold uppercase tracking-wide text-slate-400">Reason (optional)</span>
-              <input
-                className="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-slate-200 placeholder-slate-500 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/50"
-                value={reason}
-                onChange={(event) => setReason(event.target.value)}
-                placeholder="Optional reason"
-              />
-            </label>
-
-            <label className="grid gap-1 md:col-span-1 xl:col-span-1">
-              <span className="text-xs font-semibold uppercase tracking-wide text-slate-400">Expires at (optional)</span>
-              <input
-                type="datetime-local"
-                className="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-slate-200 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/50"
-                value={expiresAt}
-                onChange={(event) => setExpiresAt(event.target.value)}
-              />
-            </label>
-          </>
-        )}
-
-        <div className="flex flex-col gap-2 pt-1 sm:flex-row sm:items-center sm:justify-between md:col-span-2 xl:col-span-3">
-          <button
-            type="button"
-            className="rounded-lg border border-slate-700 bg-slate-950 px-4 py-2 text-sm font-semibold text-slate-200 transition hover:border-slate-500 hover:text-slate-100"
-            onClick={resetForm}
-            disabled={busyCreating}
-          >
-            Reset
-          </button>
-          <button
-            type="button"
-            className="rounded-lg bg-blue-600 px-5 py-2 text-sm font-semibold text-white transition hover:bg-blue-700 disabled:opacity-50"
-            onClick={handleCreate}
-            disabled={busyCreating}
-          >
-            {busyCreating ? "Creating..." : "Add ignore rule"}
-          </button>
-        </div>
-
-        {formMessage && (
-          <div className="rounded-lg border border-green-800 bg-green-950/30 px-3 py-2 text-sm text-green-200 md:col-span-2 xl:col-span-3">
-            {formMessage}
+          <div className="grid gap-1">
+            <span className={labelClass}>Scope</span>
+            <div role="radiogroup" aria-label="Scope" className="grid grid-cols-2 gap-2 rounded-lg border border-line bg-bg p-1">
+              {(["all_tags", "selected_tags"] as const).map((value) => (
+                <button
+                  key={value}
+                  type="button"
+                  role="radio"
+                  aria-checked={scope === value}
+                  className={`min-h-11 rounded-md px-3 text-sm font-medium transition ${scope === value ? "bg-accent text-white" : "text-fg2 hover:bg-line hover:text-fg"}`}
+                  onClick={() => setScope(value)}
+                >
+                  {value === "all_tags" ? "All tags" : "Selected tags"}
+                </button>
+              ))}
+            </div>
           </div>
-        )}
-        {submitError && (
+
+          {scope === "selected_tags" && (
+            <label className="grid gap-1 md:col-span-2 xl:col-span-2">
+              <span className={labelClass}>Tag patterns</span>
+              <div className="flex gap-2">
+                <input className={`${inputClass} flex-1`} value={tagInput} onChange={(event) => setTagInput(event.target.value)} placeholder="e.g. dev-*" />
+                <Button className="min-h-11" onClick={addTagGroup}>
+                  Add
+                </Button>
+              </div>
+              {tagGroups.length > 0 && (
+                <ul className="m-0 mt-1 flex list-none flex-wrap gap-2 p-0">
+                  {tagGroups.map((tag) => (
+                    <li key={tag} className="rounded-full border border-line bg-bg px-2 py-1 text-xs">
+                      <span>{tag}</span>
+                      <button type="button" aria-label={`Remove ${tag}`} className="ml-2 text-fg2 hover:text-fg" onClick={() => removeTagGroup(tag)}>
+                        ✕
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </label>
+          )}
+
           <div className="md:col-span-2 xl:col-span-3">
-            <ErrorBanner message={submitError} onRetry={() => setSubmitError("")} />
+            <Button variant="quiet" aria-expanded={showAdvanced} onClick={() => setShowAdvanced((prev) => !prev)} className="min-h-11">
+              Advanced options {showAdvanced ? "▾" : "▸"}
+            </Button>
           </div>
-        )}
-      </section>
 
-      <TrivyIgnoreListPanel
-        repoFilter={repoFilter}
-        repositories={repositories}
-        loading={loading}
-        error={error}
-        items={items}
-        statusByVulnId={statusByVulnId}
-        fetchingByVulnId={fetchingByVulnId}
-        deletingId={deletingId}
-        onRepoFilterChange={setRepoFilter}
-        onRetry={() => void retry()}
-        onDelete={handleDelete}
-        onFetchDetail={handleFetchDetail}
-        onOpenCveDetail={handleOpenCveDetail}
-      />
+          {showAdvanced && (
+            <>
+              <label className="grid gap-1 xl:col-span-2">
+                <span className={labelClass}>Reason (optional)</span>
+                <input className={inputClass} value={reason} onChange={(event) => setReason(event.target.value)} placeholder="Optional reason" />
+              </label>
+              <label className="grid gap-1">
+                <span className={labelClass}>Expires at (optional)</span>
+                <input type="datetime-local" className={inputClass} value={expiresAt} onChange={(event) => setExpiresAt(event.target.value)} />
+              </label>
+            </>
+          )}
 
-      <section className="rounded-lg border border-slate-700 bg-slate-900/90 p-4">
-        <details className="mt-4 rounded-lg border border-slate-700 bg-slate-950/60 p-3 text-xs">
-          <summary className="cursor-pointer font-semibold text-slate-200">Generate file example</summary>
-          <p className="mt-2 text-slate-400">Use this endpoint to render CI-ready ignore files:</p>
-          <pre className="mt-1 break-all text-slate-200">{generateExample}</pre>
-          <p className="mt-2 text-slate-400">Response is plain text in newline-separated CVE format.</p>
-        </details>
-      </section>
+          <div className="flex flex-col-reverse gap-2 sm:flex-row sm:items-center sm:justify-between md:col-span-2 xl:col-span-3">
+            <Button className="min-h-11" onClick={resetForm} disabled={busyCreating}>
+              Reset
+            </Button>
+            <Button variant="primary" className="min-h-11" onClick={handleCreate} disabled={busyCreating}>
+              {busyCreating ? "Creating..." : "Add ignore rule"}
+            </Button>
+          </div>
+        </Card>
+      )}
 
-      <CveDetailDrawer
-        open={drawerOpen}
-        loading={detailLoading}
-        error={detailError}
-        data={detail}
-        onClose={() => {
-          setDrawerOpen(false);
-          setDetail(null);
-          setDetailError(null);
-          setDetailLoading(false);
-        }}
-      />
+      <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_340px] lg:items-start">
+        <TrivyIgnoreListPanel
+          repoFilter={repoFilter}
+          repositories={repositories}
+          loading={loading}
+          error={error}
+          items={items}
+          statusByVulnId={statusByVulnId}
+          fetchingByVulnId={fetchingByVulnId}
+          deletingId={deletingId}
+          onRepoFilterChange={setRepoFilter}
+          onRetry={() => void retry()}
+          onDelete={handleDelete}
+          onFetchDetail={handleFetchDetail}
+          onBulkDelete={handleBulkDelete}
+          onStopIgnoring={handleStopIgnoring}
+          loadRepos={loadRepos}
+          onPreviewTarget={(repo, tag) => setPreviewTarget({ repo, tag })}
+          onAddRule={() => setShowForm(true)}
+        />
+        <div className="grid gap-4">
+          <IgnorePreviewCard repositories={repositories} loadPreview={loadPreview} target={previewTarget} />
+          <details className="rounded-lg border border-line bg-card p-3 text-xs">
+            <summary className="flex min-h-11 cursor-pointer items-center font-semibold">Generate file example</summary>
+            <p className="mt-2 text-muted">Use this endpoint to render CI-ready ignore files:</p>
+            <pre className="mt-1 whitespace-pre-wrap break-all">{generateExample}</pre>
+            <p className="mt-2 text-muted">Response is plain text in newline-separated CVE format.</p>
+          </details>
+        </div>
+      </div>
     </AppShell>
   );
 }

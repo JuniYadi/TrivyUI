@@ -87,7 +87,7 @@ describe("GET /api/vulnerabilities", () => {
     seedData(db);
 
     const handler = createVulnerabilitiesHandler(db);
-    const response = handler(new Request("http://localhost/api/vulnerabilities"));
+    const response = handler(new Request("http://localhost/api/vulnerabilities?group=finding"));
     const body = (await response.json()) as {
       success: boolean;
       data: {
@@ -109,7 +109,7 @@ describe("GET /api/vulnerabilities", () => {
     seedData(db);
 
     const handler = createVulnerabilitiesHandler(db);
-    const response = handler(new Request("http://localhost/api/vulnerabilities?severity=CRITICAL"));
+    const response = handler(new Request("http://localhost/api/vulnerabilities?group=finding&severity=CRITICAL"));
     const body = (await response.json()) as {
       data: {
         items: Array<{ severity: string }>;
@@ -126,7 +126,7 @@ describe("GET /api/vulnerabilities", () => {
     seedData(db);
 
     const handler = createVulnerabilitiesHandler(db);
-    const response = handler(new Request("http://localhost/api/vulnerabilities?limit=1"));
+    const response = handler(new Request("http://localhost/api/vulnerabilities?group=finding&limit=1"));
     const body = (await response.json()) as {
       success: boolean;
       data: {
@@ -158,7 +158,7 @@ describe("GET /api/vulnerabilities", () => {
     seedData(db);
 
     const handler = createVulnerabilitiesHandler(db);
-    const response = handler(new Request("http://localhost/api/vulnerabilities?search=openssl"));
+    const response = handler(new Request("http://localhost/api/vulnerabilities?group=finding&search=openssl"));
     const body = (await response.json()) as {
       data: {
         items: Array<{ cve_id: string; package_name: string; description: string | null }>;
@@ -182,7 +182,7 @@ describe("GET /api/vulnerabilities", () => {
     seedData(db);
 
     const handler = createVulnerabilitiesHandler(db);
-    const response = handler(new Request("http://localhost/api/vulnerabilities?sort=package_name&order=asc"));
+    const response = handler(new Request("http://localhost/api/vulnerabilities?group=finding&sort=package_name&order=asc"));
     const body = (await response.json()) as {
       data: {
         items: Array<{ package_name: string }>;
@@ -200,7 +200,7 @@ describe("GET /api/vulnerabilities", () => {
     seedData(db);
 
     const handler = createVulnerabilitiesHandler(db);
-    const response = handler(new Request("http://localhost/api/vulnerabilities?page=-1"));
+    const response = handler(new Request("http://localhost/api/vulnerabilities?group=finding&page=-1"));
     const body = (await response.json()) as {
       success: false;
       error: { code: string };
@@ -216,7 +216,7 @@ describe("GET /api/vulnerabilities", () => {
     seedData(db);
 
     const handler = createVulnerabilitiesHandler(db);
-    const response = handler(new Request("http://localhost/api/vulnerabilities?limit=500"));
+    const response = handler(new Request("http://localhost/api/vulnerabilities?group=finding&limit=500"));
     const body = (await response.json()) as {
       success: false;
       error: { code: string };
@@ -232,7 +232,7 @@ describe("GET /api/vulnerabilities", () => {
     seedData(db);
 
     const handler = createVulnerabilitiesHandler(db);
-    const response = handler(new Request("http://localhost/api/vulnerabilities?sort=invalid_field"));
+    const response = handler(new Request("http://localhost/api/vulnerabilities?group=finding&sort=invalid_field"));
     const body = (await response.json()) as {
       success: false;
       error: { code: string };
@@ -248,7 +248,7 @@ describe("GET /api/vulnerabilities", () => {
     seedData(db);
 
     const handler = createVulnerabilitiesHandler(db);
-    const response = handler(new Request("http://localhost/api/vulnerabilities?search=definitely-not-found"));
+    const response = handler(new Request("http://localhost/api/vulnerabilities?group=finding&search=definitely-not-found"));
     const body = (await response.json()) as {
       success: boolean;
       data: {
@@ -297,7 +297,7 @@ describe("GET /api/vulnerabilities", () => {
     );
 
     const handler = createVulnerabilitiesHandler(db);
-    const response = handler(new Request("http://localhost/api/vulnerabilities"));
+    const response = handler(new Request("http://localhost/api/vulnerabilities?group=finding"));
     const body = (await response.json()) as {
       data: {
         items: Array<{ cve_id: string; tag_group: string; state: string; resolved_at: string | null }>;
@@ -347,12 +347,12 @@ describe("GET /api/vulnerabilities", () => {
 
     const handler = createVulnerabilitiesHandler(db);
 
-    const doneRes = handler(new Request("http://localhost/api/vulnerabilities?state=done"));
+    const doneRes = handler(new Request("http://localhost/api/vulnerabilities?group=finding&state=done"));
     const doneBody = (await doneRes.json()) as {
       data: { items: Array<{ cve_id: string; tag_group: string; state: string; resolved_at: string | null }> };
     };
 
-    const openRes = handler(new Request("http://localhost/api/vulnerabilities?state=open"));
+    const openRes = handler(new Request("http://localhost/api/vulnerabilities?group=finding&state=open"));
     const openBody = (await openRes.json()) as {
       data: { items: Array<{ cve_id: string; tag_group: string; state: string }> };
     };
@@ -399,7 +399,7 @@ describe("GET /api/vulnerabilities", () => {
     );
 
     const handler = createVulnerabilitiesHandler(db);
-    const response = handler(new Request("http://localhost/api/vulnerabilities?state=all"));
+    const response = handler(new Request("http://localhost/api/vulnerabilities?group=finding&state=all"));
     const body = (await response.json()) as {
       data: { items: Array<{ cve_id: string; tag_group: string; state: string; resolved_at: string | null }> };
     };
