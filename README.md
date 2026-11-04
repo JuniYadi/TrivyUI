@@ -93,6 +93,31 @@ If upload fails with `INVALID_TRIVY_FORMAT`, the JSON is valid syntax but not a 
 
 ## Upload via API
 
+Create an API key under **API keys** and send it as `X-API-Key`.
+
+### CI flow (3 steps)
+
+```bash
+# 1. Get the ignore file for this repo + tag
+curl -s -H "X-API-Key: $TRIVYUI_API_KEY" -o .trivyignore \
+  "https://your-host/api/trivy-ignore/generate?repo=$REPO&tag=$TAG"
+
+# 2. Scan: ignore rules apply, ignored CVEs stay in the report
+trivy image --format json \
+  --ignorefile .trivyignore \
+  --show-suppressed \
+  -o report.json "$IMAGE"
+
+# 3. Upload
+curl -X POST https://your-host/api/upload \
+  -H "X-API-Key: $TRIVYUI_API_KEY" \
+  -F "file=@report.json;type=application/json"
+```
+
+Why `--show-suppressed`: without it Trivy drops ignored CVEs before the upload, so TrivyUI cannot tell whether a repository still has the CVE or already fixed it. With the flag, suppressed findings are uploaded (Trivy JSON `Results[].ExperimentalModifiedFindings`), kept separate from open vulnerabilities, and the **Ignore rules** page shows per repository: still present, fixed, or no scan since the rule was created. The flag is experimental and needs Trivy v0.50.0 or newer.
+
+### Endpoints
+
 Single file (`file` field):
 
 ```bash
@@ -107,6 +132,8 @@ curl -X POST "http://localhost:3000/api/upload/batch" \
   -F "files=@trivy-image.json;type=application/json" \
   -F "files=@trivy-fs.json;type=application/json"
 ```
+
+`/api/webhook` also accepts a raw `application/json` body.
 
 Expected responses:
 - `201` success
