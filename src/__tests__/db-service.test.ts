@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { Database } from "bun:sqlite";
 import { unlinkSync } from "node:fs";
-import { initDb } from "../db";
+import { initDb, initFullSchema } from "../db";
 import {
   insertVulnerabilities,
   upsertImage,
@@ -113,5 +113,28 @@ describe("db service", () => {
 
     db.close();
     unlinkSync(path);
+  });
+});
+
+describe("image tag group backfill", () => {
+  test("re-running schema init patches legacy images missing tag grouping", () => {
+    const db = initDb(":memory:");
+    const repoId = upsertRepository(db, "ghcr.io/acme/legacy");
+    db.query("INSERT INTO images (repository_id, name, repository_base, tag, tag_group) VALUES (?1, ?2, '', NULL, 'ungrouped')").run(
+      repoId,
+      "ghcr.io/acme/legacy:1.2.3",
+    );
+
+    initFullSchema(db);
+
+    const row = db.query("SELECT repository_base, tag, tag_group FROM images WHERE name = ?1").get("ghcr.io/acme/legacy:1.2.3") as {
+      repository_base: string;
+      tag: string | null;
+      tag_group: string;
+    };
+    expect(row.repository_base).toBe("ghcr.io/acme/legacy:1.2.3");
+    expect(row.tag).toBe("1.2.3");
+    expect(row.tag_group).not.toBe("ungrouped");
+    db.close();
   });
 });
