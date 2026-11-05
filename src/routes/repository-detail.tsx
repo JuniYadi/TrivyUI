@@ -24,6 +24,7 @@ import { SeverityBar } from "../components/ui/severity-bar";
 import { SeverityChip } from "../components/ui/severity-chip";
 import { useCveSummary } from "../hooks/use-cve-detail";
 import { useCveIgnore } from "../hooks/use-cve-ignore";
+import { buildTrivyIgnoreAuthHeaders } from "../hooks/use-trivy-ignores";
 import { useRepoCveStates, useRepoDetail, useRepoRules, useRepoTags, useRepoVulnerabilities } from "../hooks/use-repo-detail";
 import { useUrlSearch } from "../hooks/use-url-search";
 import type { RepoGroupHealth } from "../services/repo-state";
@@ -128,7 +129,7 @@ export interface RepositoryDetailViewProps {
   data: RepositoryDetail;
   group: string | null;
   onGroupChange: (group: string | null) => void;
-  tags: Pick<RepoTagsSectionProps, "page" | "onPage" | "groupTags">;
+  tags: Pick<RepoTagsSectionProps, "page" | "onPage" | "groupTags" | "onResetTag">;
   vulns: Omit<RepoVulnsSectionProps, "groups" | "group" | "onGroupChange">;
   rules: Omit<RepoIgnoreRulesProps, "repositoryId" | "repositoryName">;
 }
@@ -222,6 +223,19 @@ export function RepositoryDetailPage() {
   const cveStates = useRepoCveStates(data?.name ?? null, cve, reloadKey);
   const ignore = useCveIgnore(() => setReloadKey((n) => n + 1));
 
+  async function resetScans(path: string, message: string) {
+    if (!window.confirm(message)) {
+      return;
+    }
+    const response = await fetch(path, { method: "DELETE", headers: buildTrivyIgnoreAuthHeaders() });
+    if (!response.ok) {
+      window.alert(response.status === 401 ? "Reset failed: a valid API key is required." : "Reset failed.");
+      return;
+    }
+    setReloadKey((n) => n + 1);
+    retry();
+  }
+
   const closePanel = useCallback(() => update({ cve: null }), [update]);
 
   const name = data ? displayRepoName(data.name, data.registry) : "Repository";
@@ -240,7 +254,12 @@ export function RepositoryDetailPage() {
   const view: Omit<RepositoryDetailViewProps, "data"> = {
     group,
     onGroupChange: (next) => update({ group: next, tagPage: null, page: null }),
-    tags: { page: tagPage, onPage: (page) => update({ tagPage: page > 1 ? page : null }), groupTags },
+    tags: {
+      page: tagPage,
+      onPage: (page) => update({ tagPage: page > 1 ? page : null }),
+      groupTags,
+      onResetTag: (tag) => void resetScans(`/api/images/${tag.image_id}`, `Delete all scan data for ${tag.tag ?? tag.name}? Ignore rules are kept.`),
+    },
     vulns: {
       vulns: vulns.data,
       loading: vulns.loading,
@@ -276,6 +295,13 @@ export function RepositoryDetailPage() {
         data && (
           <>
             <LinkButton href={`/trivy-ignore?repository=${encodeURIComponent(data.name)}`}>{`Ignore rules${ruleCount === undefined ? "" : ` (${ruleCount})`}`}</LinkButton>
+            <button
+              type="button"
+              onClick={() => void resetScans(`/api/repositories/${data.id}/scans`, `Reset ${name}? All scans and findings for every tag are deleted. Ignore rules are kept.`)}
+              className={`inline-flex min-h-11 items-center justify-center rounded-lg border border-line px-3 text-sm font-medium text-red-300 hover:bg-bg sm:min-h-9 ${FOCUS}`}
+            >
+              Reset
+            </button>
             <a
               href={`/vulnerabilities?repository=${encodeURIComponent(data.name)}`}
               className={`inline-flex min-h-11 items-center justify-center rounded-lg bg-accent px-3 text-sm font-medium text-white hover:brightness-110 sm:min-h-9 ${FOCUS}`}
