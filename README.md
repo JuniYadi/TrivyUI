@@ -142,6 +142,20 @@ Expected responses:
 - `415` unsupported content type
 - `422` JSON is not recognized as Trivy result
 
+## MCP Server
+
+TrivyUI exposes a read-only [MCP](https://modelcontextprotocol.io) endpoint (Streamable HTTP, stateless JSON) at `POST /mcp`. Tools: `list_repositories`, `list_repository_tags`, `get_image_vulnerabilities`, `search_vulnerabilities`, `get_stats`.
+
+```bash
+claude mcp add --transport http trivyui http://localhost:3000/mcp --header "X-API-Key: trivy_..."
+```
+
+When `API_KEY_ENABLED=true`, every `/mcp` request needs a valid key via `X-API-Key` or `Authorization: Bearer <key>`; otherwise the endpoint is open.
+
+## Reset scan data
+
+`DELETE /api/repositories/:id/scans` removes all scans/findings of a repository and `DELETE /api/images/:id` removes a single tag. The repository and its ignore rules are kept. Both require an API key when `API_KEY_ENABLED=true`.
+
 ## Useful Commands
 
 ```bash
