@@ -256,6 +256,13 @@ export function createImagesHandler(db: Database) {
     try {
       const url = new URL(request.url);
       const detail = url.pathname.match(/^\/api\/images\/(\d+)$/);
+      if (detail && request.method === "DELETE") {
+        if (!db.query("SELECT id FROM images WHERE id = ?").get(Number(detail[1]))) {
+          return sendError(404, "IMAGE_NOT_FOUND", "Image not found");
+        }
+        db.query("DELETE FROM images WHERE id = ?").run(Number(detail[1]));
+        return buildSuccessResponse({ deleted_images: 1 });
+      }
       if (detail) {
         return handleImageDetail(db, Number(detail[1]), url);
       }

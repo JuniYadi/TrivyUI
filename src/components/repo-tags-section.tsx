@@ -11,7 +11,7 @@ export const LATEST_PER_GROUP = 3;
 
 const ROW_GRID = "grid grid-cols-[minmax(0,1fr)_3rem_3.5rem] items-center gap-x-3 sm:grid-cols-[minmax(0,11rem)_minmax(0,1fr)_3rem_3.5rem_5rem]";
 
-function TagRow({ tag }: { tag: RepoTagRow }) {
+function TagRow({ tag, onReset }: { tag: RepoTagRow; onReset?: (tag: RepoTagRow) => void }) {
   return (
     <li className={`${ROW_GRID} border-t border-rowline px-4`}>
       <AppLink href={`/images/${tag.image_id}`} className="inline-flex min-h-11 min-w-0 items-center gap-2 text-link hover:underline sm:min-h-9">
@@ -29,6 +29,11 @@ function TagRow({ tag }: { tag: RepoTagRow }) {
       </span>
       <span className="hidden text-right text-xs text-fg2 sm:block" title={formatDateTime(tag.last_scanned_at)}>
         {timeAgo(tag.last_scanned_at)}
+        {onReset && (
+          <button type="button" onClick={() => onReset(tag)} className={`ml-2 text-red-300 hover:underline ${FOCUS}`} aria-label={`Reset scan data for ${tag.tag ?? tag.name}`}>
+            Reset
+          </button>
+        )}
       </span>
     </li>
   );
@@ -47,9 +52,10 @@ export interface RepoTagsSectionProps {
   page: number;
   onPage: (page: number) => void;
   groupTags: { data: RepoTagPage | null; loading: boolean; error: string | null };
+  onResetTag?: (tag: RepoTagRow) => void;
 }
 
-export function RepoTagsSection({ tagGroups, latestTags, group, onGroupChange, page, onPage, groupTags }: RepoTagsSectionProps) {
+export function RepoTagsSection({ tagGroups, latestTags, group, onGroupChange, page, onPage, groupTags, onResetTag }: RepoTagsSectionProps) {
   const selected = group ? tagGroups.find((g) => g.group_name === group) : undefined;
   const pageData = groupTags.data && groupTags.data.group === group ? groupTags.data : null;
 
@@ -87,7 +93,7 @@ export function RepoTagsSection({ tagGroups, latestTags, group, onGroupChange, p
                 </p>
                 <ul className="m-0 list-none p-0">
                   {rows.map((tag) => (
-                    <TagRow key={tag.image_id} tag={tag} />
+                    <TagRow key={tag.image_id} tag={tag} onReset={onResetTag} />
                   ))}
                 </ul>
                 {g.tag_count > rows.length && (
@@ -113,7 +119,7 @@ export function RepoTagsSection({ tagGroups, latestTags, group, onGroupChange, p
             ) : (
               <ul className={`m-0 list-none p-0 ${groupTags.loading ? "opacity-60" : ""}`} aria-busy={groupTags.loading}>
                 {(pageData?.items ?? []).map((tag) => (
-                  <TagRow key={tag.image_id} tag={tag} />
+                  <TagRow key={tag.image_id} tag={tag} onReset={onResetTag} />
                 ))}
                 {pageData && pageData.items.length === 0 && <li className="border-t border-rowline px-4 py-6 text-center text-sm text-muted">No tags in this group.</li>}
               </ul>
