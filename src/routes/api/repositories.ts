@@ -121,6 +121,18 @@ export function createRepositoriesHandler(db: Database) {
     try {
       const url = new URL(request.url);
 
+      const resetMatch = url.pathname.match(/^\/api\/repositories\/(\d+)\/scans$/);
+      if (resetMatch && request.method === "DELETE") {
+        const repoId = Number(resetMatch[1]);
+        if (!db.query("SELECT id FROM repositories WHERE id = ? LIMIT 1").get(repoId)) {
+          return sendError(404, "REPOSITORY_NOT_FOUND", "Repository not found");
+        }
+        // Images cascade to scans/findings; the repository row and its ignore rules are kept.
+        const { n } = db.query("SELECT COUNT(*) AS n FROM images WHERE repository_id = ?").get(repoId) as { n: number };
+        db.query("DELETE FROM images WHERE repository_id = ?").run(repoId);
+        return buildSuccessResponse({ deleted_images: n });
+      }
+
       const idMatch = url.pathname.match(/^\/api\/repositories\/(\d+)$/);
       if (idMatch) {
         const row = db.query("SELECT id, name, created_at FROM repositories WHERE id = ? LIMIT 1").get(Number(idMatch[1])) as RepositoryRow | null;
