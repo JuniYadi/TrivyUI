@@ -13,6 +13,7 @@ import { createEmailTemplatesHandler } from "./routes/api/email-templates";
 import { createTrivyIgnoreGenerateHandler } from "./routes/api/trivy-ignore-generate";
 import { createTrivyIgnoreHandler } from "./routes/api/trivy-ignore";
 import { createVulnerabilityCatalogHandler } from "./routes/api/vulnerability-catalog";
+import { createMcpHandler } from "./routes/mcp";
 import { enforcePostApiKeyAuth } from "./services/api-key-auth";
 import { registerBunCronJobs } from "./services/scheduled-notifications";
 import homepage from "./index.html";
@@ -32,6 +33,7 @@ const emailTemplatesHandler = createEmailTemplatesHandler(db);
 const trivyIgnoreHandler = createTrivyIgnoreHandler(db);
 const trivyIgnoreGenerateHandler = createTrivyIgnoreGenerateHandler(db);
 const vulnerabilityCatalogHandler = createVulnerabilityCatalogHandler(db);
+const mcpHandler = createMcpHandler(db);
 const HTML_PATH = new URL("./index.html", import.meta.url);
 
 export const SPA_ROUTES = {
@@ -76,6 +78,10 @@ export async function handleRequest(request: Request): Promise<Response> {
   const authResponse = await enforcePostApiKeyAuth(db, request);
   if (authResponse) {
     return authResponse;
+  }
+
+  if (pathname === "/mcp") {
+    return mcpHandler(request);
   }
 
   if (pathname === "/api/health") {
@@ -136,7 +142,7 @@ export async function handleRequest(request: Request): Promise<Response> {
     pathname === "/api/repositories" ||
     pathname.startsWith("/api/repositories/")
   ) {
-    if (request.method !== "GET") {
+    if (request.method !== "GET" && request.method !== "DELETE") {
       return methodNotAllowed(request.method, "/api/repositories");
     }
 
@@ -144,7 +150,7 @@ export async function handleRequest(request: Request): Promise<Response> {
   }
 
   if (pathname === "/api/images" || pathname.startsWith("/api/images/")) {
-    if (request.method !== "GET") {
+    if (request.method !== "GET" && request.method !== "DELETE") {
       return methodNotAllowed(request.method, "/api/images");
     }
 
