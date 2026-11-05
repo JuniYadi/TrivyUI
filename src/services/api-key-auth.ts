@@ -15,6 +15,10 @@ function isProtectedMutatingMethod(method: string): boolean {
 }
 
 function shouldProtectRequest(url: URL, method: string): boolean {
+  if (url.pathname === "/mcp") {
+    return true;
+  }
+
   if (!url.pathname.startsWith("/api/")) {
     return false;
   }
@@ -48,7 +52,8 @@ export async function enforcePostApiKeyAuth(db: Database, request: Request): Pro
     return null;
   }
 
-  const providedKey = request.headers.get("X-API-Key")?.trim();
+  const bearer = request.headers.get("Authorization")?.match(/^Bearer\s+(.+)$/i)?.[1];
+  const providedKey = (request.headers.get("X-API-Key") ?? (url.pathname === "/mcp" ? bearer : null))?.trim();
   if (!providedKey) {
     return sendError(401, "UNAUTHORIZED", "Missing API key");
   }
