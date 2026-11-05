@@ -177,12 +177,8 @@ export function ApiKeysPage() {
               {createError}
             </div>
           )}
-        </Card>
 
-        <McpSetupCard apiKey={latestPlaintext} />
-
-        <Card className="p-0">
-          <div className="relative overflow-x-auto">
+          <div className="relative overflow-x-auto rounded-lg border border-line">
             <table className="w-full min-w-[640px] border-collapse text-sm">
               <thead>
                 <tr className="border-b border-line text-left text-xs uppercase tracking-wide text-muted">
@@ -244,6 +240,8 @@ export function ApiKeysPage() {
             </table>
           </div>
         </Card>
+
+        <McpSetupCard apiKey={latestPlaintext} />
       </div>
     </AppShell>
   );
@@ -257,25 +255,32 @@ function McpSetupCard({ apiKey }: { apiKey: string | null }) {
   const json = JSON.stringify({ mcpServers: { trivyui: { url, headers: { "X-API-Key": key } } } }, null, 2);
   const block = "overflow-x-auto whitespace-pre rounded-md border border-line bg-bg px-3 py-2 font-mono text-xs text-fg";
   return (
-    <Card className="grid gap-3">
-      <div>
-        <h2 className="text-base font-semibold">Connect via MCP</h2>
-        <p className="text-sm text-fg2">
-          Let AI agents (Claude, Cursor, etc.) read repositories, tags, vulnerabilities and stats. Read-only. The key is
-          required when <Mono>API_KEY_ENABLED=true</Mono>; <Mono>Authorization: Bearer</Mono> also works.
-        </p>
-      </div>
-      <div className="grid gap-1">
-        <span className="text-xs font-semibold uppercase tracking-wide text-muted">Claude Code</span>
-        <pre className={block}>{claude}</pre>
-      </div>
-      <div className="grid gap-1">
-        <span className="text-xs font-semibold uppercase tracking-wide text-muted">Cursor / other clients (mcp.json)</span>
-        <pre className={block}>{json}</pre>
-      </div>
-      <p className="text-xs text-muted">
-        Tools: list_repositories, list_repository_tags, get_image_vulnerabilities, search_vulnerabilities, get_stats
-      </p>
+    <Card>
+      {/* ponytail: native <details> for show/hide, closed by default */}
+      <details className="group">
+        <summary className="flex min-h-11 cursor-pointer list-none items-center justify-between gap-2 [&::-webkit-details-marker]:hidden">
+          <h2 className="text-base font-semibold">Connect via MCP</h2>
+          <span className="text-sm text-fg2 group-open:hidden">Show</span>
+          <span className="hidden text-sm text-fg2 group-open:inline">Hide</span>
+        </summary>
+        <div className="mt-3 grid gap-3">
+          <p className="text-sm text-fg2">
+            Let AI agents (Claude, Cursor, etc.) read repositories, tags, vulnerabilities and stats. Read-only. The key is
+            required when <Mono>API_KEY_ENABLED=true</Mono>; <Mono>Authorization: Bearer</Mono> also works.
+          </p>
+          <div className="grid gap-1">
+            <span className="text-xs font-semibold uppercase tracking-wide text-muted">Claude Code</span>
+            <pre className={block}>{claude}</pre>
+          </div>
+          <div className="grid gap-1">
+            <span className="text-xs font-semibold uppercase tracking-wide text-muted">Cursor / other clients (mcp.json)</span>
+            <pre className={block}>{json}</pre>
+          </div>
+          <p className="text-xs text-muted">
+            Tools: list_repositories, list_repository_tags, get_image_vulnerabilities, search_vulnerabilities, get_stats
+          </p>
+        </div>
+      </details>
     </Card>
   );
 }
